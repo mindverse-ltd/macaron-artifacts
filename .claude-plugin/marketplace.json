@@ -1,0 +1,17 @@
+{
+  "name": "macaron",
+  "owner": {
+    "name": "Mindverse",
+    "url": "https://macaron.im"
+  },
+  "plugins": [
+    {
+      "name": "macaron",
+      "source": {
+        "source": "github",
+        "repo": "mindverse-ltd/macaron-claude-code"
+      },
+      "description": "Macaron WebUI for Claude Code — streaming GenUI builder, model switcher, and visual session manager."
+    }
+  ]
+}

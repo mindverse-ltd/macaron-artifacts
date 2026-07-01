@@ -1,0 +1,60 @@
+import type { FastifyReply } from 'fastify';
+import type { SessionStreamEvent } from '@macaron/shared';
+import { sseSend } from './sse.js';
+
+// Per-sessionId registry. Spawned `claude -p` processes write here so that
+// freshly-navigated Session pages can subscribe to live deltas via SSE.
+
+type LiveSession = {
+  events: SessionStreamEvent[];
+  subs: Set<FastifyReply>;
+  ended: boolean;
+};
+
+const LIVE_RING = 4000;
+const KEEP_AROUND_MS = 60_000;
+const sessions = new Map<string, LiveSession>();
+
+export function liveStart(sid: string, meta: { cwd: string }): void {
+  sessions.set(sid, {
+    events: [{ type: 'meta', cwd: meta.cwd, sessionId: sid }],
+    subs: new Set(),
+    ended: false,
+  });
+}
+
+export function livePush(sid: string, payload: SessionStreamEvent): void {
+  const ls = sessions.get(sid);
+  if (!ls || ls.ended) return;
+  ls.events.push(payload);
+  if (ls.events.length > LIVE_RING) ls.events.splice(0, ls.events.length - LIVE_RING);
+  for (const sub of ls.subs) {
+    try {
+      sseSend(sub, payload);
+    } catch {
+      ls.subs.delete(sub);
+    }
+  }
+}
+
+export function liveEnd(sid: string, payload: SessionStreamEvent): void {
+  const ls = sessions.get(sid);
+  if (!ls) return;
+  ls.ended = true;
+  ls.events.push(payload);
+  for (const sub of ls.subs) {
+    try {
+      sseSend(sub, payload);
+      sub.raw.write('data: [DONE]\n\n');
+      sub.raw.end();
+    } catch {
+      /* already closed */
+    }
+  }
+  ls.subs.clear();
+  setTimeout(() => sessions.delete(sid), KEEP_AROUND_MS);
+}
+
+export function liveGet(sid: string): LiveSession | undefined {
+  return sessions.get(sid);
+}

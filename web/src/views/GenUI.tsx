@@ -134,7 +134,13 @@ export function GenUI() {
         {config && (
           <div className="genui-modelinfo">
             <span className="genui-modelchip">model · {config.macaron.model}</span>
-            <span className="genui-modelendpoint" title={config.macaron.base}>{new URL(config.macaron.base).host}</span>
+            {config.macaron.base ? (
+              <span className="genui-modelendpoint" title={config.macaron.base}>
+                {(() => { try { return new URL(config.macaron.base).host; } catch { return config.macaron.base; } })()}
+              </span>
+            ) : (
+              <span className="genui-modelendpoint" style={{ color: 'var(--bad)' }}>not configured</span>
+            )}
           </div>
         )}
       </header>

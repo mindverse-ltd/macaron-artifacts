@@ -13,7 +13,13 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { HOME, MACARON_API_BASE, MACARON_API_KEY } from '../config.js';
 
-export const ANTHROPIC_PROVIDER_ID = 'anthropic';
+// The built-in pass-through provider. Never touches the SDK subprocess env —
+// it inherits process.env unchanged. Whatever ANTHROPIC_BASE_URL /
+// ANTHROPIC_AUTH_TOKEN the user has in their shell (Claude Code login,
+// a GLM relay, LiteLLM, Bedrock, …) is exactly what runs.
+export const SYSTEM_PROVIDER_ID = 'system';
+// Legacy id kept for one-shot migration only.
+const LEGACY_ANTHROPIC_ID = 'anthropic';
 
 // b200 endpoint used to seed the built-in Macaron provider template on a
 // first-run install. Users can edit/delete it like any other custom entry.
@@ -46,9 +52,13 @@ export type PublicCustomProvider = {
 };
 
 export type PublicBuiltinProvider = {
-  id: 'anthropic';
+  id: 'system';
   name: string;
   description: string;
+  // If the ambient env has ANTHROPIC_BASE_URL set, surface it so the user
+  // can tell what their pass-through is actually pointing at (e.g. a GLM
+  // relay). null = truly using Anthropic direct.
+  detectedEndpoint: string | null;
 };
 
 export type PublicSettings = {
@@ -75,11 +85,16 @@ function seedMacaronProvider(): CustomProvider {
 
 function makeDefaults(): Settings {
   return {
-    activeProviderId: ANTHROPIC_PROVIDER_ID,
+    activeProviderId: SYSTEM_PROVIDER_ID,
     // Ship one seeded Macaron entry — users see it in the list, can add key,
     // switch to it, or delete it. Same UX as any other custom provider.
     customProviders: [seedMacaronProvider()],
   };
+}
+
+function normalizeActiveId(id: string): string {
+  // Old configs used 'anthropic' as the built-in id; unify on 'system'.
+  return id === LEGACY_ANTHROPIC_ID ? SYSTEM_PROVIDER_ID : id;
 }
 
 // Old shape (0.x): { provider: 'anthropic'|'macaron', providers: { macaron: { apiKey } } }
@@ -93,9 +108,9 @@ function migrateIfLegacy(raw: unknown): Settings {
     customProviders?: CustomProvider[];
   };
   if (legacy && Array.isArray(legacy.customProviders)) {
-    // Already current shape.
+    // Already current shape — just normalize the legacy 'anthropic' id.
     return {
-      activeProviderId: legacy.activeProviderId || ANTHROPIC_PROVIDER_ID,
+      activeProviderId: normalizeActiveId(legacy.activeProviderId || SYSTEM_PROVIDER_ID),
       customProviders: legacy.customProviders.map(sanitizeProvider),
     };
   }
@@ -109,7 +124,7 @@ function migrateIfLegacy(raw: unknown): Settings {
   };
   const wasMacaronActive = legacy?.provider === 'macaron';
   return {
-    activeProviderId: wasMacaronActive ? macaron.id : ANTHROPIC_PROVIDER_ID,
+    activeProviderId: wasMacaronActive ? macaron.id : SYSTEM_PROVIDER_ID,
     customProviders: [macaron],
   };
 }
@@ -152,14 +167,18 @@ export async function warmSettingsCache(): Promise<void> {
 
 export async function readPublicSettings(): Promise<PublicSettings> {
   const s = await readSettings();
+  const envBase = process.env.ANTHROPIC_BASE_URL || '';
+  const usingRelay = Boolean(envBase);
   return {
     activeProviderId: s.activeProviderId,
     builtins: [
       {
-        id: ANTHROPIC_PROVIDER_ID,
-        name: 'Anthropic (default)',
-        description:
-          "Uses your Claude Code login — Opus 4.7 by default. Nothing to configure.",
+        id: SYSTEM_PROVIDER_ID,
+        name: 'System default',
+        description: usingRelay
+          ? "Passes through your shell's ANTHROPIC_BASE_URL — the SDK will hit your configured relay/gateway. We don't touch anything."
+          : "Uses your Claude Code login untouched. We don't override any env vars.",
+        detectedEndpoint: usingRelay ? envBase : null,
       },
     ],
     customProviders: s.customProviders.map((p) => ({
@@ -213,14 +232,14 @@ export async function deleteProvider(id: string): Promise<boolean> {
   s.customProviders = s.customProviders.filter((p) => p.id !== id);
   if (s.customProviders.length === before) return false;
   // If we just deleted the active provider, fall back to anthropic default.
-  if (s.activeProviderId === id) s.activeProviderId = ANTHROPIC_PROVIDER_ID;
+  if (s.activeProviderId === id) s.activeProviderId = SYSTEM_PROVIDER_ID;
   await persist();
   return true;
 }
 
 export async function setActiveProvider(id: string): Promise<boolean> {
   const s = await readSettings();
-  if (id !== ANTHROPIC_PROVIDER_ID && !s.customProviders.some((p) => p.id === id)) {
+  if (id !== SYSTEM_PROVIDER_ID && !s.customProviders.some((p) => p.id === id)) {
     return false;
   }
   s.activeProviderId = id;
@@ -237,7 +256,7 @@ export function getActiveProviderEnv(): {
   env: Record<string, string> | null;
 } {
   const s = cache ?? makeDefaults();
-  if (s.activeProviderId === ANTHROPIC_PROVIDER_ID) {
+  if (s.activeProviderId === SYSTEM_PROVIDER_ID) {
     return { model: DEFAULT_ANTHROPIC_MODEL, env: null };
   }
   const p = s.customProviders.find((x) => x.id === s.activeProviderId);

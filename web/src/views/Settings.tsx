@@ -156,8 +156,16 @@ export function Settings() {
                 <div className="prov-card-head">
                   <span className="prov-name">{b.name}</span>
                   <span className="prov-tag">built-in</span>
+                  {b.detectedEndpoint && (
+                    <span className="prov-tag ok">env override detected</span>
+                  )}
                 </div>
                 <div className="prov-card-sub">{b.description}</div>
+                {b.detectedEndpoint && (
+                  <div className="prov-card-sub">
+                    <code>ANTHROPIC_BASE_URL={b.detectedEndpoint}</code>
+                  </div>
+                )}
               </div>
             </label>
           ))}

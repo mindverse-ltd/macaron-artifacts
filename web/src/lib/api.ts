@@ -24,9 +24,10 @@ export async function getJSON<T>(url: string): Promise<T> {
 }
 
 export type PublicBuiltinProvider = {
-  id: 'anthropic';
+  id: 'system';
   name: string;
   description: string;
+  detectedEndpoint: string | null;
 };
 export type PublicCustomProvider = {
   id: string;

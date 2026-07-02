@@ -205,7 +205,7 @@ export function Settings() {
                 </button>
                 <button
                   type="button"
-                  className="ghost small danger"
+                  className="ghost small prov-danger"
                   onClick={(e) => { e.preventDefault(); void remove(p); }}
                   disabled={busy || editing !== null}
                 >

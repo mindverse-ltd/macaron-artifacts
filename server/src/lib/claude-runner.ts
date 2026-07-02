@@ -80,6 +80,12 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
   // content_block_start/delta/stop with an `index`; we use that to pair
   // input_json_delta chunks with the originating tool_use's id+name.
   const toolBlocks = new Map<number, { id: string; name: string; json: string }>();
+  // Confirm which provider a call is actually hitting — useful when
+  // debugging "is Macaron really being used" questions.
+  const routedBase = opts.envOverrides?.ANTHROPIC_BASE_URL || '(inherited from process.env)';
+  console.log(
+    `[claude-runner] starting  model=${opts.model ?? '(sdk default)'}  base=${routedBase}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}`,
+  );
   try {
     const stream = query({
       prompt: buildPromptInput(opts),

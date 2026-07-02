@@ -721,8 +721,17 @@ textarea:focus, select:focus, input:focus {
   gap: 6px;
   flex: 0 0 auto;
 }
-.prov-card-actions .ghost.small.danger { color: var(--bad); }
-.prov-card-actions .ghost.small.danger:hover { background: rgba(198, 92, 82, 0.08); }
+/* Ghost delete button — matches Edit dimensions/border, only text goes red
+   on hover so the row doesn't scream. `.prov-danger` is scoped to avoid the
+   global .danger (solid red confirm-dialog style) from stomping us. */
+.prov-card-actions .ghost.small.prov-danger {
+  color: var(--text);
+}
+.prov-card-actions .ghost.small.prov-danger:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: rgba(198, 92, 82, 0.06);
+}
 
 .prov-editor {
   border-color: var(--accent);

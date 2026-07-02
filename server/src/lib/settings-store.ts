@@ -8,7 +8,7 @@
 // Cache is warmed at startup so getActiveProviderEnv() is synchronous —
 // hot-path request handlers can call it without awaiting disk I/O.
 
-import { promises as fs, mkdirSync, existsSync } from 'node:fs';
+import { promises as fs, mkdirSync, existsSync, symlinkSync, lstatSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -251,17 +251,39 @@ export async function setActiveProvider(id: string): Promise<boolean> {
 // ---------- Active provider → SDK env override -------------------------
 
 // Isolated CLAUDE_CONFIG_DIR for subprocesses run against a custom provider.
-// Claude Code CLI reads its OAuth session from disk on startup, which would
-// otherwise beat any ANTHROPIC_AUTH_TOKEN we set in the subprocess env. By
-// pointing CLAUDE_CONFIG_DIR at an empty dir we own, the subprocess finds
-// no OAuth session and falls through to env-based auth against Macaron.
-// User's ~/.claude/ is completely untouched — terminal `claude` sessions
-// keep using their normal login.
+// Claude Code CLI reads its OAuth session from ~/.claude/settings.json on
+// startup, which would otherwise beat any ANTHROPIC_AUTH_TOKEN we set in
+// the subprocess env. We give it a fresh empty dir so the subprocess falls
+// through to env-based auth against the custom provider.
+//
+// Caveat: the CLI ALSO stores session jsonls under <config_dir>/projects/.
+// If we let those write to the isolated dir, our WebUI (which reads from
+// ~/.claude/projects/) never sees the new session. Fix: symlink
+// <isolated>/projects → ~/.claude/projects so sessions land in the same
+// place terminal `claude` uses. Terminal `claude` sessions and our
+// subprocess sessions coexist in one project tree; only auth is isolated.
 const ISOLATED_CONFIG_DIR = path.join(os.tmpdir(), 'macaron-plugin-isolated-claude');
 let isolatedDirReady = false;
 function ensureIsolatedDir(): string {
   if (!isolatedDirReady) {
     if (!existsSync(ISOLATED_CONFIG_DIR)) mkdirSync(ISOLATED_CONFIG_DIR, { recursive: true });
+    // Symlink projects/ so jsonls land in ~/.claude/projects/ where the
+    // WebUI can read them.
+    const projectsLink = path.join(ISOLATED_CONFIG_DIR, 'projects');
+    const realProjects = path.join(HOME, '.claude', 'projects');
+    if (!existsSync(realProjects)) mkdirSync(realProjects, { recursive: true });
+    try {
+      const st = lstatSync(projectsLink);
+      // Repair if it's not a symlink or points elsewhere.
+      if (!st.isSymbolicLink()) {
+        // A stray dir was created here on an earlier run; replace it.
+        fs.rm(projectsLink, { recursive: true, force: true }).catch(() => {});
+        symlinkSync(realProjects, projectsLink);
+      }
+    } catch {
+      // Doesn't exist — create the symlink.
+      try { symlinkSync(realProjects, projectsLink); } catch { /* already there */ }
+    }
     isolatedDirReady = true;
   }
   return ISOLATED_CONFIG_DIR;

@@ -436,6 +436,8 @@ export function Session() {
   const [dragOver, setDragOver] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composingRef = useRef(false);
+  const compositionEndedAtRef = useRef(0);
   const toast = useToast();
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
@@ -712,6 +714,13 @@ export function Session() {
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // Some IMEs emit the confirming Enter just after compositionend; keep it
+      // reserved for candidate selection instead of submitting the prompt.
+      if (e.nativeEvent.isComposing || composingRef.current || e.keyCode === 229) return;
+      if (compositionEndedAtRef.current > 0 && performance.now() - compositionEndedAtRef.current < 80) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       send();
     }
@@ -853,6 +862,11 @@ export function Session() {
           value={input}
           disabled={sending}
           onChange={(e) => setInput(e.target.value)}
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+            compositionEndedAtRef.current = performance.now();
+          }}
           onPaste={(e) => {
             const files: File[] = [];
             for (const item of Array.from(e.clipboardData.items)) {

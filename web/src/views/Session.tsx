@@ -79,7 +79,9 @@ type Item =
   | { id: string; kind: 'thinking'; text: string }
   | { id: string; kind: 'tool'; name: string; input: unknown; result?: string }
   | { id: string; kind: 'genui'; toolUseId: string; prompt: string; code?: string; status: 'pending' | 'ready' | 'error'; error?: string }
+  | { id: string; kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { id: string; kind: 'live-user'; text: string }
+  | { id: string; kind: 'live-user-image'; mimeType: string; data: string }
   | { id: string; kind: 'live-assistant'; text: string };
 
 function isNoisyUserText(t: string): boolean {
@@ -105,6 +107,11 @@ function flatten(messages: Message[]): Item[] {
         lastTool = null;
       } else if (b.kind === 'thinking') {
         if (b.text.trim()) out.push({ id: `t${i++}`, kind: 'thinking', text: b.text });
+        lastTool = null;
+      } else if (b.kind === 'image') {
+        // Render images inline where they appear in the block order so text
+        // + image sequences the user pastes read naturally (interleaved).
+        out.push({ id: `img${i++}`, kind: 'image', role: m.role, mimeType: b.mimeType, data: b.data });
         lastTool = null;
       } else if (b.kind === 'tool_use') {
         if (isRenderUITool(b.name)) {
@@ -211,6 +218,20 @@ function LiveAssistantItem({ text }: { text: string }) {
 
 function ThinkingItem({ text }: { text: string }) {
   return <div className="ti-thinking">💭 {text}</div>;
+}
+
+// Inline image block from a user or assistant message. Uses the same "❯"
+// gutter as UserItem so user-side images visually stack with adjacent text.
+function ImageItem({ role, mimeType, data }: { role: 'user' | 'assistant'; mimeType: string; data: string }) {
+  const src = `data:${mimeType};base64,${data}`;
+  return (
+    <div className={role === 'user' ? 'ti-user ti-image-row' : 'ti-image-row'}>
+      {role === 'user' && <span className="ti-chev">❯</span>}
+      <div className="ti-image-wrap">
+        <img className="ti-image" src={src} alt="attachment" />
+      </div>
+    </div>
+  );
 }
 
 const PREVIEW_LINES = 4;
@@ -369,6 +390,10 @@ function ItemView({ it }: { it: Item }) {
       return <ToolItem name={it.name} input={it.input} result={it.result} />;
     case 'genui':
       return <GenuiItem it={it} />;
+    case 'image':
+      return <ImageItem role={it.role} mimeType={it.mimeType} data={it.data} />;
+    case 'live-user-image':
+      return <ImageItem role="user" mimeType={it.mimeType} data={it.data} />;
   }
 }
 
@@ -392,6 +417,10 @@ export function Session() {
   // -1 = no usage signal yet (Macaron path or pre-first-delta). Indicator
   // falls back to a len/4 estimate when this is < 0.
   const [outputTokens, setOutputTokens] = useState<number>(-1);
+  // Images the user attached to the CURRENT in-flight turn. Rendered inline
+  // (above the user text) while streaming and rolled into completedTurns on
+  // the next send — same pattern as liveUser / liveAssistant / liveTools.
+  const [liveUserImages, setLiveUserImages] = useState<AttachedImage[]>([]);
   // Completed turns held in-memory between refreshes. We used to re-fetch the
   // jsonl after each `done` event to promote live buffers into canonical
   // data.messages, but the CLI flushes the jsonl asynchronously — sometimes
@@ -531,15 +560,25 @@ export function Session() {
   // previous turn's assistant reply/tools when they type another prompt.
   const rollLiveIntoHistory = useCallback(() => {
     const frozen: Item[] = [];
-    if (liveUser) frozen.push({ id: `hist-u-${Date.now()}`, kind: 'user', text: liveUser });
+    const ts = Date.now();
+    // Images ordered above the accompanying text in the turn history.
+    for (let k = 0; k < liveUserImages.length; k++) {
+      const img = liveUserImages[k]!;
+      const m = /^data:([^;]+);base64,(.*)$/.exec(img.dataUrl);
+      const mimeType = m?.[1] || img.mimeType || 'image/png';
+      const data = m?.[2] || '';
+      if (data) frozen.push({ id: `hist-img-${ts}-${k}`, kind: 'image', role: 'user', mimeType, data });
+    }
+    if (liveUser) frozen.push({ id: `hist-u-${ts}`, kind: 'user', text: liveUser });
     frozen.push(...liveTools);
-    if (liveAssistant) frozen.push({ id: `hist-a-${Date.now()}`, kind: 'assistant', text: liveAssistant });
+    if (liveAssistant) frozen.push({ id: `hist-a-${ts}`, kind: 'assistant', text: liveAssistant });
     if (frozen.length) setCompletedTurns((cur) => [...cur, ...frozen]);
     setLiveUser('');
     setLiveAssistant('');
     setLiveTools([]);
+    setLiveUserImages([]);
     setOutputTokens(-1);
-  }, [liveUser, liveAssistant, liveTools]);
+  }, [liveUser, liveAssistant, liveTools, liveUserImages]);
 
   const send = useCallback(
     async (e?: FormEvent) => {
@@ -554,7 +593,10 @@ export function Session() {
       // message erases the first reply until the next page refresh.
       rollLiveIntoHistory();
       setSending(true);
-      setLiveUser(text || (sentImages.length ? `(${sentImages.length} image${sentImages.length > 1 ? 's' : ''})` : ''));
+      // Live text is just what the user typed; images render inline via
+      // liveUserImages instead of a placeholder string.
+      setLiveUser(text);
+      setLiveUserImages(sentImages);
       setLiveAssistant('');
       setLiveTools([]);
       setOutputTokens(-1);
@@ -727,6 +769,21 @@ export function Session() {
         {liveAssistant && <ItemView it={{ id: 'live-a', kind: 'live-assistant', text: liveAssistant }} />}
         {[...liveTools].reverse().map((t) => <ItemView key={t.id} it={t} />)}
         {liveUser && <ItemView it={{ id: 'live-u', kind: 'live-user', text: liveUser }} />}
+        {/* Live-user images render ABOVE the user text visually. In
+            column-reverse DOM order the FIRST child renders at the visual
+            bottom, so images (which we want ABOVE liveUser visually) go
+            AFTER liveUser in DOM. Reverse to preserve their sequence. */}
+        {[...liveUserImages].reverse().map((img, k) => (
+          <ItemView
+            key={img.id || `live-img-${k}`}
+            it={{
+              id: img.id || `live-img-${k}`,
+              kind: 'live-user-image',
+              mimeType: img.mimeType,
+              data: /^data:[^;]+;base64,(.*)$/.exec(img.dataUrl)?.[1] || '',
+            }}
+          />
+        ))}
         {[...completedTurns].reverse().map((it) => (
           <ItemView key={it.id} it={it} />
         ))}

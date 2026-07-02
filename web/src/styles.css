@@ -775,6 +775,27 @@ textarea:focus, select:focus, input:focus {
   margin-top: 18px;
 }
 
+/* ---------- inline images in a message ---------- */
+.ti-image-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+}
+.ti-image-row .ti-chev { flex: 0 0 auto; }
+.ti-image-wrap {
+  max-width: 100%;
+}
+.ti-image {
+  max-width: min(440px, 100%);
+  max-height: 320px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+  object-fit: contain;
+  background: var(--surface-2);
+}
+
 /* ---------- thinking indicator (claude-cli 1:1 clone) ----------
    Colors mirror the shipped CLI theme: `claude: rgb(215,119,87)` (light
    theme) — a warm coral for star + verb + tail. Meta items (elapsed, tokens,

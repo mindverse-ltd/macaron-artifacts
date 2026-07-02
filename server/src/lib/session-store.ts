@@ -252,6 +252,16 @@ export async function readSessionMessages(project: string, sid: string): Promise
               blocks.push({ kind: 'thinking', text: b.thinking });
             else if (b.type === 'tool_use')
               blocks.push({ kind: 'tool_use', id: b.id, name: b.name, input: b.input });
+            else if (b.type === 'image' && b.source?.type === 'base64' && b.source?.data) {
+              // The CLI persists user-attached images as base64 in the
+              // jsonl. Ship them through so the WebUI can render inline
+              // where they appear (preserving interleaved order with text).
+              blocks.push({
+                kind: 'image',
+                mimeType: String(b.source.media_type || 'image/png'),
+                data: String(b.source.data),
+              });
+            }
             else if (b.type === 'tool_result') {
               const t =
                 typeof b.content === 'string'

@@ -73,15 +73,23 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 // ---- Flatten Claude's per-block messages into a TUI-style item list -------
 
+// A "part" is a sub-block inside a single user or live-user message card:
+// text and image blocks the CLI persisted (or the current live turn is
+// accumulating) belong to the same message and should render inside a
+// single "❯"-gutter card in their original order.
+export type MsgPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; mimeType: string; data: string };
+
 type Item =
-  | { id: string; kind: 'user'; text: string }
+  | { id: string; kind: 'user'; parts: MsgPart[] }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'thinking'; text: string }
   | { id: string; kind: 'tool'; name: string; input: unknown; result?: string }
   | { id: string; kind: 'genui'; toolUseId: string; prompt: string; code?: string; status: 'pending' | 'ready' | 'error'; error?: string }
-  | { id: string; kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
-  | { id: string; kind: 'live-user'; text: string }
-  | { id: string; kind: 'live-user-image'; mimeType: string; data: string }
+  // Assistant-side inline image (rare — only when the model emits one).
+  | { id: string; kind: 'assistant-image'; mimeType: string; data: string }
+  | { id: string; kind: 'live-user'; parts: MsgPart[] }
   | { id: string; kind: 'live-assistant'; text: string };
 
 function isNoisyUserText(t: string): boolean {
@@ -96,22 +104,33 @@ function flatten(messages: Message[]): Item[] {
   const out: Item[] = [];
   let i = 0;
   let lastTool: Extract<Item, { kind: 'tool' }> | null = null;
-  for (const m of messages) {
+  for (const mi in messages) {
+    const m = messages[mi]!;
+    // Collect any text + image blocks the user sent in this message into a
+    // SINGLE user Item so they render inside one card in original order
+    // (the CLI stores them interleaved; splitting them into separate cards
+    // makes one message look like three).
+    if (m.role === 'user') {
+      const parts: MsgPart[] = [];
+      for (const b of m.blocks) {
+        if (b.kind === 'text' && !isNoisyUserText(b.text)) parts.push({ kind: 'text', text: b.text });
+        else if (b.kind === 'image') parts.push({ kind: 'image', mimeType: b.mimeType, data: b.data });
+      }
+      if (parts.length) out.push({ id: `u${i++}-msg${mi}`, kind: 'user', parts });
+    }
+    // Non-user blocks (assistant text/thinking/tool_*) still emit one Item
+    // per block so their per-block visuals (tool cards, thinking boxes, code
+    // panes) stay independent.
     for (const b of m.blocks) {
-      if (b.kind === 'text') {
-        if (m.role === 'user') {
-          if (!isNoisyUserText(b.text)) out.push({ id: `u${i++}`, kind: 'user', text: b.text });
-        } else {
-          if (b.text.trim()) out.push({ id: `a${i++}`, kind: 'assistant', text: b.text });
-        }
+      if (m.role !== 'user' && b.kind === 'text') {
+        if (b.text.trim()) out.push({ id: `a${i++}`, kind: 'assistant', text: b.text });
         lastTool = null;
       } else if (b.kind === 'thinking') {
         if (b.text.trim()) out.push({ id: `t${i++}`, kind: 'thinking', text: b.text });
         lastTool = null;
-      } else if (b.kind === 'image') {
-        // Render images inline where they appear in the block order so text
-        // + image sequences the user pastes read naturally (interleaved).
-        out.push({ id: `img${i++}`, kind: 'image', role: m.role, mimeType: b.mimeType, data: b.data });
+      } else if (m.role !== 'user' && b.kind === 'image') {
+        // Very rare — assistant emitting an image. Keep in its own row.
+        out.push({ id: `img${i++}`, kind: 'assistant-image', mimeType: b.mimeType, data: b.data });
         lastTool = null;
       } else if (b.kind === 'tool_use') {
         if (isRenderUITool(b.name)) {
@@ -191,11 +210,27 @@ function toolHeader(name: string, input: any): string {
 
 // ---- Items ----------------------------------------------------------------
 
-function UserItem({ text }: { text: string }) {
+// One user message = one visual card, no matter how many text or image
+// blocks it holds. The "❯" chevron sits at top-left; parts stack in
+// original order so pasted "image → text → image" reads naturally.
+function UserItem({ parts }: { parts: MsgPart[] }) {
+  const hasNonEmptyText = parts.some((p) => p.kind === 'text' && p.text);
+  const hasImage = parts.some((p) => p.kind === 'image');
+  if (!hasNonEmptyText && !hasImage) return null;
   return (
     <div className="ti-user">
       <span className="ti-chev">❯</span>
-      <div className="ti-user-body">{text}</div>
+      <div className="ti-user-body">
+        {parts.map((p, idx) =>
+          p.kind === 'text' ? (
+            <div key={idx} className="ti-user-text">{p.text}</div>
+          ) : (
+            <div key={idx} className="ti-user-image">
+              <img className="ti-image" src={`data:${p.mimeType};base64,${p.data}`} alt="attachment" />
+            </div>
+          ),
+        )}
+      </div>
     </div>
   );
 }
@@ -220,13 +255,12 @@ function ThinkingItem({ text }: { text: string }) {
   return <div className="ti-thinking">💭 {text}</div>;
 }
 
-// Inline image block from a user or assistant message. Uses the same "❯"
-// gutter as UserItem so user-side images visually stack with adjacent text.
-function ImageItem({ role, mimeType, data }: { role: 'user' | 'assistant'; mimeType: string; data: string }) {
+// Assistant-side inline image (rare — some models emit vision output).
+// User-side images render inside UserItem's parts instead of here.
+function AssistantImageItem({ mimeType, data }: { mimeType: string; data: string }) {
   const src = `data:${mimeType};base64,${data}`;
   return (
-    <div className={role === 'user' ? 'ti-user ti-image-row' : 'ti-image-row'}>
-      {role === 'user' && <span className="ti-chev">❯</span>}
+    <div className="ti-image-row">
       <div className="ti-image-wrap">
         <img className="ti-image" src={src} alt="attachment" />
       </div>
@@ -379,7 +413,7 @@ function ItemView({ it }: { it: Item }) {
   switch (it.kind) {
     case 'user':
     case 'live-user':
-      return <UserItem text={it.text} />;
+      return <UserItem parts={it.parts} />;
     case 'assistant':
       return <AssistantItem text={it.text} />;
     case 'live-assistant':
@@ -390,10 +424,8 @@ function ItemView({ it }: { it: Item }) {
       return <ToolItem name={it.name} input={it.input} result={it.result} />;
     case 'genui':
       return <GenuiItem it={it} />;
-    case 'image':
-      return <ImageItem role={it.role} mimeType={it.mimeType} data={it.data} />;
-    case 'live-user-image':
-      return <ImageItem role="user" mimeType={it.mimeType} data={it.data} />;
+    case 'assistant-image':
+      return <AssistantImageItem mimeType={it.mimeType} data={it.data} />;
   }
 }
 
@@ -563,15 +595,18 @@ export function Session() {
   const rollLiveIntoHistory = useCallback(() => {
     const frozen: Item[] = [];
     const ts = Date.now();
-    // Images ordered above the accompanying text in the turn history.
-    for (let k = 0; k < liveUserImages.length; k++) {
-      const img = liveUserImages[k]!;
+    // Freeze the whole user turn (images + text) into ONE Item so it renders
+    // as a single card in completedTurns, matching how a page-refresh load
+    // via flatten() would group them from the jsonl.
+    const parts: MsgPart[] = [];
+    for (const img of liveUserImages) {
       const m = /^data:([^;]+);base64,(.*)$/.exec(img.dataUrl);
       const mimeType = m?.[1] || img.mimeType || 'image/png';
       const data = m?.[2] || '';
-      if (data) frozen.push({ id: `hist-img-${ts}-${k}`, kind: 'image', role: 'user', mimeType, data });
+      if (data) parts.push({ kind: 'image', mimeType, data });
     }
-    if (liveUser) frozen.push({ id: `hist-u-${ts}`, kind: 'user', text: liveUser });
+    if (liveUser) parts.push({ kind: 'text', text: liveUser });
+    if (parts.length) frozen.push({ id: `hist-u-${ts}`, kind: 'user', parts });
     frozen.push(...liveTools);
     if (liveAssistant) frozen.push({ id: `hist-a-${ts}`, kind: 'assistant', text: liveAssistant });
     if (frozen.length) setCompletedTurns((cur) => [...cur, ...frozen]);
@@ -777,22 +812,24 @@ export function Session() {
             manual page refresh (which loads canonical data). */}
         {liveAssistant && <ItemView it={{ id: 'live-a', kind: 'live-assistant', text: liveAssistant }} />}
         {[...liveTools].reverse().map((t) => <ItemView key={t.id} it={t} />)}
-        {liveUser && <ItemView it={{ id: 'live-u', kind: 'live-user', text: liveUser }} />}
-        {/* Live-user images render ABOVE the user text visually. In
-            column-reverse DOM order the FIRST child renders at the visual
-            bottom, so images (which we want ABOVE liveUser visually) go
-            AFTER liveUser in DOM. Reverse to preserve their sequence. */}
-        {[...liveUserImages].reverse().map((img, k) => (
+        {/* Current-turn user message = one card. Images stack ABOVE the
+            text (Claude-web ordering: attachments before prose). */}
+        {(liveUser || liveUserImages.length > 0) && (
           <ItemView
-            key={img.id || `live-img-${k}`}
             it={{
-              id: img.id || `live-img-${k}`,
-              kind: 'live-user-image',
-              mimeType: img.mimeType,
-              data: /^data:[^;]+;base64,(.*)$/.exec(img.dataUrl)?.[1] || '',
+              id: 'live-u',
+              kind: 'live-user',
+              parts: [
+                ...liveUserImages.map((img) => ({
+                  kind: 'image' as const,
+                  mimeType: img.mimeType,
+                  data: /^data:[^;]+;base64,(.*)$/.exec(img.dataUrl)?.[1] || '',
+                })),
+                ...(liveUser ? [{ kind: 'text' as const, text: liveUser }] : []),
+              ],
             }}
           />
-        ))}
+        )}
         {[...completedTurns].reverse().map((it) => (
           <ItemView key={it.id} it={it} />
         ))}

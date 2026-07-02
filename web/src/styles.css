@@ -548,13 +548,27 @@ textarea:focus, select:focus, input:focus {
   line-height: 1.55;
 }
 .ti-user-body {
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   color: var(--text);
   flex: 1;
   min-width: 0;
   font-size: 13.5px;
   line-height: 1.55;
+}
+.ti-user-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.ti-user-image { max-width: 100%; }
+.ti-user-image .ti-image {
+  /* Images inside a user card are already inset by the card's padding, so
+     don't need extra borders. Keep the max-width slightly smaller than the
+     standalone `.ti-image` so they don't dominate the message. */
+  max-width: min(360px, 100%);
+  max-height: 260px;
+  border: 1px solid var(--border);
 }
 
 /* assistant text — markdown */

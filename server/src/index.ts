@@ -11,6 +11,7 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerWorkspaceRoutes } from './routes/workspaces.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerSettingsRoutes } from './routes/settings.js';
+import { registerRelayRoutes } from './routes/relay.js';
 
 const app = Fastify({
   logger: { level: process.env.MACARON_LOG_LEVEL || 'info' },
@@ -23,6 +24,7 @@ const app = Fastify({
 await app.register(async (instance) => {
   await registerHealthRoutes(instance);
   await registerSettingsRoutes(instance);
+  await registerRelayRoutes(instance);
   await registerWorkspaceRoutes(instance);
   await registerSessionRoutes(instance);
 });

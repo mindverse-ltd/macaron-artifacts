@@ -12,7 +12,7 @@ import { promises as fs, mkdirSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { HOME, MACARON_API_BASE, MACARON_API_KEY } from '../config.js';
+import { HOME, HOST, PORT, MACARON_API_BASE, MACARON_API_KEY } from '../config.js';
 
 // The built-in pass-through provider. Never touches the SDK subprocess env —
 // it inherits process.env unchanged. Whatever ANTHROPIC_BASE_URL /
@@ -280,20 +280,30 @@ export function getActiveProviderEnv(): {
   const p = s.customProviders.find((x) => x.id === s.activeProviderId);
   if (!p) return { model: DEFAULT_ANTHROPIC_MODEL, env: null };
   const isolatedDir = ensureIsolatedDir();
+  // Point the SDK subprocess at our local Anthropic-compatible relay rather
+  // than at the provider directly. The relay stubs the /v1/ endpoints the
+  // CLI probes at startup (models, org, telemetry) that Macaron doesn't
+  // implement, and forwards /v1/messages verbatim after rewriting body.model
+  // to the provider's canonical name. This way the CLI's startup checks
+  // pass and requests actually reach the provider.
+  const relayBase = `http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}/relay/anthropic/${p.id}`;
   return {
+    // Pass the provider's model name to SDK (best-effort — relay rewrites
+    // anyway). Keeping a valid Anthropic name here also placates SDK
+    // client-side model validation.
     model: p.model || DEFAULT_ANTHROPIC_MODEL,
     env: {
       ...process.env as Record<string, string>,
-      // Isolate from user's OAuth session — this is the whole point.
+      // Isolate from user's OAuth session so env-based auth wins.
       CLAUDE_CONFIG_DIR: isolatedDir,
-      // Just in case a stale token is being passed through anyway.
+      // Clear any stale OAuth token that might be passed through.
       CLAUDE_CODE_OAUTH_TOKEN: '',
-      // Route to the custom provider.
-      ANTHROPIC_BASE_URL: p.endpoint,
+      // Point SDK subprocess at our local relay (see relay.ts).
+      ANTHROPIC_BASE_URL: relayBase,
+      // Relay uses the provider's key server-side; we still set the env
+      // token so the SDK considers itself "authenticated" and skips OAuth.
       ANTHROPIC_AUTH_TOKEN: p.apiKey,
       ANTHROPIC_API_KEY: p.apiKey,
-      // Force the model — some CLI code paths read ANTHROPIC_MODEL for
-      // env-based selection.
       ANTHROPIC_MODEL: p.model || DEFAULT_ANTHROPIC_MODEL,
     },
   };

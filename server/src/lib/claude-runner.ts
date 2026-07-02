@@ -193,6 +193,24 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
         }
         yield { kind: 'message', subtype: m.subtype || 'system' };
       } else if (m.type === 'result') {
+        if (m.is_error) {
+          const r = m as unknown as {
+            subtype?: string;
+            stop_reason?: string;
+            api_error_status?: number | null;
+            errors?: string[];
+            result?: string;
+          };
+          const detail =
+            (r.errors && r.errors.length ? r.errors.join(' | ') : '') ||
+            r.result ||
+            [r.subtype, r.stop_reason, r.api_error_status ? `http ${r.api_error_status}` : '']
+              .filter(Boolean)
+              .join(' · ') ||
+            'unknown SDK error';
+          console.log('[claude-runner] SDK error result:', JSON.stringify(r, null, 2));
+          yield { kind: 'error', error: detail };
+        }
         yield {
           kind: 'done',
           exitCode: m.is_error ? 1 : 0,

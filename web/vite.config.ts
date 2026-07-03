@@ -11,28 +11,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src/macaron-vendor'),
     },
   },
-  plugins: [
-    react({
-      // Process .tsx from node_modules too (partial-react ships raw TSX).
-      include: /\.(jsx|tsx|mjs)$/,
-    }),
-  ],
-  optimizeDeps: {
-    // Pre-bundle partial-react and its TSX source via esbuild so Vite serves them
-    // as plain JS to the browser. Without this Vite balks on the .tsx in deps.
-    include: [
-      'partial-react',
-      'partial-react/compiler',
-      'partial-react/import-map',
-      'partial-react/render-context',
-      'partial-tsx',
-      '@esm.sh/tsx',
-      'react-dom/server',
-    ],
-    esbuildOptions: {
-      loader: { '.ts': 'tsx', '.tsx': 'tsx' },
-    },
-  },
+  plugins: [react()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

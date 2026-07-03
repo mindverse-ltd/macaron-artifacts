@@ -3,7 +3,6 @@
 // TS LanguageService scaffolding over one virtual App.tsx; runs diagnostics against the vendored
 // $macaron/ui source via compilerOptions.paths.
 import path from "node:path";
-import { createRequire } from "node:module";
 import type TypeScript from "typescript";
 
 export type TypeCheckService = { ts: typeof TypeScript; appFile: string; appSource: string; appVersion: number; service: TypeScript.LanguageService };
@@ -12,16 +11,11 @@ export const DEFAULT_APP_FILENAME = "App.tsx";
 export const DEFAULT_MAX_REPORTED = 16;
 
 export const diagnosticMessage = (ts: typeof TypeScript, diagnostic: TypeScript.Diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-const tsLibDir = path.dirname(createRequire(import.meta.url).resolve("typescript"));
-const resolveDefaultLibFile = (ts: typeof TypeScript, compilerOptions: TypeScript.CompilerOptions) => {
-  const defaultLib = ts.getDefaultLibFilePath(compilerOptions);
-  return ts.sys.fileExists(defaultLib) ? defaultLib : path.join(tsLibDir, ts.getDefaultLibFileName(compilerOptions));
-};
 
 export const createTypeCheckService = (ts: typeof TypeScript, { root, filename, compilerOptions, ambient }: { root: string; filename: string; compilerOptions: TypeScript.CompilerOptions; ambient?: string }): TypeCheckService => {
   const appFile = path.join(root, ".genui-check", filename);
   const ambientFile = path.join(root, ".genui-check", "genui-ambient.d.ts");
-  const defaultLibFile = resolveDefaultLibFile(ts, compilerOptions);
+  const defaultLibFile = ts.getDefaultLibFilePath(compilerOptions);
   let service!: TypeScript.LanguageService;
   const serviceState: TypeCheckService = { ts, appFile, appSource: "", appVersion: 0, get service() { return service; } };
   // Cache snapshots for immutable files (version "0" = unchanged). Without this, TS's program sync

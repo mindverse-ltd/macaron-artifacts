@@ -56,8 +56,9 @@ try {
   await app.listen({ host: HOST, port: PORT });
   app.log.info(`macaron server listening on http://${HOST}:${PORT}`);
   // Pre-warm the render_ui TS check: the first diagnose pays full program construction (~400ms
-  // sync). Do it now, at boot, instead of mid-turn while an SSE stream is live.
-  setImmediate(() => checkGenUI('export default function App() { return null }'));
+  // sync). Do it now, at boot, instead of mid-turn while an SSE stream is live. checkGenUI never
+  // throws (it degrades to an ack on failure), so this can't crash the listening server.
+  setImmediate(() => { try { checkGenUI('export default function App() { return null }'); } catch { /* checkGenUI is non-throwing; defensive only */ } });
 } catch (err) {
   app.log.error(err);
   process.exit(1);

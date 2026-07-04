@@ -4,6 +4,7 @@
 // surfaces with the actual valid types, not degraded to `any`. No npm dep beyond `typescript`
 // + the vendored typeCheckService/diagnostics in ./genui-check-vendored.
 import { existsSync } from "node:fs";
+import path from "node:path";
 import ts from "typescript";
 import { WEB_ROOT } from "../config.js";
 import { createCheckResult, type GenUICheckResult, type GenUIDiagnostic } from "./genui-check-vendored/diagnostics.js";
@@ -51,10 +52,10 @@ const toDiag = (d: ts.Diagnostic): GenUIDiagnostic => {
   return { message, startLineNumber: s.line + 1, startColumn: s.character + 1 };
 };
 
-// LanguageService is expensive to build; one shared service handles every render_ui call.
-// `undefined` also marks "diagnostics unavailable" (e.g. the published CLI ships no web/src, so
-// the vendored facades can't resolve) — in that state checkGenUI no-ops to an ack rather than
-// surfacing phantom errors or crashing.
+// LanguageService is expensive to build; one shared service handles every render_ui call. The
+// `serviceUnavailable` latch marks "diagnostics permanently off" (e.g. the published CLI ships no
+// web/src, so the vendored facades can't resolve) — in that state checkGenUI no-ops to an ack
+// rather than surfacing phantom errors or crashing.
 let service: TypeCheckService | undefined;
 let serviceUnavailable = false;
 
@@ -70,7 +71,7 @@ export const checkGenUI = (code: string): GenUICheckResult => {
     if (!service) {
       // Published `mcc` ships only web/dist (no web/src), so the facades can't resolve — bail to
       // an ack. The dev/source checkout always has web/src/macaron-vendor.
-      if (!existsSync(`${WEB_ROOT}/src/macaron-vendor`)) { serviceUnavailable = true; return { ok: true }; }
+      if (!existsSync(path.join(WEB_ROOT, "src", "macaron-vendor"))) { serviceUnavailable = true; return { ok: true }; }
       service = createTypeCheckService(ts, { root: WEB_ROOT, filename: DEFAULT_APP_FILENAME, compilerOptions, ambient: AMBIENT_DECLARATIONS });
     }
     const svc = service;

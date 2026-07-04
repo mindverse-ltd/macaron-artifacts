@@ -60,7 +60,7 @@ try {
   // makes this warm the expensive half — it pulls source.tsx and its whole vendored tree into the
   // snapshot cache; without an import TS lazily skips them and the first real render_ui still pays
   // ~300ms. checkGenUI never throws (it degrades to an ack on failure), so this can't crash boot.
-  setImmediate(() => { try { checkGenUI('import "$macaron/ui";\nexport default function App() { return null }'); } catch { /* checkGenUI is non-throwing; defensive only */ } });
+  setImmediate(() => checkGenUI('import "$macaron/ui";\nexport default function App() { return null }'));
 } catch (err) {
   app.log.error(err);
   process.exit(1);

@@ -7,10 +7,7 @@
   "plugins": [
     {
       "name": "macaron",
-      "source": {
-        "source": "github",
-        "repo": "mindverse-ltd/macaron-claude-code"
-      },
+      "source": "./",
       "description": "Macaron WebUI for Claude Code — streaming GenUI builder, model switcher, and visual session manager."
     }
   ]

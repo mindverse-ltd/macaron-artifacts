@@ -14,10 +14,11 @@ MACARON_PORT="${1:-7878}" bash "${CLAUDE_PLUGIN_ROOT}/start.sh"
 
 If `$1` is empty, just run `bash "${CLAUDE_PLUGIN_ROOT}/start.sh"`.
 
-Do not paraphrase the URL. After the server prints `Macaron WebUI: http://localhost:<port>`, also run `open "http://localhost:<port>"` to launch the browser. Then briefly tell the user what the three tabs do:
+Do not paraphrase the URL. After the server prints `Macaron WebUI: http://localhost:<port>`, also run `open "http://localhost:<port>"` to launch the browser. Then briefly tell the user what the views do:
 
-- **GenUI** — stream Macaron-generated TSX with live preview
-- **Chat** — same prompt against Claude / Codex / Macaron-0.6, side-by-side
-- **Sessions** — browse Claude & Codex history, copy a `--resume` command
+- **Dashboard** — all workspaces from `~/.claude/projects`, sorted by last activity
+- **Workspace** — one project's sessions with previews; start a new session from here
+- **Session** — full transcript (thinking, tool calls, live GenUI previews) + follow-up chat
+- **Settings** — manage Anthropic-compatible providers (Macaron, OpenRouter, LiteLLM, …) and pick the active one
 
 If `lsof` reports the port is busy, the script kills the existing process first; this is expected.

@@ -14,8 +14,8 @@
     "build:web": "npm run build -w @macaron/shared && npm run build -w @macaron/web",
     "build:server": "npm run build -w @macaron/shared && npm run build -w @macaron/server",
     "start": "node server/dist/index.js",
-    "build:bundle": "npm run build:bundle -w @macaron/server",
-    "prepack": "npm run build -w @macaron/shared && npm run build:bundle -w @macaron/server && npm run build -w @macaron/web",
+    "bundle": "npm run bundle -w @macaron/server",
+    "prepack": "npm run build -w @macaron/shared && npm run bundle -w @macaron/server && npm run build -w @macaron/web",
     "typecheck": "npm run typecheck -w @macaron/shared && npm run typecheck -w @macaron/server && npm run typecheck -w @macaron/web"
   },
   "bin": {

@@ -5,11 +5,13 @@ import {
   updateProvider,
   deleteProvider,
   setActiveProvider,
+  setYoloMode,
 } from '../lib/settings-store.js';
 
 type AddBody = { name?: string; endpoint?: string; model?: string; apiKey?: string };
 type UpdateBody = { name?: string; endpoint?: string; model?: string; apiKey?: string };
 type ActiveBody = { providerId?: string };
+type YoloBody = { enabled?: boolean };
 
 export async function registerSettingsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/settings', async () => await readPublicSettings());
@@ -69,6 +71,22 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
     try {
       const ok = await setActiveProvider(id);
       if (!ok) return reply.status(404).send({ error: 'provider not found' });
+      return await readPublicSettings();
+    } catch (e) {
+      return reply.status(500).send({ error: (e as Error).message });
+    }
+  });
+
+  // Toggle YOLO mode (global bypassPermissions). When enabled, every SDK
+  // subprocess is launched with permissionMode='bypassPermissions' +
+  // allowDangerouslySkipPermissions=true, regardless of what the WebUI sends.
+  // Returns the full public settings so the client can update its UI.
+  app.put<{ Body: YoloBody }>('/api/settings/yolo', async (req, reply) => {
+    if (typeof req.body?.enabled !== 'boolean') {
+      return reply.status(400).send({ error: 'enabled (boolean) required' });
+    }
+    try {
+      await setYoloMode(req.body.enabled);
       return await readPublicSettings();
     } catch (e) {
       return reply.status(500).send({ error: (e as Error).message });

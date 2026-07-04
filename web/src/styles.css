@@ -815,6 +815,15 @@ textarea:focus, select:focus, input:focus {
   background: rgba(238, 92, 42, 0.04);
 }
 .prov-card input[type='radio'] { margin-top: 5px; flex: 0 0 auto; }
+.prov-card input[type='checkbox'] { margin-top: 5px; flex: 0 0 auto; }
+.yolo-card kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
 .prov-card-body { flex: 1; min-width: 0; }
 .prov-card-head {
   display: flex;

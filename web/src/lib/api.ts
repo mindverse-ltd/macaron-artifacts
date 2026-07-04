@@ -40,6 +40,7 @@ export type PublicSettings = {
   activeProviderId: string;
   builtins: PublicBuiltinProvider[];
   customProviders: PublicCustomProvider[];
+  yoloMode: boolean;
 };
 
 export type ProviderInput = {
@@ -80,6 +81,12 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ providerId }),
+    }),
+  setYoloMode: (enabled: boolean) =>
+    req<PublicSettings>('/api/settings/yolo', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
     }),
   workspaces: () => getJSON<WorkspacesResponse>('/api/workspaces'),
   workspace: (project: string) =>

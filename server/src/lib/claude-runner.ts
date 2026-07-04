@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { query, type SDKMessage, type PermissionMode, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { macaronMcpServer } from './macaron-mcp.js';
 import { registerPending } from './permission-registry.js';
+import { getYoloMode } from './settings-store.js';
 
 export type AttachedImage = { mimeType: string; dataUrl: string };
 
@@ -123,13 +124,30 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
   void (async () => {
     let sessionEmitted = false;
     try {
+      // YOLO mode (global Settings toggle) forces bypassPermissions for
+      // every run, regardless of what the WebUI requested. This is the
+      // single server-side override point — route handlers stay ignorant.
+      const effectivePermissionMode: PermissionMode = getYoloMode()
+        ? 'bypassPermissions'
+        : (opts.permissionMode ?? 'default');
       const stream = query({
         prompt: buildPromptInput(opts),
         options: {
           cwd: opts.cwd,
           resume: opts.resume,
           model: opts.model,
-          permissionMode: opts.permissionMode,
+          permissionMode: effectivePermissionMode,
+          // The SDK passes `permissionMode` to the CLI as `--permission-mode`,
+          // but the CLI refuses to actually enter `bypassPermissions` unless
+          // `--allow-dangerously-skip-permissions` is also on the arg list (or
+          // `skipDangerousModePermissionPrompt: true` is in the config dir's
+          // settings.json). Our subprocess runs against an isolated
+          // CLAUDE_CONFIG_DIR (/tmp/macaron-plugin-isolated-claude) that has
+          // no settings.json, so neither condition is met and the CLI silently
+          // falls back to default mode — canUseTool fires for every tool call
+          // and the "Bypass all" toggle in the WebUI does nothing. Pass the
+          // flag explicitly so bypass mode actually takes effect.
+          allowDangerouslySkipPermissions: effectivePermissionMode === 'bypassPermissions',
           includePartialMessages: true,
           abortController: opts.abortController,
           mcpServers: { macaron: macaronMcpServer },
@@ -137,6 +155,10 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
           // canUseTool: pause the SDK, ask the client, resume once decided.
           // A promise is registered under a random id; the client's POST to
           // /permission-decision looks the id up and resolves it.
+          // NOTE: when permissionMode === 'bypassPermissions' (and
+          // allowDangerouslySkipPermissions is true), the SDK does NOT invoke
+          // this callback — every tool auto-approves. That's the intended
+          // "yolo" UX.
           canUseTool: async (toolName: string, input: Record<string, unknown>) => {
             const id = randomUUID();
             const decision = await new Promise<

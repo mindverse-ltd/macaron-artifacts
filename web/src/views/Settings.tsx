@@ -107,6 +107,36 @@ export function Settings() {
     }
   };
 
+  const toggleYolo = async (next: boolean) => {
+    if (next) {
+      const ok = await confirm({
+        title: 'Enable YOLO mode?',
+        body: (
+          <>
+            <div className="confirm-sub">
+              Every SDK subprocess will run with <code>permissionMode: 'bypassPermissions'</code> — <strong>all tool calls auto-approve</strong>, no permission prompts in the WebUI. This applies to every session, regardless of the per-session permission picker.
+            </div>
+            <div className="confirm-sub">
+              Recommended only when you trust the workspace and model. Turn off anytime to restore per-session control.
+            </div>
+          </>
+        ),
+        confirmLabel: 'Enable',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      setSettings(await api.setYoloMode(next));
+      toast(next ? 'YOLO mode on — all permissions bypassed' : 'YOLO mode off');
+    } catch (e) {
+      toast(`error: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (error) {
     return (
       <section className="view">
@@ -221,6 +251,34 @@ export function Settings() {
             </p>
           )}
         </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-row-head">
+          <h2 className="sec-title">Permissions</h2>
+        </div>
+        <label className={`prov-card yolo-card${settings.yoloMode ? ' active' : ''}`}>
+          <input
+            type="checkbox"
+            checked={settings.yoloMode}
+            onChange={(e) => void toggleYolo(e.target.checked)}
+            disabled={busy}
+          />
+          <div className="prov-card-body">
+            <div className="prov-card-head">
+              <span className="prov-name">YOLO mode</span>
+              <span className={`prov-tag ${settings.yoloMode ? 'ok' : 'bad'}`}>
+                {settings.yoloMode ? 'on — all tools auto-approve' : 'off'}
+              </span>
+            </div>
+            <div className="prov-card-sub">
+              Bypass <code>permissionMode</code> for every session. The SDK launches with <code>--allow-dangerously-skip-permissions</code> + <code>--permission-mode bypassPermissions</code>, so <strong>no tool call will prompt you</strong> — including file edits, shell commands, and <code>render_ui</code>.
+            </div>
+            <div className="prov-card-sub">
+              Off (default): each session's permission picker (<kbd>Shift</kbd>+<kbd>Tab</kbd>) is respected.
+            </div>
+          </div>
+        </label>
       </div>
 
       {editing && (

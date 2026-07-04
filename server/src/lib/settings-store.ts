@@ -40,6 +40,12 @@ export type CustomProvider = {
 export type Settings = {
   activeProviderId: string; // 'anthropic' or a CustomProvider.id
   customProviders: CustomProvider[];
+  // When true, every SDK subprocess is launched with
+  // `permissionMode: 'bypassPermissions'` + `allowDangerouslySkipPermissions:
+  // true`, regardless of what the WebUI sends. Off by default — bypass mode
+  // auto-approves every tool call with no client prompt, so it should be an
+  // explicit opt-in.
+  yoloMode: boolean;
 };
 
 // Public projection sent to the client. Never surfaces raw apiKey — only a
@@ -66,6 +72,7 @@ export type PublicSettings = {
   activeProviderId: string;
   builtins: PublicBuiltinProvider[];
   customProviders: PublicCustomProvider[];
+  yoloMode: boolean;
 };
 
 const CONFIG_PATH = path.join(HOME, '.claude', 'macaron-config.json');
@@ -90,6 +97,7 @@ function makeDefaults(): Settings {
     // Ship one seeded Macaron entry — users see it in the list, can add key,
     // switch to it, or delete it. Same UX as any other custom provider.
     customProviders: [seedMacaronProvider()],
+    yoloMode: false,
   };
 }
 
@@ -107,12 +115,14 @@ function migrateIfLegacy(raw: unknown): Settings {
     providers?: { macaron?: { apiKey?: string } };
     activeProviderId?: string;
     customProviders?: CustomProvider[];
+    yoloMode?: boolean;
   };
   if (legacy && Array.isArray(legacy.customProviders)) {
     // Already current shape — just normalize the legacy 'anthropic' id.
     return {
       activeProviderId: normalizeActiveId(legacy.activeProviderId || SYSTEM_PROVIDER_ID),
       customProviders: legacy.customProviders.map(sanitizeProvider),
+      yoloMode: Boolean(legacy.yoloMode),
     };
   }
   // Legacy: rebuild
@@ -127,6 +137,7 @@ function migrateIfLegacy(raw: unknown): Settings {
   return {
     activeProviderId: wasMacaronActive ? macaron.id : SYSTEM_PROVIDER_ID,
     customProviders: [macaron],
+    yoloMode: Boolean(legacy?.yoloMode),
   };
 }
 
@@ -189,6 +200,7 @@ export async function readPublicSettings(): Promise<PublicSettings> {
       model: p.model,
       configured: Boolean(p.apiKey),
     })),
+    yoloMode: s.yoloMode,
   };
 }
 
@@ -304,6 +316,19 @@ export function getActiveProviderRaw():
   const p = s.customProviders.find((x) => x.id === s.activeProviderId);
   if (!p) return null;
   return { id: p.id, name: p.name, endpoint: p.endpoint, model: p.model, apiKey: p.apiKey };
+}
+
+// Sync getter for hot-path consumers (claude-runner reads this on every run
+// to decide whether to force bypassPermissions). Cache is warmed at startup
+// by warmSettingsCache(), so this never blocks on disk I/O.
+export function getYoloMode(): boolean {
+  return (cache ?? makeDefaults()).yoloMode ?? false;
+}
+
+export async function setYoloMode(enabled: boolean): Promise<void> {
+  const s = await readSettings();
+  s.yoloMode = Boolean(enabled);
+  await persist();
 }
 
 export function getActiveProviderEnv(): {

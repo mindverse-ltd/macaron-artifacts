@@ -17,6 +17,7 @@ import {
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
+import { loadHistory, pushHistory } from '../lib/history';
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
 
 const RENDER_UI_TOOL = 'mcp__macaron__render_ui';
@@ -712,12 +713,37 @@ function SessionActionsMenu({
 
 // ---- Session view ---------------------------------------------------------
 
-export function Session() {
-  const { project = '', sid = '' } = useParams();
+export type SessionProps = {
+  // When rendered as a canvas tile the parent passes project + sid directly
+  // instead of relying on the URL params (multiple tiles on one route can't
+  // share params). `focused` gates the global Shift+Tab handler so only the
+  // active tile responds.
+  project?: string;
+  sid?: string;
+  focused?: boolean;
+  onFocus?: () => void;
+  onRemove?: () => void;
+  // Suppress the top breadcrumb + copy/refresh bar — the tile grip already
+  // hosts those actions in canvas mode.
+  hideBar?: boolean;
+  // Incrementing this from the parent forces a fresh reload of the jsonl
+  // (used by the tile's refresh button).
+  refreshKey?: number;
+};
+
+export function Session(props: SessionProps = {}) {
+  const params = useParams();
+  const project = props.project ?? params.project ?? '';
+  const sid = props.sid ?? params.sid ?? '';
   const location = useLocation();
   const navigate = useNavigate();
   const isNew = !sid;
   const isPending = Boolean((location.state as { pending?: boolean } | null)?.pending);
+  // When mounted as a canvas tile the parent decides focus. Standalone
+  // (single-URL) mount is always focused.
+  const focused = props.focused ?? true;
+  const hideBar = props.hideBar ?? false;
+  const refreshKey = props.refreshKey ?? 0;
   const [data, setData] = useState<SessionDetail | null>(null);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -756,6 +782,16 @@ export function Session() {
   // trigger that pulls the canonical data back.
   const [completedTurns, setCompletedTurns] = useState<Item[]>([]);
   const [input, setInput] = useState('');
+  // Shell-style prompt history, per project. Latest at the end. Loaded
+  // lazily so each new mount picks up entries appended by sibling tiles.
+  const [history, setHistory] = useState<string[]>(() => loadHistory(project));
+  useEffect(() => { setHistory(loadHistory(project)); }, [project]);
+  // Navigation state. null = user is composing a fresh draft; otherwise
+  // 0 = latest sent, 1 = one before, … history.length-1 = oldest. When we
+  // enter history navigation we stash the draft so ArrowDown-past-latest
+  // can restore it.
+  const [historyIdx, setHistoryIdx] = useState<number | null>(null);
+  const draftInputRef = useRef<string>('');
   const [shown, setShown] = useState(PAGE_SIZE);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   // Shift+Tab cycles through permission modes globally on the Session view
@@ -921,7 +957,8 @@ export function Session() {
     if (isNew) return; // no jsonl yet — empty state until first send
     // For brand-new sessions the jsonl may not exist yet — suppress the 404 error.
     load({ silent: isPending });
-  }, [project, sid, load, isPending, isNew]);
+    // refreshKey included so an incrementing parent nonce forces reload.
+  }, [project, sid, load, isPending, isNew, refreshKey]);
 
   // Global Shift+Tab → cycle permission mode, matching claude-cli's binding.
   // The browser's own "reverse focus" behaviour is preempted; we surface the
@@ -935,6 +972,7 @@ export function Session() {
       bypassPermissions: 'Bypass all',
     };
     const onKey = (e: Event) => {
+      if (!focused) return; // canvas tiles only respond when active
       const ke = e as unknown as { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean; preventDefault: () => void };
       if (ke.key !== 'Tab' || !ke.shiftKey || ke.ctrlKey || ke.metaKey || ke.altKey) return;
       ke.preventDefault();
@@ -945,7 +983,7 @@ export function Session() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toast]);
+  }, [toast, focused]);
 
   // When we arrived from "+ New session", the in-browser live store already
   // has the fetch open and is collecting deltas (this survived the route
@@ -1121,6 +1159,11 @@ export function Session() {
       const sentImages = images;
       setInput('');
       setImages([]);
+      // Persist to prompt history + reset navigation state.
+      const nextHistory = pushHistory(project, text);
+      setHistory(nextHistory);
+      setHistoryIdx(null);
+      draftInputRef.current = '';
       // Roll the *previous* turn's live buffers into history before we
       // clobber them with this turn's user text — otherwise typing a second
       // message erases the first reply until the next page refresh.
@@ -1293,46 +1336,82 @@ export function Session() {
       }
       e.preventDefault();
       send();
+      return;
+    }
+    // Shell-style history navigation: ArrowUp when already in history mode
+    // OR when the textarea is empty / cursor is at position 0 recalls an
+    // earlier prompt. Escape bails back to the draft the user was typing.
+    if (e.key === 'ArrowUp') {
+      const ta = e.currentTarget;
+      const canEnter =
+        historyIdx !== null || input === '' || ta.selectionStart === 0;
+      if (!canEnter || history.length === 0) return;
+      e.preventDefault();
+      const nextIdx = historyIdx === null ? 0 : Math.min(historyIdx + 1, history.length - 1);
+      if (historyIdx === null) draftInputRef.current = input;
+      setHistoryIdx(nextIdx);
+      setInput(history[history.length - 1 - nextIdx]!);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      if (historyIdx === null) return;
+      e.preventDefault();
+      if (historyIdx === 0) {
+        setHistoryIdx(null);
+        setInput(draftInputRef.current);
+        return;
+      }
+      const nextIdx = historyIdx - 1;
+      setHistoryIdx(nextIdx);
+      setInput(history[history.length - 1 - nextIdx]!);
+      return;
+    }
+    if (e.key === 'Escape' && historyIdx !== null) {
+      e.preventDefault();
+      setHistoryIdx(null);
+      setInput(draftInputRef.current);
     }
   };
 
   return (
     <section className="view session-view">
-      <div className="session-bar">
-        <div className="session-bar-left">
-          <Link to="/" className="crumb-link">Workspaces</Link>
-          <span className="sep">›</span>
-          <Link to={`/w/${encodeURIComponent(project)}`} className="crumb-link">{name}</Link>
-          <span className="sep">›</span>
-          <span className="sess-id-crumb">{isNew ? 'new' : sid.slice(0, 8)}</span>
-          {data?.gitBranch && <span className="sess-branch">{data.gitBranch}</span>}
-        </div>
-        <div className="session-bar-right">
-          {!isNew && (
+      {!hideBar && (
+        <div className="session-bar">
+          <div className="session-bar-left">
+            <Link to="/" className="crumb-link">Workspaces</Link>
+            <span className="sep">›</span>
+            <Link to={`/w/${encodeURIComponent(project)}`} className="crumb-link">{name}</Link>
+            <span className="sep">›</span>
+            <span className="sess-id-crumb">{isNew ? 'new' : sid.slice(0, 8)}</span>
+            {data?.gitBranch && <span className="sess-branch">{data.gitBranch}</span>}
+          </div>
+          <div className="session-bar-right">
+            {!isNew && (
+              <button
+                className="ghost small"
+                onClick={() => navigator.clipboard.writeText(`claude --resume ${sid}`).then(() => toast(`copied: claude --resume ${sid}`))}
+                title="Copy claude --resume command"
+              >
+                Copy resume
+              </button>
+            )}
             <button
-              className="ghost small"
-              onClick={() => navigator.clipboard.writeText(`claude --resume ${sid}`).then(() => toast(`copied: claude --resume ${sid}`))}
-              title="Copy claude --resume command"
+              className="icon-btn"
+              onClick={() => load()}
+              title="Refresh"
+              aria-label="Refresh"
+              disabled={isNew}
             >
-              Copy resume
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16" />
+                <path d="M3 12a9 9 0 0 1 15.36-6.36L21 8" />
+                <polyline points="21 3 21 8 16 8" />
+                <polyline points="3 21 3 16 8 16" />
+              </svg>
             </button>
-          )}
-          <button
-            className="icon-btn"
-            onClick={() => load()}
-            title="Refresh"
-            aria-label="Refresh"
-            disabled={isNew}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16" />
-              <path d="M3 12a9 9 0 0 1 15.36-6.36L21 8" />
-              <polyline points="21 3 21 8 16 8" />
-              <polyline points="3 21 3 16 8 16" />
-            </svg>
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/*
         flex-direction: column-reverse on .thread. DOM order must be newest →
@@ -1402,6 +1481,12 @@ export function Session() {
         {(cwd || startedAt) && <SessionHeader cwd={cwd} startedAt={startedAt} />}
       </div>
 
+      {/* Input area always mounted — collapses to a zero-fr grid row
+          when the tile isn't focused so a click-focus animates in
+          smoothly against the content's natural height, and the user's
+          typed draft survives focus changes. */}
+      <div className={`session-input-area${focused ? '' : ' collapsed'}`}>
+      <div className="session-input-inner">
       <form
         className={`session-input${dragOver ? ' drag-over' : ''}`}
         onSubmit={send}
@@ -1436,7 +1521,12 @@ export function Session() {
           placeholder="Reply to Claude…"
           value={input}
           disabled={sending}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            // Any manual edit exits history-navigation mode — pressing
+            // Send now sends the (possibly edited) text as a fresh entry.
+            if (historyIdx !== null) setHistoryIdx(null);
+          }}
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={() => {
             composingRef.current = false;
@@ -1528,6 +1618,8 @@ export function Session() {
         claudeMdCount={data?.claudeMdCount}
         mcpCount={data?.mcpCount}
       />
+      </div>
+      </div>
     </section>
   );
 }

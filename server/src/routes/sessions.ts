@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { CLAUDE_PROJECTS } from '../config.js';
 import {
+  decodeClaudeProjectName,
   deleteSession,
   readSessionMessages,
   readSessionSummary,
@@ -229,12 +230,18 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
         return reply.status(400).send({ error: 'text or images required' });
       }
 
-      let cwd = process.env.HOME || '/tmp';
+      // Prefer the cwd embedded in the jsonl's first `user`/etc line, but
+      // that read is capped at HEAD_BYTES — a big paste on the first line
+      // pushes cwd out of range and we'd silently fall back to $HOME, which
+      // makes the SDK look under the wrong project dir and error with "No
+      // conversation found". The project name IS the cwd (encoded by
+      // claude-cli), so use it as the safe default.
+      let cwd = decodeClaudeProjectName(project) || process.env.HOME || '/tmp';
       try {
         const head = await readSessionSummary(path.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`));
         if (head?.cwd) cwd = head.cwd;
       } catch {
-        /* fall back to HOME */
+        /* fall back to decoded project name */
       }
 
       startSSE(reply);

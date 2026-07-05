@@ -142,13 +142,16 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
   const e = opts.envOverrides;
   const routedBase = e?.ANTHROPIC_BASE_URL || '(inherited from process.env)';
   const cfgDir = e?.CLAUDE_CONFIG_DIR || '(user default ~/.claude)';
-  const userMcp = loadUserMcpServers();
+  const shouldInjectUserMcp = Boolean(e?.CLAUDE_CONFIG_DIR);
+  const userMcp = shouldInjectUserMcp ? loadUserMcpServers() : {};
   const userMcpNames = Object.keys(userMcp);
   console.log(
     `[claude-runner] starting  model=${opts.model ?? '(sdk default)'}  base=${routedBase}  CLAUDE_CONFIG_DIR=${cfgDir}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}`,
   );
   console.log(
-    `[claude-runner] mcp  macaron + user(${userMcpNames.length}): ${userMcpNames.join(', ') || '(none)'}`,
+    shouldInjectUserMcp
+      ? `[claude-runner] mcp  macaron + injected user(${userMcpNames.length}): ${userMcpNames.join(', ') || '(none)'}`
+      : '[claude-runner] mcp  macaron + user config discovered by SDK',
   );
 
   // Launch the SDK stream in the background. Both success and error paths
@@ -318,4 +321,3 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
     yield r.value;
   }
 }
-

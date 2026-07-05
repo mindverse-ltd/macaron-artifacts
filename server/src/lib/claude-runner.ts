@@ -3,6 +3,9 @@
 // approach — same UX, no CLI stdout parsing, typed events, no IPC buffering.
 
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { query, type SDKMessage, type PermissionMode, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { macaronMcpServer } from './macaron-mcp.js';
 import { registerPending } from './permission-registry.js';
@@ -82,6 +85,31 @@ function buildPromptInput(opts: RunOptions): string | AsyncIterable<SDKUserMessa
   return (async function* () { yield msg; })();
 }
 
+// Read the user's global MCP servers from ~/.claude.json and merge them into
+// the SDK's `mcpServers` option. This is needed because custom providers run
+// the subprocess against an isolated CLAUDE_CONFIG_DIR (to block OAuth — see
+// settings-store.ts), which also hides ~/.claude.json and thus drops the
+// user's global MCP config. Injecting via the SDK option bypasses the
+// CLAUDE_CONFIG_DIR redirect without touching settings.json (where OAuth
+// lives), so MCP and auth isolation stay decoupled.
+//
+// The `macaron` entry is stripped: the hardcoded macaron MCP must stay the
+// SDK-instance version (createSdkMcpServer), not a user-configured stdio one.
+function loadUserMcpServers(): Record<string, unknown> {
+  try {
+    const claudeJsonPath = path.join(homedir(), '.claude.json');
+    const raw = readFileSync(claudeJsonPath, 'utf8');
+    const cfg = JSON.parse(raw) as { mcpServers?: Record<string, unknown> };
+    const servers = cfg.mcpServers ?? {};
+    if (typeof servers !== 'object' || servers === null) return {};
+    const { macaron: _omit, ...rest } = servers;
+    return rest;
+  } catch {
+    // Missing file, unreadable, or malformed JSON — degrade to macaron-only.
+    return {};
+  }
+}
+
 export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> {
   // Queue-based generator: both the SDK's async iterator loop and the
   // canUseTool callback push here. canUseTool needs to *both* emit a
@@ -114,8 +142,13 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
   const e = opts.envOverrides;
   const routedBase = e?.ANTHROPIC_BASE_URL || '(inherited from process.env)';
   const cfgDir = e?.CLAUDE_CONFIG_DIR || '(user default ~/.claude)';
+  const userMcp = loadUserMcpServers();
+  const userMcpNames = Object.keys(userMcp);
   console.log(
     `[claude-runner] starting  model=${opts.model ?? '(sdk default)'}  base=${routedBase}  CLAUDE_CONFIG_DIR=${cfgDir}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}`,
+  );
+  console.log(
+    `[claude-runner] mcp  macaron + user(${userMcpNames.length}): ${userMcpNames.join(', ') || '(none)'}`,
   );
 
   // Launch the SDK stream in the background. Both success and error paths
@@ -150,7 +183,7 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
           allowDangerouslySkipPermissions: effectivePermissionMode === 'bypassPermissions',
           includePartialMessages: true,
           abortController: opts.abortController,
-          mcpServers: { macaron: macaronMcpServer },
+          mcpServers: { macaron: macaronMcpServer, ...userMcp },
           allowedTools: ['mcp__macaron__render_ui'],
           // canUseTool: pause the SDK, ask the client, resume once decided.
           // A promise is registered under a random id; the client's POST to

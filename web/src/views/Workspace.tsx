@@ -26,6 +26,7 @@ import {
   type TileGeom,
 } from '../lib/canvas';
 import { Session } from './Session';
+import { GitPanel } from '../components/GitPanel';
 
 // One row cell in the canvas grid (px). CSS grid-auto-rows uses this; a
 // tile's rowSpan is a multiplier. Kept in sync with `.ws-canvas-grid-v2`
@@ -58,6 +59,7 @@ export function Workspace() {
   // subscribe to the liveStore instead of trying to load the (nonexistent)
   // jsonl. Cleared after the tile picks it up.
   const [pendingSids, setPendingSids] = useState<Set<string>>(new Set());
+  const [gitOpen, setGitOpen] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -212,11 +214,16 @@ export function Workspace() {
           </span>
         </div>
         <div className="ws-canvas-actions">
+          <button className="ghost small" onClick={() => setGitOpen(true)}>
+            Git
+          </button>
           <button className="ghost small" onClick={handleNewSession}>
             + New Session
           </button>
         </div>
       </header>
+
+      {gitOpen && <GitPanel project={project} onClose={() => setGitOpen(false)} />}
 
       {canvas.tiles.length === 0 ? (
         <div className="ws-canvas-empty">

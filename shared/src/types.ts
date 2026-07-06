@@ -80,6 +80,34 @@ export type SessionDetail = {
   mcpCount?: number;
 };
 
+// ---- Git panel ------------------------------------------------------------
+// Per-file entry from `git status --porcelain=v1`. `x`/`y` are the raw
+// index/worktree status codes (M, A, D, R, ?, …). A file can be both staged
+// and unstaged at once (edited after `git add`), so the two flags are
+// independent, not mutually exclusive.
+export type GitFileStatus = {
+  path: string;
+  x: string;
+  y: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  renamedFrom?: string;
+};
+
+export type GitStatus = {
+  isRepo: boolean;
+  branch: string;
+  detached: boolean;
+  hasCommits: boolean;
+  ahead: number;
+  behind: number;
+  upstream?: string;
+  files: GitFileStatus[];
+};
+
+export type GitBranches = { current: string; branches: string[] };
+
 export type WorkspacesResponse = { workspaces: Workspace[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
 export type HealthResponse = { ok: boolean; model: string };

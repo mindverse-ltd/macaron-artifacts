@@ -47,7 +47,8 @@ That way the user sees a meaningful shell within seconds.
 - No \`as any\` casts in JSX
 
 # When to use this tool
-Call render_ui when a visual answer beats prose: dashboards, charts, comparison cards, forms, settings panels, interactive widgets, mini editors, status reports. Don't use it for plain text answers. Don't write a markdown TSX fence in chat — that's a failed answer. After render_ui returns, the host already shows the rendered UI to the user; keep your follow-up reply short (one sentence ack at most).`;
+Call render_ui when a visual answer beats prose: dashboards, charts, comparison cards, forms, settings panels, interactive widgets, mini editors, status reports. Don't use it for plain text answers. Don't write a markdown TSX fence in chat — that's a failed answer. After render_ui returns, the host already shows the rendered UI to the user; keep your follow-up reply short (one sentence ack at most).
+If an earlier render_ui call in this conversation errored with a disconnect / server-not-available message, that was a transient host restart — the bridge is recreated fresh every turn, so just call render_ui again instead of telling the user the tool is broken.`;
 
 const INSTRUCTIONS =
   'Macaron GenUI bridge. The render_ui tool inlines a TSX component into the conversation. ' +

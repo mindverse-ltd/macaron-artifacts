@@ -1,14 +1,14 @@
-// Server-side GenUI diagnostics for render_ui. Vendored from macaron-genui-demo's standalone
-// check/lint path: TS semantic diagnostics over Claude's TSX, with $macaron/ui resolved to the
-// REAL vendored source via compilerOptions.paths — so facade misuse (bad props, missing exports)
-// surfaces with the actual valid types, not degraded to `any`. No npm dep beyond `typescript`
-// + the vendored typeCheckService/diagnostics in ./genui-check-vendored.
+// Server-side GenUI diagnostics for render_ui. TS semantic diagnostics over Claude's TSX, with
+// $macaron/ui resolved to the REAL vendored source via compilerOptions.paths — so facade misuse
+// (bad props, missing exports) surfaces with the actual valid types, not degraded to `any`. The
+// LanguageService scaffolding + bag formatting come from @genui/diagnostics (the same modules the
+// upstream genui-cli standalone check/lint path uses), so host and CLI format identically.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { createCheckResult, type GenUICheckResult, type GenUIDiagnostic } from "@genui/diagnostics";
+import { createTypeCheckService, DEFAULT_APP_FILENAME, DEFAULT_MAX_REPORTED, diagnosticMessage, type TypeCheckService } from "@genui/diagnostics/type-check";
 import { WEB_ROOT } from "../config.js";
-import { createCheckResult, type GenUICheckResult, type GenUIDiagnostic } from "./genui-check-vendored/diagnostics.js";
-import { createTypeCheckService, DEFAULT_APP_FILENAME, DEFAULT_MAX_REPORTED, diagnosticMessage, type TypeCheckService } from "./genui-check-vendored/typeCheckService.js";
 
 // Facade -> vendored source on disk, relative to WEB_ROOT (the tsconfig dir). Only specifiers the
 // browser resolves to OUR vendored source belong here; bare npm packages (lucide-react, motion)

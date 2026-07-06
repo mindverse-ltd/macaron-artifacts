@@ -1,4 +1,6 @@
 // Parse OpenAI-style SSE (Macaron, used by GenUI).
+import { authHeaders } from './auth';
+
 export type OpenAIStreamHandlers = {
   onDelta?: (text: string) => void;
   onReasoning?: (text: string) => void;
@@ -17,7 +19,7 @@ export async function streamOpenAI(
   try {
     resp = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
       signal: h.signal,
     });
@@ -96,7 +98,7 @@ export async function streamSession(
   try {
     resp = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     });
   } catch (e) {

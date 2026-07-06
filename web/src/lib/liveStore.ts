@@ -8,6 +8,7 @@
 // Session subscribes and gets the current buffer + live updates.
 
 import { extractPartialCode } from './partialJson';
+import { authHeaders } from './auth';
 
 // A single item on the timeline. Text chunks and tool calls are stored in
 // one ordered list so the UI renders them in the exact interleaved order
@@ -110,7 +111,7 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
     let sid = '';
     fetch(`/api/workspaces/${encodeURIComponent(project)}/sessions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
         text,
         permissionMode: opts.permissionMode,

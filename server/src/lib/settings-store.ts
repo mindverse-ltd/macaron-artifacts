@@ -14,10 +14,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { HOME, HOST, PORT, MACARON_API_BASE, MACARON_API_KEY } from '../config.js';
 
-// The built-in pass-through provider. Never touches the SDK subprocess env —
-// it inherits process.env unchanged. Whatever ANTHROPIC_BASE_URL /
-// ANTHROPIC_AUTH_TOKEN the user has in their shell (Claude Code login,
-// a GLM relay, LiteLLM, Bedrock, …) is exactly what runs.
+// The built-in pass-through provider. Inherits process.env so whatever
+// ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN the user has in their shell
+// (Claude Code login, a GLM relay, LiteLLM, Bedrock, …) is exactly what runs —
+// unless the server was launched from inside a Claude Code session, in which
+// case that session's leaked vars are scrubbed first (see scrubbedAmbientEnv).
 export const SYSTEM_PROVIDER_ID = 'system';
 // Legacy id kept for one-shot migration only.
 const LEGACY_ANTHROPIC_ID = 'anthropic';
@@ -179,7 +180,10 @@ export async function warmSettingsCache(): Promise<void> {
 
 export async function readPublicSettings(): Promise<PublicSettings> {
   const s = await readSettings();
-  const envBase = process.env.ANTHROPIC_BASE_URL || '';
+  // Derive the display from the same effective env the SDK subprocess gets
+  // (scrubbedAmbientEnv drops vars leaked by an enclosing Claude Code
+  // session), so Settings never advertises a relay the run would discard.
+  const envBase = (scrubbedAmbientEnv() ?? process.env).ANTHROPIC_BASE_URL || '';
   const usingRelay = Boolean(envBase);
   return {
     activeProviderId: s.activeProviderId,
@@ -337,13 +341,29 @@ export async function setYoloMode(enabled: boolean): Promise<void> {
   await persist();
 }
 
+// System-default normally inherits process.env unchanged (env: null). But if
+// this server was itself launched from inside a Claude Code session (`claude`
+// → Bash → mcc/tsx watch), that session's env is in ours: ANTHROPIC_BASE_URL /
+// AUTH_TOKEN point at whatever relay the outer session used, CLAUDE_CONFIG_DIR
+// may relocate transcripts, and CLAUDE_CODE_SESSION_ID marks subprocesses as
+// nested children. "System default" must mean the user's normal ambient Claude
+// auth, so in that case hand the SDK a scrubbed copy instead.
+function scrubbedAmbientEnv(): Record<string, string> | null {
+  if (!process.env.CLAUDECODE && !process.env.CLAUDE_CODE_SESSION_ID) return null;
+  const env = { ...process.env } as Record<string, string>;
+  for (const k of Object.keys(env)) {
+    if (k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_') || k.startsWith('ANTHROPIC_') || k === 'CLAUDE_CONFIG_DIR') delete env[k];
+  }
+  return env;
+}
+
 export function getActiveProviderEnv(): {
   model: string | undefined;
   env: Record<string, string> | null;
 } {
   const s = cache ?? makeDefaults();
   if (s.activeProviderId === SYSTEM_PROVIDER_ID) {
-    return { model: DEFAULT_ANTHROPIC_MODEL, env: null };
+    return { model: DEFAULT_ANTHROPIC_MODEL, env: scrubbedAmbientEnv() };
   }
   const p = s.customProviders.find((x) => x.id === s.activeProviderId);
   if (!p) return { model: DEFAULT_ANTHROPIC_MODEL, env: null };

@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type {
   Block,
@@ -39,6 +40,39 @@ export async function deleteSession(project: string, sid: string): Promise<void>
   const filePath = path.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
   await fs.unlink(filePath);
   summaryCache.delete(filePath);
+}
+
+// Duplicate a claude session as a brand-new sid so both can be resumed
+// independently. We rewrite every `sessionId` field inside the jsonl to the
+// new uuid — otherwise `claude --resume` would still find the original when
+// scanning by embedded sessionId.
+export async function duplicateSession(
+  project: string,
+  sid: string,
+): Promise<{ newSid: string }> {
+  const srcPath = path.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
+  const raw = await fs.readFile(srcPath, 'utf8');
+  const newSid = randomUUID();
+  const destPath = path.join(CLAUDE_PROJECTS, project, `${newSid}.jsonl`);
+  const outLines: string[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) {
+      outLines.push(line);
+      continue;
+    }
+    try {
+      const o = JSON.parse(line) as Record<string, unknown>;
+      if (typeof o.sessionId === 'string') o.sessionId = newSid;
+      outLines.push(JSON.stringify(o));
+    } catch {
+      outLines.push(line);
+    }
+  }
+  let next = outLines.join('\n');
+  if (!next.endsWith('\n')) next += '\n';
+  // wx = fail if a file with this uuid already exists (astronomically rare)
+  await fs.writeFile(destPath, next, { encoding: 'utf8', flag: 'wx' });
+  return { newSid };
 }
 
 // Truncate a session at the message identified by `uuid` — the picked entry

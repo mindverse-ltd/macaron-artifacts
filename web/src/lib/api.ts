@@ -102,6 +102,11 @@ export const api = {
     );
     if (!r.ok) throw new Error(`http ${r.status}`);
   },
+  duplicateSession: (project: string, sid: string) =>
+    req<{ ok: true; newSid: string }>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/duplicate`,
+      { method: 'POST' },
+    ),
   permissionDecision: (id: string, decision: 'allow' | 'deny', reason?: string) =>
     req<{ ok: boolean }>('/api/permission-decision', {
       method: 'POST',

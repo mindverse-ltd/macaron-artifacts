@@ -4,6 +4,7 @@ import { CLAUDE_PROJECTS } from '../config.js';
 import {
   decodeClaudeProjectName,
   deleteSession,
+  duplicateSession,
   readSessionMessages,
   readSessionSummary,
   rewindSession,
@@ -41,6 +42,20 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       return reply.status(404).send({ error: (e as Error).message });
     }
   });
+
+  // Duplicate: clone the jsonl to a fresh sid so both can be resumed
+  // independently. Sidebar's context menu wires to this.
+  app.post<{ Params: Params }>(
+    '/api/sessions/claude/:project/:sid/duplicate',
+    async ({ params }, reply) => {
+      try {
+        const r = await duplicateSession(params.project, params.sid);
+        return { ok: true, ...r };
+      } catch (e) {
+        return reply.status(404).send({ error: (e as Error).message });
+      }
+    },
+  );
 
   // Resolve a pending canUseTool call — { id, decision:'allow'|'deny', reason? }.
   app.post<{ Body: { id?: string; decision?: 'allow' | 'deny'; reason?: string } }>(

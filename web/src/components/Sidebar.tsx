@@ -152,7 +152,18 @@ export function Sidebar() {
         {
           icon: '⊕',
           label: 'Duplicate',
-          onClick: () => toast('duplicate not yet implemented'),
+          onClick: async () => {
+            try {
+              const r = await api.duplicateSession(w.project, s.sessionId);
+              toast(`duplicated → ${r.newSid.slice(0, 8)}`);
+              loadData();
+              navigate(
+                `/w/${encodeURIComponent(w.project)}/s/${encodeURIComponent(r.newSid)}`,
+              );
+            } catch (err) {
+              toast(`duplicate failed: ${(err as Error).message}`);
+            }
+          },
         },
         'separator',
         {

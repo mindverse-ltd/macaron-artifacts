@@ -18,6 +18,15 @@ export const MAX_COL_SPAN = 12;
 export const MIN_ROW_SPAN = 4;
 export const MAX_ROW_SPAN = 24;
 
+// A "draft" tile — a placeholder placed on the canvas BEFORE a real session
+// exists. The user types into it, and once the server assigns a real
+// sessionId, `promoteDraft(realSid)` swaps this sentinel for the real id in
+// place. Only one draft can exist per workspace at a time.
+export const DRAFT_SID = '__draft__';
+export function isDraftSid(sid: string): boolean {
+  return sid === DRAFT_SID;
+}
+
 type CanvasState = {
   tiles: TileGeom[];
   focusedSid: string | null;
@@ -136,6 +145,8 @@ export function useCanvas(project: string): {
   reorder: (fromIdx: number, toIdx: number) => void;
   resize: (sid: string, patch: { colSpan?: number; rowSpan?: number }) => void;
   focus: (sid: string) => void;
+  addDraft: () => void;
+  promoteDraft: (realSid: string) => void;
 } {
   const [state, setState] = useState<CanvasState>(() => loadCanvas(project));
 
@@ -268,6 +279,48 @@ export function useCanvas(project: string): {
     [update],
   );
 
+  // Insert a placeholder draft tile at the front and focus it. If a draft
+  // already exists we just refocus it — only one draft at a time keeps the
+  // sentinel sid unambiguous.
+  const addDraft = useCallback(() => {
+    update((cur) => {
+      if (cur.tiles.some((t) => t.sid === DRAFT_SID)) {
+        return cur.focusedSid === DRAFT_SID ? cur : { ...cur, focusedSid: DRAFT_SID };
+      }
+      return {
+        tiles: [
+          { sid: DRAFT_SID, colSpan: DEFAULT_COL_SPAN, rowSpan: DEFAULT_ROW_SPAN },
+          ...cur.tiles,
+        ],
+        focusedSid: DRAFT_SID,
+      };
+    });
+  }, [update]);
+
+  // Swap the draft sentinel for the real sessionId in place — keeps grid
+  // position + focus intact so the tile the user was typing in stays put.
+  const promoteDraft = useCallback(
+    (realSid: string) => {
+      if (!realSid || realSid === DRAFT_SID) return;
+      update((cur) => {
+        const draftIdx = cur.tiles.findIndex((t) => t.sid === DRAFT_SID);
+        if (draftIdx < 0) return cur;
+        // If the real sid is already on the canvas, drop the draft entry
+        // instead of duplicating.
+        const dup = cur.tiles.some((t) => t.sid === realSid);
+        const tiles = cur.tiles.slice();
+        if (dup) {
+          tiles.splice(draftIdx, 1);
+        } else {
+          tiles[draftIdx] = { ...tiles[draftIdx]!, sid: realSid };
+        }
+        const focusedSid = cur.focusedSid === DRAFT_SID ? realSid : cur.focusedSid;
+        return { tiles, focusedSid };
+      });
+    },
+    [update],
+  );
+
   return {
     tiles: state.tiles,
     focusedSid: state.focusedSid,
@@ -278,5 +331,7 @@ export function useCanvas(project: string): {
     reorder,
     resize,
     focus,
+    addDraft,
+    promoteDraft,
   };
 }

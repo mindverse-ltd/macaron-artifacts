@@ -15,7 +15,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { api, basename, type SessionListItem, type Workspace as Wk } from '../lib/api';
-import { useToast } from '../components/Toast';
 import {
   useCanvas,
   CANVAS_COLS,
@@ -23,10 +22,10 @@ import {
   MAX_COL_SPAN,
   MIN_ROW_SPAN,
   MAX_ROW_SPAN,
+  isDraftSid,
   type TileGeom,
 } from '../lib/canvas';
 import { Session } from './Session';
-import { startNewSession } from '../lib/liveStore';
 
 // One row cell in the canvas grid (px). CSS grid-auto-rows uses this; a
 // tile's rowSpan is a multiplier. Kept in sync with `.ws-canvas-grid-v2`
@@ -51,13 +50,14 @@ export function Workspace() {
   const [workspace, setWorkspace] = useState<Wk | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[] | null>(null);
   const [error, setError] = useState('');
-  const [showNewInput, setShowNewInput] = useState(false);
-  const [newPrompt, setNewPrompt] = useState('');
-  const [creating, setCreating] = useState(false);
-  const toast = useToast();
   const canvas = useCanvas(project);
   const gridRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<ResizeState | null>(null);
+  // Track which real sids were just promoted from a draft — Session tiles
+  // read this to know they should treat the first turn as "in-flight" and
+  // subscribe to the liveStore instead of trying to load the (nonexistent)
+  // jsonl. Cleared after the tile picks it up.
+  const [pendingSids, setPendingSids] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     api
@@ -87,22 +87,41 @@ export function Workspace() {
 
   const name = workspace?.name || basename(workspace?.cwd || '') || project;
 
-  const handleNewSession = async () => {
-    if (!newPrompt.trim() || creating) return;
-    setCreating(true);
-    try {
-      const newSid = await startNewSession(project, { text: newPrompt.trim() });
-      setNewPrompt('');
-      setShowNewInput(false);
-      canvas.add(newSid);
-      canvas.focus(newSid);
-      load();
-    } catch (e) {
-      toast(`failed: ${(e as Error).message}`);
-    } finally {
-      setCreating(false);
-    }
+  // "+ New Session" now just adds an empty draft tile — the user types the
+  // first prompt inside the tile's own composer. The draft's sid is swapped
+  // for the real one once the server assigns it (see promoteDraft below).
+  const handleNewSession = () => {
+    canvas.addDraft();
   };
+
+  // Called by a draft tile's Session when startNewSession returns a real
+  // sid. We swap the draft sentinel in place and mark the new sid as
+  // "pending" so the tile's next mount subscribes to the liveStore stream
+  // instead of racing to GET the (not-yet-flushed) jsonl.
+  const handleDraftPromoted = useCallback(
+    (newSid: string) => {
+      setPendingSids((cur) => {
+        if (cur.has(newSid)) return cur;
+        const next = new Set(cur);
+        next.add(newSid);
+        return next;
+      });
+      canvas.promoteDraft(newSid);
+      // Refresh the session list in the background so the sidebar picks up
+      // the new entry once the jsonl exists.
+      load();
+    },
+    [canvas, load],
+  );
+
+  const clearPending = useCallback((sid: string) => {
+    setPendingSids((cur) => {
+      if (!cur.has(sid)) return cur;
+      const next = new Set(cur);
+      next.delete(sid);
+      return next;
+    });
+  }, []);
 
   // dnd-kit reorder. rectSortingStrategy handles multi-column grids; the
   // sortable transform + transition on each tile give the FLIP animation
@@ -193,31 +212,11 @@ export function Workspace() {
           </span>
         </div>
         <div className="ws-canvas-actions">
-          <button className="ghost small" onClick={() => setShowNewInput((v) => !v)}>
+          <button className="ghost small" onClick={handleNewSession}>
             + New Session
           </button>
         </div>
       </header>
-
-      {showNewInput && (
-        <div className="ws-new-input">
-          <textarea
-            autoFocus
-            placeholder="What do you want to work on?"
-            value={newPrompt}
-            onChange={(e) => setNewPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleNewSession();
-              }
-            }}
-          />
-          <button className="primary small" disabled={creating} onClick={handleNewSession}>
-            {creating ? 'Creating…' : 'Start'}
-          </button>
-        </div>
-      )}
 
       {canvas.tiles.length === 0 ? (
         <div className="ws-canvas-empty">
@@ -243,15 +242,23 @@ export function Workspace() {
               }}
             >
               {canvas.tiles.map((tile) => {
-                const meta = sessions.find((x) => x.sessionId === tile.sid);
+                const draft = isDraftSid(tile.sid);
+                const meta = draft ? undefined : sessions.find((x) => x.sessionId === tile.sid);
                 const isFocused = canvas.focusedSid === tile.sid;
+                const label = draft
+                  ? 'New session'
+                  : meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8);
                 return (
                   <SortableTile
                     key={tile.sid}
                     tile={tile}
-                    label={meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8)}
+                    label={label}
                     isFocused={isFocused}
                     project={project}
+                    isDraft={draft}
+                    initialPending={pendingSids.has(tile.sid)}
+                    onPendingConsumed={() => clearPending(tile.sid)}
+                    onCreated={handleDraftPromoted}
                     onFocus={() => canvas.focus(tile.sid)}
                     onRemove={() => canvas.remove(tile.sid)}
                     onResizeStart={(e) => startResize(tile.sid, e)}
@@ -274,6 +281,10 @@ function SortableTile({
   label,
   isFocused,
   project,
+  isDraft,
+  initialPending,
+  onPendingConsumed,
+  onCreated,
   onFocus,
   onRemove,
   onResizeStart,
@@ -282,6 +293,10 @@ function SortableTile({
   label: string;
   isFocused: boolean;
   project: string;
+  isDraft: boolean;
+  initialPending: boolean;
+  onPendingConsumed: () => void;
+  onCreated: (newSid: string) => void;
   onFocus: () => void;
   onRemove: () => void;
   onResizeStart: (e: React.PointerEvent) => void;
@@ -364,6 +379,7 @@ function SortableTile({
       <div className="ws-tile-grip" {...attributes} {...listeners} title="Drag to reorder">
         <span className="ws-tile-grip-dots">⋮⋮</span>
         <span className="ws-tile-grip-label">{label}</span>
+        {!isDraft && (
         <button
           className="ws-tile-action"
           onPointerDown={(e) => e.stopPropagation()}
@@ -379,6 +395,8 @@ function SortableTile({
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
         </button>
+        )}
+        {!isDraft && (
         <button
           className="ws-tile-action"
           onPointerDown={(e) => e.stopPropagation()}
@@ -396,6 +414,7 @@ function SortableTile({
             <polyline points="3 21 3 16 8 16" />
           </svg>
         </button>
+        )}
         <button
           className="ws-tile-x"
           onPointerDown={(e) => e.stopPropagation()}
@@ -412,12 +431,19 @@ function SortableTile({
       <div className="ws-tile-body">
         <Session
           project={project}
-          sid={tile.sid}
+          // A draft tile has no real sid yet — Session's `isNew` branch is
+          // driven by `!sid`, so pass an empty string until promoteDraft
+          // swaps the sentinel for a real id (this whole tile then remounts
+          // with the real sid + `initialPending`).
+          sid={isDraft ? '' : tile.sid}
           focused={isFocused}
           onFocus={onFocus}
           hideBar
           refreshKey={refreshKey}
           onSendingChange={setIsRunning}
+          initialPending={initialPending}
+          onPendingConsumed={onPendingConsumed}
+          onCreated={onCreated}
         />
       </div>
       <div

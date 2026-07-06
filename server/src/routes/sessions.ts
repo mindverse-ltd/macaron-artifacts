@@ -8,6 +8,7 @@ import {
   readSessionMessages,
   readSessionSummary,
   rewindSession,
+  searchMessages,
   writeCompactedSession,
 } from '../lib/session-store.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
@@ -26,6 +27,17 @@ type MessageBody = {
 };
 
 export async function registerSessionRoutes(app: FastifyInstance): Promise<void> {
+  // Grep claude transcripts for a substring — backs the command palette's
+  // message search. Newest-first, capped at `limit` hits (see searchMessages).
+  app.get<{ Querystring: { q?: string; limit?: string } }>(
+    '/api/search/messages',
+    async ({ query }) => {
+      const q = String(query?.q || '');
+      const limit = Math.min(100, Math.max(1, parseInt(query?.limit || '30', 10) || 30));
+      return { hits: await searchMessages(q, limit) };
+    },
+  );
+
   app.get<{ Params: Params }>('/api/sessions/claude/:project/:sid', async ({ params }, reply) => {
     try {
       return await readSessionMessages(params.project, params.sid);

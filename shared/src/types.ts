@@ -80,7 +80,21 @@ export type SessionDetail = {
   mcpCount?: number;
 };
 
+// A transcript-search match — one message whose text contains the query.
+// The palette deep-links into the session via project+sessionId, and uses
+// `uuid` to scroll to the exact message when the session view is mounted.
+export type MessageSearchHit = {
+  project: string;
+  sessionId: string;
+  uuid?: string;
+  role: 'user' | 'assistant';
+  snippet: string;
+  preview: string;
+  mtime: number;
+};
+
 export type WorkspacesResponse = { workspaces: Workspace[] };
+export type MessageSearchResponse = { hits: MessageSearchHit[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
 export type HealthResponse = { ok: boolean; model: string };
 export type ConfigResponse = {

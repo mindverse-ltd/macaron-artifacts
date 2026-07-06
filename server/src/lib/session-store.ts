@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {
   Block,
   Message,
+  MessageSearchHit,
   SessionDetail,
   SessionListItem,
   UsageSnapshot,
@@ -475,6 +476,87 @@ export async function readSessionMessages(project: string, sid: string): Promise
     claudeMdCount,
     mcpCount,
   };
+}
+
+// Extract plain text from a jsonl user/assistant line's message content,
+// ignoring tool_use / tool_result / image blocks — noise for a text search.
+function lineText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const b of content as Array<{ type?: string; text?: string }>) {
+    if (b?.type === 'text' && b.text) parts.push(b.text);
+  }
+  return parts.join(' ');
+}
+
+// Whitespace-collapsed window around the first match so the palette row
+// shows context, not the whole message.
+function snippetAround(text: string, q: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const idx = flat.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return flat.slice(0, 180);
+  const start = Math.max(0, idx - 60);
+  const end = Math.min(flat.length, idx + q.length + 120);
+  return (start > 0 ? '…' : '') + flat.slice(start, end) + (end < flat.length ? '…' : '');
+}
+
+// Grep the claude transcripts for a substring, newest-first, stopping once
+// `limit` hits accumulate. Recency-biased on purpose: a palette wants the
+// last thing you touched, and bounding the scan to ~limit sessions keeps the
+// cost sane over a large ~/.claude/projects tree.
+export async function searchMessages(query: string, limit = 30): Promise<MessageSearchHit[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const ql = q.toLowerCase();
+  const sessions = await listAllSessions(); // sorted mtime desc
+  const hits: MessageSearchHit[] = [];
+  for (const s of sessions) {
+    if (hits.length >= limit) break;
+    const filePath = path.join(CLAUDE_PROJECTS, s.project, `${s.sessionId}.jsonl`);
+    let raw: string;
+    try {
+      const st = await fs.stat(filePath);
+      if (st.size > SESSION_TAIL_BYTES) {
+        const fh = await fs.open(filePath, 'r');
+        try {
+          const buf = Buffer.alloc(SESSION_TAIL_BYTES);
+          await fh.read(buf, 0, SESSION_TAIL_BYTES, st.size - SESSION_TAIL_BYTES);
+          raw = buf.toString('utf8');
+          const nl = raw.indexOf('\n');
+          if (nl !== -1) raw = raw.slice(nl + 1);
+        } finally {
+          await fh.close();
+        }
+      } else {
+        raw = await fs.readFile(filePath, 'utf8');
+      }
+    } catch {
+      continue;
+    }
+    for (const line of raw.split('\n')) {
+      if (hits.length >= limit) break;
+      if (!line.trim() || line.toLowerCase().indexOf(ql) < 0) continue; // cheap pre-filter
+      try {
+        const o = JSON.parse(line);
+        if ((o.type !== 'user' && o.type !== 'assistant') || o.isMeta) continue;
+        const text = lineText(o.message?.content);
+        if (text.toLowerCase().indexOf(ql) < 0) continue;
+        hits.push({
+          project: s.project,
+          sessionId: s.sessionId,
+          uuid: typeof o.uuid === 'string' ? o.uuid : undefined,
+          role: o.type,
+          snippet: snippetAround(text, q),
+          preview: s.preview,
+          mtime: s.mtime,
+        });
+      } catch {
+        /* skip malformed */
+      }
+    }
+  }
+  return hits;
 }
 
 async function countClaudeMd(cwd: string): Promise<number> {

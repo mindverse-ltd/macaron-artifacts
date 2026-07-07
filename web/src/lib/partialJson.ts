@@ -22,7 +22,7 @@ export function extractPartialCode(raw: string, field = 'code'): string {
 
 // partial-json with Allow.ARR completes an unclosed array but drops any element
 // that isn't a fully-closed string — so a chip appears only once its question
-// is whole, never half-typed. Mirrors free-chat's iterateSuggestion.
+// is whole, never half-typed.
 // We scan every '[' and keep the one yielding the MOST items rather than the
 // first that parses: the model's reply is relayed verbatim, so a non-Anthropic
 // provider may wrap the real array in prose that itself contains a decoy array

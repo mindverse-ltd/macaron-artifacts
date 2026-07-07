@@ -811,14 +811,17 @@ export function Session(props: SessionProps = {}) {
   const [followupRaw, setFollowupRaw] = useState('');
   const followupGen = useRef(0);
   const followups = useMemo(() => parseFollowups(followupRaw), [followupRaw]);
+  // Clear the chips and invalidate any deltas still streaming from a superseded
+  // follow-up query, atomically. Returns the new generation so a producer can
+  // capture it as its token; call sites that only need to reset ignore it.
+  const resetFollowups = useCallback(() => { setFollowupRaw(''); return ++followupGen.current; }, []);
   // First-turn follow-ups stream over an independent live-store channel that
   // outlives the main turn's `done` (which clears the live store). 2nd+ turns
   // deliver follow-ups via streamSession's onFollowupDelta instead. Not gated
   // on isPending — the canvas path flips it right at `done`, before the
   // follow-up stream even starts.
   useEffect(() => {
-    const gen = ++followupGen.current;
-    setFollowupRaw('');
+    const gen = resetFollowups();
     return subscribeFollowup(sid, (text) => {
       if (followupGen.current !== gen) return;
       setFollowupRaw((prev) => prev + text);
@@ -1241,8 +1244,7 @@ export function Session(props: SessionProps = {}) {
       setImages([]);
       // New turn ⇒ new follow-up generation: clears the chips and invalidates
       // any deltas still streaming from the previous turn's follow-up query.
-      const fGen = ++followupGen.current;
-      setFollowupRaw('');
+      const fGen = resetFollowups();
       // Persist to prompt history + reset navigation state.
       const nextHistory = pushHistory(project, text);
       setHistory(nextHistory);
@@ -1547,8 +1549,7 @@ export function Session(props: SessionProps = {}) {
                 key={`${q}-${i}`}
                 className="ti-followup-chip"
                 onClick={() => {
-                  ++followupGen.current;
-                  setFollowupRaw('');
+                  resetFollowups();
                   setInput(q);
                 }}
               >
@@ -1659,10 +1660,7 @@ export function Session(props: SessionProps = {}) {
           value={input}
           disabled={sending}
           onChange={(e) => {
-            if (followupRaw) {
-              ++followupGen.current;
-              setFollowupRaw('');
-            }
+            if (followupRaw) resetFollowups();
             setInput(e.target.value);
             // Any manual edit exits history-navigation mode — pressing
             // Send now sends the (possibly edited) text as a fresh entry.

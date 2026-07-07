@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
-import { makeAuthHook, resolveToken } from './lib/auth.js';
+import { makeAuthHook, redactTokenInUrl, resolveToken } from './lib/auth.js';
 import { warmSettingsCache } from './lib/settings-store.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
 import { checkGenUI } from './lib/genui-check.js';
@@ -19,7 +19,22 @@ import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
 
 const app = Fastify({
-  logger: { level: process.env.MACARON_LOG_LEVEL || 'info' },
+  logger: {
+    level: process.env.MACARON_LOG_LEVEL || 'info',
+    // pino's default req serializer logs req.url verbatim, so a `?token=` share
+    // link would land in every request line. Strip the token before it's logged.
+    serializers: {
+      req(req) {
+        return {
+          method: req.method,
+          url: redactTokenInUrl(req.url),
+          host: req.host,
+          remoteAddress: req.ip,
+          remotePort: req.socket?.remotePort,
+        };
+      },
+    },
+  },
   // Disable strict trailing-slash for friendlier URLs.
   ignoreTrailingSlash: true,
   // Allow large request bodies (genui prompts can grow).
@@ -81,7 +96,10 @@ try {
   app.log.info(`macaron server listening on http://${HOST}:${PORT}`);
   if (authGenerated) {
     app.log.warn(`bound to non-loopback host ${HOST} with no MACARON_AUTH_TOKEN — generated one for this run.`);
-    app.log.warn(`connect from another device with: http://${HOST}:${PORT}/?token=${authToken}`);
+    // The token is a live credential — keep it out of the structured log (which may be
+    // shipped off-box) and print the connection string straight to stdout so the operator
+    // can still grab it from their own terminal on first launch.
+    console.log(`connect from another device with: http://${HOST}:${PORT}/?token=${authToken}`);
   } else if (authToken) {
     app.log.info('server auth enabled (MACARON_AUTH_TOKEN) — remote requests require the token.');
   }

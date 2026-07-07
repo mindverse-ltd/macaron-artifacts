@@ -58,6 +58,14 @@ export function extractToken(req: FastifyRequest): string {
   return typeof q === 'string' ? q : '';
 }
 
+// The `token` query param doubles as a share-link credential, so it must never
+// reach the logs. Fastify/pino's default req serializer logs `req.url` verbatim
+// (query and all) on every request — strip any token value before it lands in
+// structured output.
+export function redactTokenInUrl(url: string): string {
+  return url.replace(/([?&]token=)[^&#]*/gi, '$1[redacted]');
+}
+
 // Fastify onRequest hook. No-op when auth is off; otherwise 401s any protected
 // request that isn't from loopback and doesn't carry a valid token.
 export function makeAuthHook(token: string) {

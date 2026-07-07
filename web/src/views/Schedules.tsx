@@ -5,10 +5,11 @@ import { useConfirm } from '../components/Confirm';
 
 const BLANK: ScheduleInput = { name: '', prompt: '', engine: 'claude', cwd: '', pattern: '', oneShot: false };
 
-// claude project encoding mirrors the CLI: '/a/b' → '-a-b'. Best-effort so the
-// last-run deep-link points at the right workspace tile.
+// claude project encoding mirrors the CLI: every non-alphanumeric char in the
+// cwd becomes '-' (e.g. '/a/.codex' → '-a--codex'), not just '/'. Best-effort so
+// the last-run deep-link points at the right workspace tile.
 function encodeProject(cwd: string): string {
-  return cwd.replace(/\//g, '-');
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 function fmtWhen(ms: number | null): string {
@@ -31,7 +32,7 @@ export function Schedules() {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const load = () => api.schedules().then((r) => setSchedules(r.schedules)).catch((e) => setError((e as Error).message));
+  const load = () => api.schedules().then((r) => { setSchedules(r.schedules); setError(''); }).catch((e) => setError((e as Error).message));
 
   useEffect(() => {
     load();

@@ -64,7 +64,12 @@ async function readRaw(): Promise<{ full: Record<string, unknown>; servers: Reco
   let raw: string;
   try {
     raw = await fs.readFile(CLAUDE_JSON, 'utf8');
-  } catch {
+  } catch (e) {
+    // Only a MISSING file is safe to treat as empty. A file that EXISTS but is
+    // unreadable (EACCES, EIO, EMFILE/ENFILE on a busy host) must rethrow —
+    // returning {} here would make the next writeServers clobber the whole
+    // ~/.claude.json (OAuth, projects, history) with { mcpServers: {…} }.
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     return { full: {}, servers: {} };
   }
   const full = JSON.parse(raw) as Record<string, unknown>;
@@ -76,12 +81,22 @@ async function readRaw(): Promise<{ full: Record<string, unknown>; servers: Reco
 async function writeServers(full: Record<string, unknown>, servers: Record<string, RawMcpServer>): Promise<void> {
   full.mcpServers = servers;
   await fs.mkdir(path.dirname(CLAUDE_JSON), { recursive: true });
-  await fs.writeFile(CLAUDE_JSON, JSON.stringify(full, null, 2), 'utf8');
+  // Atomic replace: write to a temp file in the same dir, then rename over the
+  // target (atomic on POSIX). A plain truncate-then-write would leave the whole
+  // multi-key ~/.claude.json truncated if the process dies mid-write.
+  const tmp = `${CLAUDE_JSON}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(full, null, 2), 'utf8');
+  await fs.rename(tmp, CLAUDE_JSON);
 }
 
 function inferTransport(s: RawMcpServer): McpTransport {
+  // Trust the explicit `type` first. Inferring from `command` before checking
+  // `type` would misread an http/sse entry that carries a stray `command` as
+  // stdio — toPublic then hides its url and the next save deletes it.
+  const t = String(s.type || '').toLowerCase();
+  if (t === 'stdio' || t === 'http' || t === 'sse') return t;
   if (s.command) return 'stdio';
-  return String(s.type || '').toLowerCase() === 'sse' ? 'sse' : 'http';
+  return 'http';
 }
 
 function maskMap(m: Record<string, string> | undefined): Record<string, string> | undefined {

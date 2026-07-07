@@ -1170,13 +1170,17 @@ export function Session(props: SessionProps = {}) {
   const tail = items.slice(-shown);
 
   // Opening an already-idle session (last item is an assistant reply, nothing
-  // streaming) surfaces follow-ups too — not only the instant a turn ends. One
-  // shot per sid; the generation guard drops deltas from a session we've since
-  // left, and the followupRaw check skips it once a turn's chips already exist.
+  // streaming) surfaces follow-ups too — not only the instant a turn ends.
+  // Fires once per sid: after our OWN turn `onDone` flips `sending` false while
+  // the message stream is still open, so without this latch the effect would
+  // re-run and fire a duplicate /followups query — bumping the generation and
+  // starving the in-flight post-turn deltas. sid change ⇒ remount ⇒ ref resets.
   const lastItemKind = items[items.length - 1]?.kind;
+  const idleFollowupFired = useRef(false);
   useEffect(() => {
     if (isNew || isPending || sending || polling) return;
-    if (lastItemKind !== 'assistant' || followupRaw) return;
+    if (lastItemKind !== 'assistant' || followupRaw || idleFollowupFired.current) return;
+    idleFollowupFired.current = true;
     const gen = ++followupGen.current;
     void streamSession(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/followups`,

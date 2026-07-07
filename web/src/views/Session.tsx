@@ -53,7 +53,7 @@ type Item =
   | { id: string; kind: 'user'; parts: MsgPart[]; uuid?: string }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'thinking'; text: string }
-  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string }
+  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; isError?: boolean }
   | { id: string; kind: 'todo'; todos: TodoEntry[] }
   | { id: string; kind: 'system_event'; eventType: string; text: string }
   | { id: string; kind: 'genui'; toolUseId: string; prompt: string; code?: string; status: 'pending' | 'ready' | 'error'; error?: string }
@@ -628,7 +628,7 @@ function ItemView({
       // Edit/Write/MultiEdit render as an inline diff card; every other tool
       // (and any edit whose input hasn't fully streamed yet) uses the plain row.
       const diff = isDiffTool(it.name) ? extractDiff(it.name, it.input) : null;
-      return diff ? <DiffCard name={it.name} diff={diff} /> : <ToolItem name={it.name} input={it.input} result={it.result} />;
+      return diff ? <DiffCard name={it.name} diff={diff} result={it.result} isError={it.isError} /> : <ToolItem name={it.name} input={it.input} result={it.result} />;
     }
     case 'todo':
       return <TodoItem todos={it.todos} />;
@@ -1318,16 +1318,19 @@ export function Session(props: SessionProps = {}) {
             );
           },
           onToolInputDone: ({ id, name, final_json }) => {
-            if (!isRenderUITool(name)) return;
             try {
               const obj = JSON.parse(final_json);
-              if (typeof obj?.code === 'string') {
+              if (isRenderUITool(name) && typeof obj?.code === 'string') {
                 setLiveTurn((cur) =>
                   cur.map((t) =>
                     t.kind === 'genui' && t.toolUseId === id
                       ? { ...t, status: 'ready', code: obj.code }
                       : t,
                   ),
+                );
+              } else if (isDiffTool(name)) {
+                setLiveTurn((cur) =>
+                  cur.map((t) => (t.kind === 'tool' && t.id === `live-${id}` ? { ...t, input: obj } : t)),
                 );
               }
             } catch { /* tolerate parse fail; stream still delivers */ }
@@ -1379,7 +1382,7 @@ export function Session(props: SessionProps = {}) {
                   return { ...t, status: 'ready' };
                 }
                 if (t.kind === 'tool' && (t.id === `live-${tool_use_id}`)) {
-                  return { ...t, result: resultText };
+                  return { ...t, result: resultText, isError };
                 }
                 return t;
               }),

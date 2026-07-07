@@ -41,10 +41,21 @@ export function extractDiff(name: string, input: unknown): ParsedDiff | null {
 function countChanges(hunks: DiffHunk[]): { plus: number; minus: number } {
   let plus = 0, minus = 0;
   for (const h of hunks) {
-    if (h.oldText) minus += h.oldText.split('\n').length;
-    if (h.newText) plus += h.newText.split('\n').length;
+    if (h.oldText) minus += toLines(h.oldText).length;
+    if (h.newText) plus += toLines(h.newText).length;
   }
   return { plus, minus };
+}
+
+function toLines(text: string): string[] {
+  return text.replace(/\n$/, '').split('\n');
+}
+
+function isFailureResult(result?: string, isError?: boolean): boolean {
+  if (isError) return true;
+  const t = result?.trim();
+  if (!t) return false;
+  return !/^The file .* (has been (updated|created) successfully|file state is current)/.test(t);
 }
 
 // …parent/file.ext — same tail the plain tool header shows for file tools.
@@ -56,12 +67,14 @@ function shortPath(p: string): string {
 // flood the thread. Mirrors sugyan's 20-line threshold.
 const AUTO_EXPAND_MAX_LINES = 20;
 
-export function DiffCard({ name, diff }: { name: string; diff: ParsedDiff }) {
+export function DiffCard({ name, diff, result, isError }: { name: string; diff: ParsedDiff; result?: string; isError?: boolean }) {
   const { plus, minus } = countChanges(diff.hunks);
-  const [open, setOpen] = useState(plus + minus <= AUTO_EXPAND_MAX_LINES);
+  const canCollapse = plus + minus > AUTO_EXPAND_MAX_LINES;
+  const failed = isFailureResult(result, isError);
+  const [open, setOpen] = useState(!canCollapse);
 
   return (
-    <div className="ti-diff">
+    <div className={'ti-diff' + (failed ? ' err' : '')}>
       <div className="ti-diff-head">
         <span className="ti-dot">●</span>
         <span className="ti-tool-name">{name}</span>
@@ -77,16 +90,24 @@ export function DiffCard({ name, diff }: { name: string; diff: ParsedDiff }) {
           {diff.hunks.map((h, i) => <HunkView key={i} hunk={h} />)}
         </div>
       )}
-      <button className="ti-expand" onClick={() => setOpen((v) => !v)}>
-        {open ? '↑ collapse' : `… expand diff (+${plus} −${minus})`}
-      </button>
+      {failed && result?.trim() && (
+        <div className="ti-tool-out ti-diff-result">
+          <span className="ti-rail">└</span>
+          <div className="ti-tool-body"><pre>{result}</pre></div>
+        </div>
+      )}
+      {canCollapse && (
+        <button className="ti-expand" onClick={() => setOpen((v) => !v)}>
+          {open ? '↑ collapse' : `… expand diff (+${plus} −${minus})`}
+        </button>
+      )}
     </div>
   );
 }
 
 function HunkView({ hunk }: { hunk: DiffHunk }) {
-  const oldLines = hunk.oldText ? hunk.oldText.split('\n') : [];
-  const newLines = hunk.newText ? hunk.newText.split('\n') : [];
+  const oldLines = hunk.oldText ? toLines(hunk.oldText) : [];
+  const newLines = hunk.newText ? toLines(hunk.newText) : [];
   return (
     <div className="ti-diff-hunk">
       {hunk.replaceAll && <div className="ti-diff-tag">replace_all</div>}

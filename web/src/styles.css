@@ -712,6 +712,12 @@ textarea:focus, select:focus, input:focus {
   background: var(--surface);
   font-family: var(--font-mono);
 }
+.ti-diff.err {
+  border-color: rgba(192, 82, 74, 0.55);
+}
+.ti-diff.err .ti-dot {
+  color: var(--bad);
+}
 .ti-diff-head {
   display: flex;
   align-items: baseline;
@@ -762,6 +768,11 @@ textarea:focus, select:focus, input:focus {
 .ti-diff-code {
   white-space: pre;
   color: var(--text);
+}
+.ti-diff-result {
+  margin: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
 }
 .ti-diff .ti-expand { padding: 4px 10px; }
 

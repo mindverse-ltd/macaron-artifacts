@@ -41,8 +41,12 @@ export async function registerTerminalRoutes(app: FastifyInstance): Promise<void
       } catch (e) {
         return reply.status(400).send({ error: `cwd unusable: ${cwd} (${(e as Error).message})` });
       }
+      try {
+        getOrCreatePty(req.params.tid, { cwd, cols, rows });
+      } catch (e) {
+        return reply.status(500).send({ error: (e as Error).message });
+      }
       startSSE(reply);
-      getOrCreatePty(req.params.tid, { cwd, cols, rows });
       ptySubscribe(req.params.tid, reply);
     },
   );

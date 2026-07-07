@@ -247,7 +247,7 @@ export function Workspace() {
                 const isFocused = canvas.focusedSid === tile.sid;
                 const label = draft
                   ? 'New session'
-                  : meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8);
+                  : meta?.label || meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8);
                 return (
                   <SortableTile
                     key={tile.sid}

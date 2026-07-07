@@ -24,6 +24,9 @@ export type SessionListItem = {
   gitBranch?: string;
   sessionId: string;
   preview: string;
+  // User-assigned human label, stored in a macaron sidecar (not in the
+  // Claude-owned jsonl). Takes display precedence over `preview` when set.
+  label?: string;
   messageCount: number;
   messageCountSuffix?: string;
   mtime: number;

@@ -25,6 +25,9 @@ export function Sidebar() {
   // Per-workspace set of canvas-pinned sids, so the session rows can show
   // + / ✓ toggles. Re-reads from localStorage whenever a canvas changes.
   const [canvasBy, setCanvasBy] = useState<Record<string, string[]>>({});
+  // sid currently in inline-rename mode (its name span becomes an <input>).
+  const [renamingSid, setRenamingSid] = useState<string>('');
+  const [renameDraft, setRenameDraft] = useState<string>('');
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
@@ -134,6 +137,22 @@ export function Sidebar() {
     });
   };
 
+  const startRename = (s: SessionListItem) => {
+    setRenamingSid(s.sessionId);
+    setRenameDraft(s.label || '');
+  };
+
+  const commitRename = async (project: string, sid: string) => {
+    const name = renameDraft.trim();
+    setRenamingSid('');
+    try {
+      await api.setSessionLabel(project, sid, name);
+      loadData();
+    } catch (err) {
+      toast(`rename failed: ${(err as Error).message}`);
+    }
+  };
+
   const sessMenu = (w: WsData, s: SessionListItem, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -148,6 +167,11 @@ export function Sidebar() {
             navigate(
               `/w/${encodeURIComponent(w.project)}/s/${encodeURIComponent(s.sessionId)}`,
             ),
+        },
+        {
+          icon: '✎',
+          label: 'Rename',
+          onClick: () => startRename(s),
         },
         {
           icon: '⊕',
@@ -260,9 +284,25 @@ export function Sidebar() {
                         onContextMenu={(e) => sessMenu(w, s, e)}
                       >
                         <span className={'sb-sess-dot sb-sess-dot-' + st} />
-                        <span className="sb-sess-name">
-                          {s.preview || s.sessionId.slice(0, 8)}
-                        </span>
+                        {renamingSid === s.sessionId ? (
+                          <input
+                            className="sb-sess-rename"
+                            value={renameDraft}
+                            autoFocus
+                            placeholder={s.preview || s.sessionId.slice(0, 8)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onBlur={() => commitRename(w.project, s.sessionId)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitRename(w.project, s.sessionId);
+                              else if (e.key === 'Escape') setRenamingSid('');
+                            }}
+                          />
+                        ) : (
+                          <span className="sb-sess-name">
+                            {s.label || s.preview || s.sessionId.slice(0, 8)}
+                          </span>
+                        )}
                         <button
                           type="button"
                           className={'sb-sess-pin' + (pinned ? ' pinned' : '')}

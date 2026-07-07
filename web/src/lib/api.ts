@@ -102,6 +102,15 @@ export const api = {
     );
     if (!r.ok) throw new Error(`http ${r.status}`);
   },
+  setSessionLabel: (project: string, sid: string, name: string) =>
+    req<{ ok: true; label: string }>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/label`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      },
+    ),
   duplicateSession: (project: string, sid: string) =>
     req<{ ok: true; newSid: string }>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/duplicate`,

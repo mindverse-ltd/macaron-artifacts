@@ -79,10 +79,13 @@ function isNoisyUserText(t: string): boolean {
 function flatten(messages: Message[]): Item[] {
   const out: Item[] = [];
   let i = 0;
-  let lastTool: Extract<Item, { kind: 'tool' }> | null = null;
-  // Timestamp of the message that emitted `lastTool`'s tool_use — paired with
-  // the tool_result message's timestamp to derive the call's wall-clock time.
-  let lastToolTs: string | undefined;
+  type PairedTool = Extract<Item, { kind: 'tool' | 'genui' }>;
+  type PendingTool = { item: PairedTool; ts?: string };
+  const pendingTools = new Map<string, PendingTool>();
+  // Legacy fallback for older/malformed transcripts without toolUseId. Normal
+  // Claude turns can emit multiple tool_use blocks before any tool_result, so
+  // id-based pairing below is the load-bearing path.
+  let fallbackTool: PendingTool | null = null;
   // TodoWrite fires repeatedly with the full task list each time. Only the
   // latest snapshot is meaningful, so we track its slot in `out` and splice
   // out the previous one when a new one arrives — this mirrors the CLI which
@@ -98,7 +101,7 @@ function flatten(messages: Message[]): Item[] {
           out.push({ id: `sys${i++}`, kind: 'system_event', eventType: b.eventType, text: b.text });
         }
       }
-      lastTool = null;
+      fallbackTool = null;
       continue;
     }
     // Collect any text + image blocks the user sent in this message into a
@@ -119,14 +122,14 @@ function flatten(messages: Message[]): Item[] {
     for (const b of m.blocks) {
       if (m.role !== 'user' && b.kind === 'text') {
         if (b.text.trim()) out.push({ id: `a${i++}`, kind: 'assistant', text: b.text });
-        lastTool = null;
+        fallbackTool = null;
       } else if (b.kind === 'thinking') {
         if (b.text.trim()) out.push({ id: `t${i++}`, kind: 'thinking', text: b.text });
-        lastTool = null;
+        fallbackTool = null;
       } else if (m.role !== 'user' && b.kind === 'image') {
         // Very rare — assistant emitting an image. Keep in its own row.
         out.push({ id: `img${i++}`, kind: 'assistant-image', mimeType: b.mimeType, data: b.data });
-        lastTool = null;
+        fallbackTool = null;
       } else if (b.kind === 'tool_use') {
         if (isTodoWriteTool(b.name)) {
           const input = (b.input || {}) as { todos?: TodoEntry[] };
@@ -141,7 +144,7 @@ function flatten(messages: Message[]): Item[] {
           out.push({ id: `todo${i++}`, kind: 'todo', todos });
           // TodoWrite's tool_result is just an ACK — don't chain it to
           // anything real.
-          lastTool = null;
+          fallbackTool = null;
         } else if (isRenderUITool(b.name)) {
           // Claude writes the TSX directly into the tool_use input.code field;
           // jsonl persists it. We use that as the rendered code immediately.
@@ -164,9 +167,11 @@ function flatten(messages: Message[]): Item[] {
             status: code ? 'ready' : 'pending',
           };
           out.push(it);
-          // Reuse lastTool slot so the next tool_result lands here.
-          lastTool = it as unknown as Extract<Item, { kind: 'tool' }>;
+          const pending = { item: it as PairedTool, ts: m.timestamp };
+          pendingTools.set(toolUseId, pending);
+          fallbackTool = pending;
         } else {
+          const toolUseId = (b as unknown as { id?: string }).id || `synthetic-${i}`;
           const it: Extract<Item, { kind: 'tool' }> = {
             id: `tool${i++}`,
             kind: 'tool',
@@ -174,13 +179,16 @@ function flatten(messages: Message[]): Item[] {
             input: b.input,
           };
           out.push(it);
-          lastTool = it;
-          lastToolTs = m.timestamp;
+          const pending = { item: it as PairedTool, ts: m.timestamp };
+          pendingTools.set(toolUseId, pending);
+          fallbackTool = pending;
         }
       } else if (b.kind === 'tool_result') {
-        if (lastTool) {
-          if ((lastTool as unknown as Item).kind === 'genui') {
-            const g = lastTool as unknown as Extract<Item, { kind: 'genui' }>;
+        const pending = b.toolUseId ? pendingTools.get(b.toolUseId) : fallbackTool;
+        const item = pending?.item;
+        if (item) {
+          if (item.kind === 'genui') {
+            const g = item;
             const t = b.text || '';
             if (t.startsWith('render_ui failed:')) {
               g.status = 'error';
@@ -189,14 +197,14 @@ function flatten(messages: Message[]): Item[] {
               g.status = 'ready';
             }
           } else {
-            lastTool.result = (lastTool.result ? lastTool.result + '\n' : '') + b.text;
-            if (b.isError) lastTool.isError = true;
+            item.result = (item.result ? item.result + '\n' : '') + b.text;
+            if (b.isError) item.isError = true;
             // Wall-clock = result message time − tool_use message time. Both
             // are best-effort ISO strings; leave undefined if either is absent
             // or the delta is nonsensical (clock skew / same-line messages).
-            if (lastToolTs && m.timestamp) {
-              const d = new Date(m.timestamp).getTime() - new Date(lastToolTs).getTime();
-              if (Number.isFinite(d) && d >= 0) lastTool.durationMs = d;
+            if (pending.ts && m.timestamp) {
+              const d = new Date(m.timestamp).getTime() - new Date(pending.ts).getTime();
+              if (Number.isFinite(d) && d >= 0) item.durationMs = d;
             }
           }
         }

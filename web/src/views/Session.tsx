@@ -1683,9 +1683,8 @@ export function Session(props: SessionProps = {}) {
         )}
         <textarea
           rows={2}
-          placeholder="Reply to Claude…"
+          placeholder={sending ? 'Draft next message…' : 'Reply to Claude…'}
           value={input}
-          disabled={sending}
           onChange={(e) => {
             if (followupRaw) resetFollowups();
             setInput(e.target.value);

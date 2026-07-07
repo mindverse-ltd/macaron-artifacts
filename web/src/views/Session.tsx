@@ -1543,7 +1543,15 @@ export function Session(props: SessionProps = {}) {
         {followups.length > 0 && (
           <div className="ti-followups">
             {followups.map((q, i) => (
-              <button key={i} className="ti-followup-chip" onClick={() => setInput(q)}>
+              <button
+                key={`${q}-${i}`}
+                className="ti-followup-chip"
+                onClick={() => {
+                  ++followupGen.current;
+                  setFollowupRaw('');
+                  setInput(q);
+                }}
+              >
                 {q}
               </button>
             ))}
@@ -1651,6 +1659,10 @@ export function Session(props: SessionProps = {}) {
           value={input}
           disabled={sending}
           onChange={(e) => {
+            if (followupRaw) {
+              ++followupGen.current;
+              setFollowupRaw('');
+            }
             setInput(e.target.value);
             // Any manual edit exits history-navigation mode — pressing
             // Send now sends the (possibly edited) text as a fresh entry.

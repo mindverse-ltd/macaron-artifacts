@@ -12,7 +12,7 @@ import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, runFollowup, type AttachedImage } from '../lib/claude-runner.js';
 import { registerRun, endRun } from '../lib/active-runs.js';
-import { getActiveProviderEnv } from '../lib/settings-store.js';
+import { getActiveProviderEnv, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
 
 type Params = { project: string };
 type NewSessionBody = {
@@ -162,10 +162,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             // Same post-turn follow-up as the resume path: stream a throwaway,
             // persistSession:false query resuming this fresh session (shared
             // prefix → cache hit). Best-effort; never blocks the turn close.
-            // `followup_done` always fires so the client can tear down its
+            // When enabled, `followup_done` lets the client tear down its
             // live-store subscription (see sessions.ts for the full rationale).
             // Gated on exitCode 0 so an abort/error stays identical to before.
-            if (!clientGone && capturedSid && ev.exitCode === 0) {
+            if (!clientGone && capturedSid && ev.exitCode === 0 && getFollowupSuggestionsEnabled()) {
               try {
                 for await (const delta of runFollowup({ resume: capturedSid, cwd, model, envOverrides: providerEnv })) {
                   if (clientGone) break;

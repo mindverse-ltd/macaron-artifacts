@@ -13,7 +13,7 @@ import {
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveGet } from '../lib/live-registry.js';
 import { runClaude, runFollowup, type AttachedImage } from '../lib/claude-runner.js';
-import { getActiveProviderEnv, getActiveProviderRaw } from '../lib/settings-store.js';
+import { getActiveProviderEnv, getActiveProviderRaw, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
 import { resolvePending } from '../lib/permission-registry.js';
 
@@ -306,14 +306,14 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
             // text delta is forwarded as a `followup_delta` event; the WebUI
             // accumulates + parses incrementally with partial-json. Best-effort
             // — any failure is swallowed, never blocks the turn's close.
-            // `followup_done` always fires (even on failure/abort) so the
+            // When enabled, `followup_done` fires even on failure so the
             // client can tear down its live-store subscription — without it,
             // the first-turn path clears the store on `done` and loses every
             // delta that streams afterward.
             // Only on a clean finish (exitCode 0): a Stop (abort → -1) or a
             // mid-turn error must stay byte-identical to pre-feature behavior,
             // never spinning up a follow-up query on an aborted transcript.
-            if (!clientGone && ev.exitCode === 0) {
+            if (!clientGone && ev.exitCode === 0 && getFollowupSuggestionsEnabled()) {
               try {
                 for await (const delta of runFollowup({ resume: sid, cwd, model: providerModel, envOverrides: providerEnv })) {
                   if (clientGone) break;

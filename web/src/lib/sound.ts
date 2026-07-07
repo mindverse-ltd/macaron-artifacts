@@ -190,6 +190,7 @@ function audioCtx(): AudioContext | null {
 }
 
 function renderNotes(notes: Note[], master: number): void {
+  if (master <= 0) return;
   const ac = audioCtx();
   if (!ac) return;
   if (ac.state === 'suspended') void ac.resume();
@@ -200,7 +201,7 @@ function renderNotes(notes: Note[], master: number): void {
     osc.type = n.type;
     osc.frequency.value = n.freq;
     const start = t0 + n.at;
-    const peak = Math.max(0, Math.min(1, n.gain * master));
+    const peak = Math.max(0.0001, Math.min(1, n.gain * master));
     // Linear attack then exponential decay — exponentialRamp can't reach 0,
     // so we floor at a tiny value and stop the node right after.
     g.gain.setValueAtTime(0.0001, start);

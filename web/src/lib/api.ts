@@ -8,6 +8,8 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  SkillInfo,
+  SkillDetail,
 } from '@macaron/shared';
 
 import type {
@@ -15,6 +17,8 @@ import type {
   WorkspaceDetailResponse,
   SessionDetail,
   HealthResponse,
+  SkillInfo,
+  SkillDetail,
 } from '@macaron/shared';
 
 export async function getJSON<T>(url: string): Promise<T> {
@@ -87,6 +91,21 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
+    }),
+
+  skills: () => getJSON<{ skills: SkillInfo[] }>('/api/skills'),
+  skill: (dir: string) => getJSON<SkillDetail>(`/api/skills/${encodeURIComponent(dir)}`),
+  setSkillEnabled: (dir: string, enabled: boolean) =>
+    req<{ skills: SkillInfo[] }>(`/api/skills/${encodeURIComponent(dir)}/enabled`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+  createSkill: (input: { name: string; description: string; body?: string }) =>
+    req<{ dir: string; skills: SkillInfo[] }>('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
     }),
   workspaces: () => getJSON<WorkspacesResponse>('/api/workspaces'),
   workspace: (project: string) =>

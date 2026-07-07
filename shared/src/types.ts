@@ -80,6 +80,25 @@ export type SessionDetail = {
   mcpCount?: number;
 };
 
+// A Claude Code skill discovered under ~/.claude/skills/<name>/SKILL.md.
+// `name`/`description` come from the SKILL.md YAML frontmatter; `enabled`
+// reflects the skillOverrides entry in ~/.claude/settings.json (a skill with
+// no override is enabled by default). `source` marks whether the dir is a
+// symlink (managed elsewhere) so the UI can warn before editing/deleting.
+export type SkillInfo = {
+  // Directory name — the identifier used for skillOverrides + the /skill-name command.
+  dir: string;
+  name: string;
+  description: string;
+  allowedTools?: string;
+  enabled: boolean;
+  source: 'dir' | 'symlink';
+};
+
+export type SkillsResponse = { skills: SkillInfo[] };
+// Full SKILL.md body for the detail/editor pane.
+export type SkillDetail = SkillInfo & { body: string; path: string };
+
 export type WorkspacesResponse = { workspaces: Workspace[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
 export type HealthResponse = { ok: boolean; model: string };

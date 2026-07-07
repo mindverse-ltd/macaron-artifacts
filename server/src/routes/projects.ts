@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { PROJECTS_ROOT } from '../config.js';
-import { registerProjectCwd } from '../lib/project-registry.js';
+import { encodeClaudeProjectName, registerProjectCwd } from '../lib/project-registry.js';
 
 type CreateBody = { name?: string; gitUrl?: string };
 
@@ -28,7 +28,7 @@ function repoNameFromUrl(url: string): string | undefined {
   try {
     const u = new URL(normalized);
     const parts = u.pathname.split('/').filter(Boolean);
-    const slug = parts.length >= 2 ? parts[1] : parts[0];
+    const slug = parts.at(-1);
     if (slug && NAME_RE.test(slug)) return slug;
   } catch {
     /* scp-style git@host:owner/repo falls through */
@@ -104,6 +104,13 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
 
     try {
       await fs.mkdir(PROJECTS_ROOT, { recursive: true });
+      const encodedDest = encodeClaudeProjectName(dest);
+      for (const sibling of await fs.readdir(PROJECTS_ROOT)) {
+        if (sibling === name || sibling.startsWith('.')) continue;
+        if (encodeClaudeProjectName(path.join(PROJECTS_ROOT, sibling)) === encodedDest) {
+          return reply.status(409).send({ error: `name collides with existing project "${sibling}" in Claude's project encoding` });
+        }
+      }
       // `mkdir` without recursive throws EEXIST if the dir is already there —
       // that's the guard against clobbering an existing project.
       await fs.mkdir(dest);

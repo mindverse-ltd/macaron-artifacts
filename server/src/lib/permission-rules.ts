@@ -31,9 +31,14 @@ const sessionRules = new Map<string, Set<string>>();
 // `sudo ls` would silently auto-approve `sudo rm -rf /`.
 const TWO_WORD = new Set(['sudo', 'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'bunx', 'pnpx', 'docker', 'cargo', 'go', 'kubectl']);
 
-// Split a shell line into sub-commands on unquoted && || ; | & operators.
-// Quoted/backtick spans are treated opaquely so a separator inside a string
-// doesn't mis-split (same limitation the references ship with).
+// Split a shell line into sub-commands on unquoted && || ; | & and newline
+// operators. Quoted/backtick spans are treated opaquely so a separator inside
+// a string doesn't mis-split (same limitation the references ship with).
+//
+// Newlines matter: a bare `\n` is a command separator in the shell, so a
+// multi-line command like `git status\nrm -rf ~` runs BOTH lines. Without
+// splitting on it, only the first line's prefix keyed the call, letting a
+// remembered `git status` silently auto-approve the second line.
 //
 // KNOWN GAP: `$(...)` / backtick command substitution is NOT a split boundary,
 // so `echo $(rm -rf /)` keys as `Bash(echo)` while the shell still runs the
@@ -53,7 +58,7 @@ function splitCompound(cmd: string): string[] {
     }
     if (c === '"' || c === "'" || c === '`') { quote = c; cur += c; continue; }
     if (cmd.slice(i, i + 2) === '&&' || cmd.slice(i, i + 2) === '||') { parts.push(cur); cur = ''; i++; continue; }
-    if (c === ';' || c === '|' || c === '&') { parts.push(cur); cur = ''; continue; }
+    if (c === ';' || c === '|' || c === '&' || c === '\n' || c === '\r') { parts.push(cur); cur = ''; continue; }
     cur += c;
   }
   parts.push(cur);

@@ -13,7 +13,7 @@ import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, type AttachedImage } from '../lib/claude-runner.js';
 import { registerRun, endRun } from '../lib/active-runs.js';
 import { getActiveProviderEnv } from '../lib/settings-store.js';
-import { createWorktree, bindWorktree, type PendingWorktree } from '../lib/worktree-store.js';
+import { createWorktree, bindWorktree, cleanupPendingWorktree, type PendingWorktree } from '../lib/worktree-store.js';
 
 type Params = { project: string };
 type NewSessionBody = {
@@ -181,9 +181,14 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             if (!clientGone) sseDone(reply);
           }
         }
+        // Stream ended without ever emitting a session (startup failure: bad
+        // provider/auth/model). Tear down the pre-created worktree so it doesn't
+        // leak untracked — bindWorktree only runs when capturedSid is set.
+        if (pendingWt && !capturedSid) await cleanupPendingWorktree(pendingWt);
       })().catch((e: unknown) => {
         const msg = (e as Error).message;
         safeSend({ type: 'error', error: msg });
+        if (pendingWt && !capturedSid) cleanupPendingWorktree(pendingWt).catch(() => {});
         if (capturedSid) {
           liveEnd(capturedSid, { type: 'done', exitCode: -1, error: msg });
           endRun(capturedSid);

@@ -162,6 +162,17 @@ export async function bindWorktree(sessionId: string, p: PendingWorktree): Promi
   await persist();
 }
 
+// Tear down a worktree that was created up front but never bound to a session
+// (the run failed before the SDK emitted `session`). Without this the branch +
+// dir leak untracked: invisible to listWorktrees, unreclaimable by prune.
+export async function cleanupPendingWorktree(p: PendingWorktree): Promise<void> {
+  await withRepoLock(p.repoRoot, async () => {
+    await gitSafe(p.repoRoot, ['worktree', 'remove', p.worktreePath, '--force']);
+    await gitSafe(p.repoRoot, ['branch', '-D', p.branch]);
+    await gitSafe(p.repoRoot, ['worktree', 'prune']);
+  });
+}
+
 async function toInfo(r: WorktreeRecord): Promise<WorktreeInfo> {
   const present = await exists(r.worktreePath);
   return {

@@ -12,8 +12,15 @@ const STORAGE_KEY = 'macaron-theme';
 const mql = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
 function read(): Theme {
-  const t = localStorage.getItem(STORAGE_KEY);
-  return t === 'light' || t === 'dark' ? t : 'system';
+  // Guard storage like index.html's pre-paint script does: this runs at
+  // module-eval via `current = read()`, so a SecurityError (private mode /
+  // storage disabled) would otherwise abort the whole bundle before mount.
+  try {
+    const t = localStorage.getItem(STORAGE_KEY);
+    return t === 'light' || t === 'dark' ? t : 'system';
+  } catch {
+    return 'system';
+  }
 }
 
 export function resolveTheme(theme: Theme): ResolvedTheme {
@@ -30,8 +37,14 @@ function apply() {
 
 export function setTheme(theme: Theme) {
   current = theme;
-  if (theme === 'system') localStorage.removeItem(STORAGE_KEY);
-  else localStorage.setItem(STORAGE_KEY, theme);
+  // Apply + notify even if persistence throws, so the toggle never dead-ends
+  // on a storage write failure (quota exceeded / private mode).
+  try {
+    if (theme === 'system') localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, theme);
+  } catch {
+    /* storage unavailable — keep the in-memory theme */
+  }
   apply();
   listeners.forEach((l) => l());
 }

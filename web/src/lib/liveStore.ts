@@ -114,10 +114,6 @@ export function subscribeFollowup(sid: string, cb: (text: string, done: boolean)
   };
 }
 
-export function clearFollowup(sid: string): void {
-  followupWatchers.delete(sid);
-}
-
 export type NewSessionOptions = {
   text: string;
   permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';

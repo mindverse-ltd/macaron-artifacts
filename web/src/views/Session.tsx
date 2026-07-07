@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, basename, type Message, type SessionDetail } from '../lib/api';
 import { streamSession } from '../lib/sse';
-import { getLive, subscribeLive, clearLive, clearFollowup, subscribeFollowup, startNewSession } from '../lib/liveStore';
+import { getLive, subscribeLive, clearLive, subscribeFollowup, startNewSession } from '../lib/liveStore';
 import { extractPartialCode, parseFollowups } from '../lib/partialJson';
 import {
   THINKING_VERBS,
@@ -804,24 +804,26 @@ export function Session(props: SessionProps = {}) {
   }, [sending, polling, sid, project]);
   const [liveUser, setLiveUser] = useState<string>('');
   // Raw follow-up text streamed after each turn (a throwaway cache-hit
-  // query). Parsed incrementally with partial-json; cleared on every new
-  // send / session switch.
+  // query). Parsed incrementally with partial-json. Deltas can arrive from a
+  // stream that a newer send / session switch already superseded (e.g. click
+  // a chip and send while the previous follow-up is still streaming), so
+  // every producer captures its generation and stale deltas are dropped.
   const [followupRaw, setFollowupRaw] = useState('');
+  const followupGen = useRef(0);
   const followups = useMemo(() => parseFollowups(followupRaw), [followupRaw]);
   // First-turn follow-ups stream over an independent live-store channel that
   // outlives the main turn's `done` (which clears the live store). 2nd+ turns
-  // deliver follow-ups via streamSession's onFollowupDelta instead.
+  // deliver follow-ups via streamSession's onFollowupDelta instead. Not gated
+  // on isPending — the canvas path flips it right at `done`, before the
+  // follow-up stream even starts.
   useEffect(() => {
-    if (!isPending) return;
-    const unsub = subscribeFollowup(sid, (text, done) => {
-      if (done) return;
+    const gen = ++followupGen.current;
+    setFollowupRaw('');
+    return subscribeFollowup(sid, (text, done) => {
+      if (done || followupGen.current !== gen) return;
       setFollowupRaw((prev) => prev + text);
     });
-    return () => {
-      unsub();
-      clearFollowup(sid);
-    };
-  }, [sid, isPending]);
+  }, [sid]);
   // Single ordered timeline for the current turn: text chunks and tool
   // calls/permissions are interleaved in the same array so the render
   // matches Claude's actual "text → tool → text → tool" sequencing. Previous
@@ -1025,7 +1027,6 @@ export function Session(props: SessionProps = {}) {
     setData(null);
     setLiveTurn([]);
     setLiveUser('');
-    setFollowupRaw('');
     setShown(PAGE_SIZE);
     if (isNew) return; // no jsonl yet — empty state until first send
     // For brand-new sessions the jsonl may not exist yet — suppress the 404 error.
@@ -1070,10 +1071,6 @@ export function Session(props: SessionProps = {}) {
       if (!s) return;
       setLiveUser(s.userText);
       setOutputTokens(s.outputTokens);
-      // Follow-ups arrive over the liveStore path (startNewSession, i.e. the
-      // first turn of a brand-new session) the same way streamSession's
-      // onFollowupDelta delivers them on later turns.
-      setFollowupRaw('');
       // Project liveStore timeline → Session Item shape (fresh objects so
       // React notices identity changes even when the underlying entry was
       // mutated in-place).
@@ -1242,6 +1239,9 @@ export function Session(props: SessionProps = {}) {
       const sentImages = images;
       setInput('');
       setImages([]);
+      // New turn ⇒ new follow-up generation: clears the chips and invalidates
+      // any deltas still streaming from the previous turn's follow-up query.
+      const fGen = ++followupGen.current;
       setFollowupRaw('');
       // Persist to prompt history + reset navigation state.
       const nextHistory = pushHistory(project, text);
@@ -1432,7 +1432,9 @@ export function Session(props: SessionProps = {}) {
             // and a page refresh reloads the canonical jsonl.
             setSending(false);
           },
-          onFollowupDelta: (t) => setFollowupRaw((prev) => prev + t),
+          onFollowupDelta: (t) => {
+            if (followupGen.current === fGen) setFollowupRaw((prev) => prev + t);
+          },
         },
       );
     },
@@ -1538,7 +1540,7 @@ export function Session(props: SessionProps = {}) {
             ABOVE liveTurn in DOM (so BELOW it visually — column-reverse)
             i.e. just above the input area, right under the latest reply.
             Clicking fills the textarea (setInput), doesn't auto-send. */}
-        {followups.length > 0 && !sending && (
+        {followups.length > 0 && (
           <div className="ti-followups">
             {followups.map((q, i) => (
               <button key={i} className="ti-followup-chip" onClick={() => setInput(q)}>

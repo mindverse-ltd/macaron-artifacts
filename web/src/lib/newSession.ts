@@ -10,18 +10,23 @@ export function encodeClaudeProjectName(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
-const pending = new Map<string, string>(); // encoded project -> chosen abs cwd
+const PENDING_TTL_MS = 10 * 60_000;
+const pending = new Map<string, { cwd: string; expiresAt: number }>(); // encoded project -> chosen abs cwd
 
 export function setPendingCwd(project: string, cwd: string): void {
-  pending.set(project, cwd);
+  pending.set(project, { cwd, expiresAt: Date.now() + PENDING_TTL_MS });
 }
 
 export function peekPendingCwd(project: string): string | undefined {
-  return pending.get(project);
+  const v = pending.get(project);
+  if (!v) return undefined;
+  if (v.expiresAt > Date.now()) return v.cwd;
+  pending.delete(project);
+  return undefined;
 }
 
 export function takePendingCwd(project: string): string | undefined {
-  const v = pending.get(project);
+  const v = peekPendingCwd(project);
   pending.delete(project);
   return v;
 }

@@ -12,6 +12,7 @@ export function DirPicker({ onPick, onClose }: { onPick: (cwd: string) => void; 
   const browse = useCallback((path?: string) => {
     setLoading(true);
     setError('');
+    setListing(null);
     api
       .listDirs(path)
       .then((d) => setListing(d))
@@ -56,8 +57,9 @@ export function DirPicker({ onPick, onClose }: { onPick: (cwd: string) => void; 
               <span className="dir-picker-name">{d.name}</span>
             </button>
           ))}
+          {error && !loading && <div className="dir-picker-empty">error: {error}</div>}
           {listing && !loading && listing.entries.length === 0 && (
-            <div className="dir-picker-empty">{error ? `error: ${error}` : 'No sub-folders here.'}</div>
+            <div className="dir-picker-empty">No sub-folders here.</div>
           )}
           {loading && <div className="dir-picker-empty">Loading…</div>}
         </div>

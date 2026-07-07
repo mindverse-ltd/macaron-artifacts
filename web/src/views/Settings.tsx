@@ -419,12 +419,18 @@ function ConfigFilesSection() {
   // (Re)load the selected file's content whenever the active file changes.
   useEffect(() => {
     if (!activeId) return;
+    // Guard against a stale response landing after the user switched tabs —
+    // otherwise a slow settings.json load could overwrite the memory draft
+    // (and get saved into the wrong file).
+    let cancelled = false;
     setLoading(true);
     setError('');
     api.configFile(activeId).then((f) => {
+      if (cancelled) return;
       setOriginal(f.content);
       setDraft(f.content);
-    }).catch((e) => setError((e as Error).message)).finally(() => setLoading(false));
+    }).catch((e) => { if (!cancelled) setError((e as Error).message); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [activeId]);
 
   const dirty = draft !== original;

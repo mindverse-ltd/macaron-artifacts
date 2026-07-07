@@ -117,9 +117,10 @@ export async function writeConfigFile(id: ConfigFileId, content: string): Promis
     const err = validateSettingsJson(content);
     if (err) throw new Error(err);
     const trimmed = content.trim();
-    // Re-serialize valid JSON so the on-disk file stays tidy; keep an empty
-    // file empty rather than writing "{}".
-    if (trimmed) toWrite = `${JSON.stringify(JSON.parse(trimmed), null, 2)}\n`;
+    // Re-serialize valid JSON so the on-disk file stays tidy. A blank edit
+    // writes a truly-empty file, not raw whitespace, so it can't leave a
+    // present-but-unparseable settings.json behind.
+    toWrite = trimmed ? `${JSON.stringify(JSON.parse(trimmed), null, 2)}\n` : '';
   }
   await fs.mkdir(path.dirname(def.path), { recursive: true });
   await fs.writeFile(def.path, toWrite, 'utf8');

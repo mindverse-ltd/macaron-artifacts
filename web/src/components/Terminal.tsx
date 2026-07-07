@@ -1,0 +1,96 @@
+import { useEffect, useRef } from 'react';
+import { Terminal as XTerm } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
+import {
+  terminalStreamUrl,
+  sendTerminalInput,
+  sendTerminalResize,
+} from '../lib/terminal';
+
+// Light "paper" theme matching the app's CSS variables (see styles.css :root).
+const THEME = {
+  background: '#F5F4ED', // --surface-2
+  foreground: '#3D3929', // --text
+  cursor: '#C96442', // --accent
+  cursorAccent: '#F5F4ED',
+  selectionBackground: 'rgba(201, 100, 66, 0.22)',
+  black: '#3D3929', brightBlack: '#8A8473',
+  red: '#C0524A', brightRed: '#C0524A',
+  green: '#5A8B5A', brightGreen: '#5A8B5A',
+  yellow: '#B88A3A', brightYellow: '#B88A3A',
+  blue: '#4A6FA5', brightBlue: '#4A6FA5',
+  magenta: '#9A5BA5', brightMagenta: '#9A5BA5',
+  cyan: '#3F8A8A', brightCyan: '#3F8A8A',
+  white: '#5D584A', brightWhite: '#3D3929',
+};
+
+export function Terminal({ project, sid, focused }: { project: string; sid: string; focused: boolean }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    const term = new XTerm({
+      fontFamily: 'var(--font-mono), ui-monospace, Menlo, Consolas, monospace',
+      fontSize: 12.5,
+      theme: THEME,
+      cursorBlink: true,
+      scrollback: 5000,
+      convertEol: false,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(host);
+    fit.fit();
+    termRef.current = term;
+    fitRef.current = fit;
+
+    const { cols, rows } = term;
+    term.onData((data) => sendTerminalInput(project, sid, data));
+
+    // history = full snapshot (reset+write, idempotent on reconnect);
+    // output = incremental chunk; exit = dim footer.
+    const es = new EventSource(terminalStreamUrl(project, sid, cols, rows));
+    es.onmessage = (e) => {
+      if (e.data === '[DONE]') return;
+      let msg: { type?: string; data?: string; exitCode?: number; error?: string };
+      try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === 'history') { term.reset(); if (msg.data) term.write(msg.data); }
+      else if (msg.type === 'output') term.write(msg.data || '');
+      else if (msg.type === 'exit') term.write(`\r\n\x1b[2m[process exited${msg.exitCode ? ` (${msg.exitCode})` : ''}]\x1b[0m\r\n`);
+      else if (msg.type === 'error') term.write(`\r\n\x1b[31m${msg.error || 'error'}\x1b[0m\r\n`);
+    };
+    // EventSource auto-reconnects; the server's history frame makes replay safe.
+
+    let raf = 0;
+    const doFit = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        try { fit.fit(); } catch { /* detached */ }
+        if (term.cols && term.rows) sendTerminalResize(project, sid, term.cols, term.rows);
+      });
+    };
+    const ro = new ResizeObserver(doFit);
+    ro.observe(host);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      es.close();
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+    };
+  }, [project, sid]);
+
+  // Focus the terminal when its tile gains focus.
+  useEffect(() => {
+    if (focused) termRef.current?.focus();
+  }, [focused]);
+
+  return <div className="term-host" ref={hostRef} />;
+}

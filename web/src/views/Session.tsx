@@ -1201,9 +1201,12 @@ export function Session(props: SessionProps = {}) {
     return out;
   }, [items]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [pendingJumpId, setPendingJumpId] = useState<string | null>(null);
 
-  // Scroll a rail node's target row into view. If the row is older than the
-  // paginated window, widen `shown` first so it's mounted before we scroll.
+  // Request a jump to a rail node's target row. If the row is older than the
+  // paginated window, widen `shown` first. The scroll runs in the effect below,
+  // once React has committed the wider window — doing it inline (even in a rAF)
+  // races the commit and silently misses rows that aren't mounted yet.
   const jumpToItem = useCallback(
     (id: string) => {
       const idx = items.findIndex((it) => it.id === id);
@@ -1212,18 +1215,25 @@ export function Session(props: SessionProps = {}) {
         if (fromTail > shown) setShown((s) => Math.max(s, fromTail));
       }
       setActiveItemId(id);
-      requestAnimationFrame(() => {
-        const el = threadRef.current?.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(id)}"]`);
-        if (!el) return;
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.remove('ti-jump-flash');
-        // Force reflow so re-adding the class restarts the flash animation.
-        void el.offsetWidth;
-        el.classList.add('ti-jump-flash');
-      });
+      setPendingJumpId(id);
     },
     [items, shown],
   );
+
+  // Resolve a pending jump after the target row is committed. Re-runs when
+  // `shown` widens (which mounts older rows), so jumps into hidden history land
+  // reliably instead of no-oping when the row wasn't mounted in time.
+  useEffect(() => {
+    if (!pendingJumpId) return;
+    const el = threadRef.current?.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(pendingJumpId)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('ti-jump-flash');
+    // Force reflow so re-adding the class restarts the flash animation.
+    void el.offsetWidth;
+    el.classList.add('ti-jump-flash');
+    setPendingJumpId(null);
+  }, [pendingJumpId, shown]);
 
   const cwd = data?.cwd || '';
   const name = cwd ? basename(cwd) : 'Session';

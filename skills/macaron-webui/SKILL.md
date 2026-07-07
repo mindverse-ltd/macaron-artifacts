@@ -19,19 +19,21 @@ Run this exactly once. Two env vars matter:
 - `MACARON_FOREGROUND=1` — makes `start.sh` `exec node` into the foreground instead of nohup-backgrounding. Backgrounded children get killed when the outer script returns inside your Bash tool, so the server would disappear seconds after launch. Foreground keeps the process anchored to the tool session and the URL is printed asynchronously before `exec` blocks.
 
 ```bash
-MACARON_ENGINE=codex MACARON_FOREGROUND=1 MACARON_PORT=7878 bash "<plugin root>/start.sh"
+MACARON_ENGINE=codex MACARON_FOREGROUND=1 MACARON_PORT=7979 bash "<plugin root>/start.sh"
 ```
+
+Port `7979` is the Codex-side default so it doesn't collide with the Claude Code plugin (which uses `7878`). Both can run at once. If 7979 is busy, tell the user to override with `MACARON_PORT=<n>`.
 
 The script:
 - Runs `npm install --include=optional` + `npm run build` on first launch (~60s). If the build fails (usually a missing `@rollup/rollup-darwin-arm64` from a partial install), it wipes `node_modules` and retries once — no user action needed.
 - Frees the port if a stale `mcx` / `mcc` is bound (`lsof` → `kill`).
-- Prints `Macaron WebUI (engine=codex): http://localhost:7878` once `/api/health` answers, THEN blocks on `exec node`.
+- Prints `Macaron WebUI (engine=codex): http://localhost:7979` once `/api/health` answers, THEN blocks on `exec node`.
 - Stays in the foreground indefinitely. This is expected — do NOT kill it after launch. The Bash tool can move on while this shell keeps the server alive.
 
 Once the URL line prints, open the browser:
 
 ```bash
-open "http://localhost:7878"
+open "http://localhost:7979"
 ```
 
 Quote the URL verbatim so the user can click it directly. If `open` fails in a sandbox (`kLSExecutableIncorrectFormat`), tell the user to paste the URL into their browser.

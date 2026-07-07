@@ -12,11 +12,15 @@ if [ -f "$DIR/.env" ]; then
   set +a
 fi
 
-PORT="${MACARON_PORT:-7878}"
-# Engine picks which SPA `/` serves. `codex` renders the Codex-focused
-# session manager; anything else (default) renders the Claude one.
-# The Codex plugin's macaron-webui skill sets this to `codex`.
+# Port default: Claude engine keeps historical 7878. Codex uses 7979 so
+# both plugins can run at once without collision. Callers can override
+# either default with MACARON_PORT.
 ENGINE="${MACARON_ENGINE:-claude}"
+if [ "$ENGINE" = "codex" ]; then
+  PORT="${MACARON_PORT:-7979}"
+else
+  PORT="${MACARON_PORT:-7878}"
+fi
 # `1` = block in the foreground (`exec node …`). The Codex plugin sets
 # this because its Bash tool kills backgrounded children when the outer
 # script returns. Default = background with nohup so the Claude Code
@@ -26,56 +30,54 @@ FOREGROUND="${MACARON_FOREGROUND:-0}"
 WEB_DIST="$DIR/web/dist"
 SERVER_DIST="$DIR/server/dist/index.js"
 
-# `npm install` on macOS arm64 sometimes skips Rollup's platform-specific
-# optional dep when the lock was generated elsewhere (npm/cli#4828) — the
-# build then blows up with "Cannot find module @rollup/rollup-darwin-arm64".
-# --include=optional forces the platform binaries in; --no-audit / --no-fund
-# just cut noise.
-run_install() {
-  (cd "$DIR" && npm install --silent --include=optional --no-audit --no-fund)
-}
-
-# npm's optional-dep bug means even --include=optional won't insert the
-# platform-specific rollup binary when a foreign package-lock exists. We
-# can't safely delete package-lock.json (it's committed), so after install
-# we spot-check that the current platform's rollup native module is present
-# and force-install it if not.
-ensure_rollup_platform() {
-  local os arch pkg workdir
-  workdir="$DIR/web"
-  os="$(node -p 'process.platform' 2>/dev/null || echo unknown)"
-  arch="$(node -p 'process.arch' 2>/dev/null || echo unknown)"
-  case "$os-$arch" in
-    darwin-arm64|darwin-x64|linux-x64|linux-arm64|win32-x64) pkg="@rollup/rollup-${os}-${arch}" ;;
-    *) return 0 ;;
-  esac
-  if [ ! -d "$workdir/node_modules/@rollup/rollup-${os}-${arch}" ]; then
-    echo "[macaron] adding $pkg (workaround for npm/cli#4828)…" >&2
-    (cd "$workdir" && npm install --no-save --silent --no-audit --no-fund "$pkg") || true
+# Prebuilt dist ships in the repo — see .gitignore for the `!web/dist/`
+# and `!server/dist/` exceptions. So the marketplace flow (git clone
+# → plugin cache → run) needs zero client-side BUILD in the common case.
+# Runtime deps (fastify, agent-sdk, zod, …) still need to be present in
+# node_modules; --omit=dev skips vite / rollup / typescript-toolchain,
+# which sidesteps the npm/cli#4828 rollup platform-binary bug entirely.
+if [ -f "$SERVER_DIST" ] && [ -f "$WEB_DIST/index.html" ]; then
+  if [ ! -d "$DIR/node_modules/fastify" ]; then
+    echo "[macaron] installing runtime deps (one-time, ~10s)…" >&2
+    (cd "$DIR" && npm install --omit=dev --silent --no-audit --no-fund)
   fi
-}
+else
+  echo "[macaron] no prebuilt dist found — falling back to source build (~60s)…" >&2
 
-if [ ! -d "$DIR/node_modules" ] || [ ! -d "$DIR/server/node_modules" ] || [ ! -d "$DIR/web/node_modules" ]; then
-  echo "[macaron] installing workspaces (one-time, ~30s)…" >&2
-  run_install
-fi
-ensure_rollup_platform
+  # `npm install` on macOS arm64 sometimes skips Rollup's platform-specific
+  # optional dep when the lock was generated elsewhere (npm/cli#4828) — the
+  # build then blows up with "Cannot find module @rollup/rollup-darwin-arm64".
+  # --include=optional forces the platform binaries in; --no-audit / --no-fund
+  # just cut noise.
+  run_install() {
+    (cd "$DIR" && npm install --silent --include=optional --no-audit --no-fund)
+  }
 
-# Rebuild when dist is missing OR when any tracked source file is newer
-# than the current bundle — so `claude plugin update` (git pull) picks up
-# code changes without users having to blow the cache away by hand.
-needs_build=0
-if [ ! -f "$SERVER_DIST" ] || [ ! -f "$WEB_DIST/index.html" ]; then
-  needs_build=1
-elif [ -n "$(find "$DIR/web/src" "$DIR/server/src" "$DIR/shared/src" \
-       -newer "$WEB_DIST/index.html" -type f -print -quit 2>/dev/null)" ]; then
-  needs_build=1
-fi
-if [ "$needs_build" -eq 1 ]; then
-  echo "[macaron] building (~30s)…" >&2
+  # npm's optional-dep bug means even --include=optional won't insert the
+  # platform-specific rollup binary when a foreign package-lock exists. We
+  # can't safely delete package-lock.json (it's committed), so after install
+  # we spot-check that the current platform's rollup native module is
+  # present and force-install it if not.
+  ensure_rollup_platform() {
+    local os arch pkg workdir
+    workdir="$DIR/web"
+    os="$(node -p 'process.platform' 2>/dev/null || echo unknown)"
+    arch="$(node -p 'process.arch' 2>/dev/null || echo unknown)"
+    case "$os-$arch" in
+      darwin-arm64|darwin-x64|linux-x64|linux-arm64|win32-x64) pkg="@rollup/rollup-${os}-${arch}" ;;
+      *) return 0 ;;
+    esac
+    if [ ! -d "$workdir/node_modules/@rollup/rollup-${os}-${arch}" ]; then
+      echo "[macaron] adding $pkg (workaround for npm/cli#4828)…" >&2
+      (cd "$workdir" && npm install --no-save --silent --no-audit --no-fund "$pkg") || true
+    fi
+  }
+
+  if [ ! -d "$DIR/node_modules" ] || [ ! -d "$DIR/server/node_modules" ] || [ ! -d "$DIR/web/node_modules" ]; then
+    run_install
+  fi
+  ensure_rollup_platform
   if ! (cd "$DIR" && npm run build --silent); then
-    # Most likely the rollup platform binary is still missing. Retry
-    # the platform install and one more build attempt before giving up.
     echo "[macaron] build failed — re-adding rollup platform dep and retrying…" >&2
     ensure_rollup_platform
     (cd "$DIR" && npm run build --silent)

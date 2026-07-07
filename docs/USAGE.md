@@ -1,6 +1,9 @@
 # Macaron 插件使用
 
-一个 WebUI，Claude Code 和 Codex 两侧都能装。装完在 CLI 里一句话拉起 → <http://localhost:7878>。
+一个 WebUI，Claude Code 和 Codex 两侧都能装，可同时开。装完在 CLI 里一句话拉起：
+
+- Claude → <http://localhost:7878>
+- Codex → <http://localhost:7979>
 
 ## 安装
 

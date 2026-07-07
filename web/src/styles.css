@@ -796,8 +796,8 @@ textarea:focus, select:focus, input:focus {
 }
 .ti-followup-chip:hover {
   color: var(--text);
-  border-color: var(--accent, var(--text-2));
-  background: var(--surface-2, var(--surface));
+  border-color: var(--accent);
+  background: var(--surface-2);
 }
 
 /* ---------- Settings page ---------- */

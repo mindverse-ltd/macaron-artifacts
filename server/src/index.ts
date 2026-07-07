@@ -5,6 +5,8 @@ import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
 import { makeAuthHook, redactTokenInUrl, resolveToken } from './lib/auth.js';
 import { warmSettingsCache } from './lib/settings-store.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
+import { warmSchedulesCache } from './lib/schedule-store.js';
+import { startScheduler } from './lib/scheduler.js';
 import { checkGenUI } from './lib/genui-check.js';
 
 // Claude Agent SDK kills MCP tool calls after 60s by default. Macaron renders
@@ -17,6 +19,7 @@ import { registerSessionRoutes } from './routes/sessions.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
+import { registerScheduleRoutes } from './routes/schedules.js';
 
 const app = Fastify({
   logger: {
@@ -55,6 +58,7 @@ await app.register(async (instance) => {
   await registerWorkspaceRoutes(instance);
   await registerSessionRoutes(instance);
   await registerCodexRoutes(instance);
+  await registerScheduleRoutes(instance);
 });
 
 // Static assets + SPA fallback. In dev (vite dev server on :5173 with proxy),
@@ -92,6 +96,7 @@ if (existsSync(WEB_DIST)) {
 try {
   await warmSettingsCache();
   await warmCodexConfigCache();
+  await warmSchedulesCache();
   await app.listen({ host: HOST, port: PORT });
   app.log.info(`macaron server listening on http://${HOST}:${PORT}`);
   if (authGenerated) {
@@ -103,6 +108,7 @@ try {
   } else if (authToken) {
     app.log.info('server auth enabled (MACARON_AUTH_TOKEN) — remote requests require the token.');
   }
+  startScheduler();
   // Pre-warm the render_ui TS check: the first diagnose pays full program construction. Do it now,
   // at boot, instead of mid-turn while an SSE stream is live. The `import "$macaron/ui"` is what
   // makes this warm the expensive half — it pulls source.tsx and its whole vendored tree into the

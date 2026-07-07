@@ -34,6 +34,7 @@ import { App } from './App';
 import { Dashboard } from './views/Dashboard';
 import { Workspace } from './views/Workspace';
 import { Settings } from './views/Settings';
+import { Schedules } from './views/Schedules';
 import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/Confirm';
 import { AuthGate } from './components/AuthGate';
@@ -82,6 +83,7 @@ const router = createHashRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'settings', element: <Settings /> },
+      { path: 'schedules', element: <Schedules /> },
       { path: 'w/:project', element: <Workspace /> },
       { path: 'w/:project/s/:sid', element: <Workspace /> },
     ],

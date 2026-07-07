@@ -8,6 +8,9 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  Schedule,
+  ScheduleInput,
+  SessionKind,
 } from '@macaron/shared';
 
 import type {
@@ -15,6 +18,9 @@ import type {
   WorkspaceDetailResponse,
   SessionDetail,
   HealthResponse,
+  Schedule,
+  ScheduleInput,
+  SchedulesResponse,
 } from '@macaron/shared';
 import { authedFetch } from './auth';
 
@@ -143,6 +149,30 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
       },
     ),
+
+  schedules: () => getJSON<SchedulesResponse>('/api/schedules'),
+  createSchedule: (input: ScheduleInput) =>
+    req<Schedule>('/api/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  updateSchedule: (id: string, patch: Partial<ScheduleInput>) =>
+    req<Schedule>(`/api/schedules/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  deleteSchedule: async (id: string): Promise<void> => {
+    const r = await authedFetch(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`http ${r.status}`);
+  },
+  pauseSchedule: (id: string) =>
+    req<Schedule>(`/api/schedules/${encodeURIComponent(id)}/pause`, { method: 'POST' }),
+  resumeSchedule: (id: string) =>
+    req<Schedule>(`/api/schedules/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+  runScheduleNow: (id: string) =>
+    req<{ ok: true }>(`/api/schedules/${encodeURIComponent(id)}/run-now`, { method: 'POST' }),
 };
 
 export function basename(p: string): string {

@@ -16,6 +16,7 @@ import { registerSettingsRoutes } from './routes/settings.js';
 import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
 import { registerTunnelRoutes } from './routes/tunnel.js';
+import { shutdownTunnel } from './lib/tunnel-manager.js';
 
 const app = Fastify({
   logger: { level: process.env.MACARON_LOG_LEVEL || 'info' },
@@ -24,6 +25,24 @@ const app = Fastify({
   // Allow large request bodies (genui prompts can grow).
   bodyLimit: 2 * 1024 * 1024,
 });
+
+let closing = false;
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (closing) return;
+  closing = true;
+  app.log.info({ signal }, 'shutting down macaron server');
+  shutdownTunnel();
+  try {
+    await app.close();
+    process.exit(0);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
 await app.register(async (instance) => {
   await registerHealthRoutes(instance);

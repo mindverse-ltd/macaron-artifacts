@@ -40,7 +40,7 @@ const SPECS: Record<TunnelProvider, ProviderSpec> = {
         if (!s.startsWith('{')) continue;
         try {
           const log = JSON.parse(s) as { msg?: string; url?: string };
-          if (log.url && (log.msg === 'started tunnel' || log.url.startsWith('https://'))) return log.url;
+          if (log.msg === 'started tunnel' && log.url?.startsWith('https://')) return log.url;
         } catch { /* partial line — wait for more */ }
       }
       return null;
@@ -144,6 +144,12 @@ export function startTunnel(provider: TunnelProvider): Promise<TunnelState> {
 }
 
 export function stopTunnel(): TunnelState {
+  shutdownTunnel();
+  state = { status: 'stopped', provider: null, url: null, startedAt: null, error: null };
+  return { ...state };
+}
+
+export function shutdownTunnel(): void {
   const child = proc;
   proc = null;
   if (child) {
@@ -153,8 +159,6 @@ export function stopTunnel(): TunnelState {
       t.unref();
     } catch { /* already gone */ }
   }
-  state = { status: 'stopped', provider: null, url: null, startedAt: null, error: null };
-  return { ...state };
 }
 
 // Never let a public tunnel outlive the server.

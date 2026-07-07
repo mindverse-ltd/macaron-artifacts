@@ -68,16 +68,22 @@ export async function removeSubscription(endpoint: string): Promise<void> {
 export async function sendPush(payload: PushNotifyPayload): Promise<void> {
   const s = await load();
   if (s.subscriptions.length === 0) return;
-  webpush.setVapidDetails('mailto:noreply@macaron.local', s.vapid.publicKey, s.vapid.privateKey);
+  // A VAPID subject must be a resolvable https:// or mailto: with a real domain;
+  // some push services reject a non-routable one like `.local`.
+  webpush.setVapidDetails('https://github.com/mindverse-ltd/macaron-claude-code', s.vapid.publicKey, s.vapid.privateKey);
   const body = JSON.stringify(payload);
+  // Snapshot before the multi-second await: a concurrent /unsubscribe can
+  // reassign s.subscriptions, which would misalign these indices and prune the
+  // wrong endpoint (or index past the end).
+  const subs = [...s.subscriptions];
   const results = await Promise.allSettled(
-    s.subscriptions.map((sub) => webpush.sendNotification(sub, body)),
+    subs.map((sub) => webpush.sendNotification(sub, body)),
   );
   const dead: string[] = [];
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
       const code = (r.reason as { statusCode?: number })?.statusCode;
-      if (code === 404 || code === 410) dead.push(s.subscriptions[i]!.endpoint);
+      if (code === 404 || code === 410) dead.push(subs[i]!.endpoint);
     }
   });
   if (dead.length) {

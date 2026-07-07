@@ -28,8 +28,10 @@ export function registerServiceWorker(): void {
   navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
     const data = e.data as { type?: string; url?: string } | undefined;
     if (data?.type === 'macaron:navigate' && data.url) {
-      // createHashRouter → the URL is a `#/...` fragment.
-      window.location.hash = data.url.replace(/^#/, '');
+      // createHashRouter → strip a leading `/#` or `#` and let the browser
+      // re-add it. The server roots the deep link at `/#/…` (so the SW
+      // cold-start openWindow resolves it against the origin, not /sw.js).
+      window.location.hash = data.url.replace(/^\/?#/, '');
       window.focus?.();
     }
   });
@@ -59,24 +61,43 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+// Whether an existing subscription was minted against `key`. If the server's
+// VAPID pair was regenerated, the old subscription would keep failing with 403
+// (never pruned — that's only 404/410), so we must drop and re-subscribe.
+function keysMatch(sub: PushSubscription, key: Uint8Array): boolean {
+  const existing = sub.options.applicationServerKey;
+  if (!existing) return false;
+  const a = new Uint8Array(existing);
+  if (a.length !== key.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== key[i]) return false;
+  return true;
+}
+
 export async function subscribeToPush(): Promise<PushState> {
   if (!pushSupported()) return 'unsupported';
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') return perm === 'denied' ? 'denied' : 'unsubscribed';
-  const { publicKey } = await fetch('/api/push/vapid-public-key').then((r) => r.json());
+  const vapidRes = await fetch('/api/push/vapid-public-key');
+  if (!vapidRes.ok) throw new Error(`vapid key fetch failed (${vapidRes.status})`);
+  const { publicKey } = await vapidRes.json();
+  const appServerKey = urlBase64ToUint8Array(publicKey);
   const reg = await navigator.serviceWorker.ready;
-  const sub =
-    (await reg.pushManager.getSubscription()) ||
-    (await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    }));
+  let sub = await reg.pushManager.getSubscription();
+  // Re-subscribe if there's no sub, or the cached one is bound to a stale key.
+  if (sub && !keysMatch(sub, appServerKey)) {
+    await sub.unsubscribe();
+    sub = null;
+  }
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
+  }
   const json = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } };
-  await fetch('/api/push/subscribe', {
+  const res = await fetch('/api/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
   });
+  if (!res.ok) throw new Error(`subscribe failed (${res.status})`);
   return 'subscribed';
 }
 

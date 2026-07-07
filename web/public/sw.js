@@ -15,14 +15,20 @@ self.addEventListener('push', (event) => {
   }
   const title = payload.title || 'Macaron';
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: payload.body || '',
-      icon: '/icons/icon-192.png',
-      badge: '/icons/badge.png',
-      tag: payload.tag,
-      renotify: Boolean(payload.tag),
-      requireInteraction: Boolean(payload.requireInteraction),
-      data: { url: payload.url || '/' },
+    // If a client is focused/visible, the in-app NotifyStack already shows this
+    // event — skip the system notification so a focused tab isn't told twice.
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      const active = clientList.some((c) => c.focused || c.visibilityState === 'visible');
+      if (active) return undefined;
+      return self.registration.showNotification(title, {
+        body: payload.body || '',
+        icon: '/icons/icon-192.png',
+        badge: '/icons/badge.png',
+        tag: payload.tag,
+        renotify: Boolean(payload.tag),
+        requireInteraction: Boolean(payload.requireInteraction),
+        data: { url: payload.url || '/' },
+      });
     }),
   );
 });
@@ -30,16 +36,21 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || '/';
+  // The deep link is a hash route (`/#/w/:project/s/:sid`); a client already on
+  // that session is the one to focus. Match its hash so a push for session C
+  // doesn't yank an unrelated tab showing session B.
+  const targetHash = url.slice(url.indexOf('#'));
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
-        for (const client of clientList) {
-          if (client.url.includes(self.location.origin)) {
-            client.focus();
-            client.postMessage({ type: 'macaron:navigate', url });
-            return undefined;
-          }
+        const sameOrigin = clientList.filter((c) => c.url.includes(self.location.origin));
+        const onTarget = sameOrigin.find((c) => c.url.includes(targetHash));
+        const client = onTarget || sameOrigin[0];
+        if (client) {
+          client.focus();
+          client.postMessage({ type: 'macaron:navigate', url });
+          return undefined;
         }
         return self.clients.openWindow(url);
       }),

@@ -9,9 +9,12 @@
 
 import { sendPush } from './push-store.js';
 
-// The client uses a hash router (createHashRouter), so deep links are `#/...`.
+// The client uses a hash router (createHashRouter). Root the path at `/#/…` so
+// the service worker's cold-start clients.openWindow() resolves it against the
+// host origin, not the SW script URL (/sw.js) — a bare `#/…` would open
+// `/sw.js#/…` and serve the raw worker file instead of the app.
 function sessionUrl(project: string, sid: string): string {
-  return `#/w/${encodeURIComponent(project)}/s/${encodeURIComponent(sid)}`;
+  return `/#/w/${encodeURIComponent(project)}/s/${encodeURIComponent(sid)}`;
 }
 
 export function pushPermissionRequest(project: string, sid: string, toolName: string): void {

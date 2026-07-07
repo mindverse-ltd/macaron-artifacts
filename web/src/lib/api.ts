@@ -8,6 +8,8 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  UsageResponse,
+  RateLimitWindow,
 } from '@macaron/shared';
 
 import type {
@@ -15,6 +17,7 @@ import type {
   WorkspaceDetailResponse,
   SessionDetail,
   HealthResponse,
+  UsageResponse,
 } from '@macaron/shared';
 
 export async function getJSON<T>(url: string): Promise<T> {
@@ -59,6 +62,7 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
   settings: () => getJSON<PublicSettings>('/api/settings'),
+  usage: () => getJSON<UsageResponse>('/api/usage'),
 
   addProvider: (input: ProviderInput) =>
     req<{ id: string; settings: PublicSettings }>('/api/settings/providers', {

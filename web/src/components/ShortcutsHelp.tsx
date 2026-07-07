@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { hasActiveModal } from '../lib/modal';
 import { SHORTCUTS } from '../lib/shortcuts';
 
 // Which-key-style help sheet. Renderless until opened. Toggled by pressing `?`
 // anywhere outside a text field, or by dispatching `macaron:shortcuts` (the
-// sidebar affordance does this). Renders straight from lib/shortcuts.ts so the
-// list never drifts from the real bindings. Reuses the .confirm-* modal chrome.
+// sidebar affordance does this). Renders from the keyboard shortcut catalogue in
+// lib/shortcuts.ts and reuses the .confirm-* modal chrome.
 
 function isTypingTarget(el: EventTarget | null): boolean {
   const node = el as HTMLElement | null;
@@ -15,6 +16,7 @@ function isTypingTarget(el: EventTarget | null): boolean {
 
 export function ShortcutsHelp() {
   const [open, setOpen] = useState(false);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -27,16 +29,20 @@ export function ShortcutsHelp() {
       // literal character in the composer, and skip when other modifiers are held.
       if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTypingTarget(e.target)) {
         e.preventDefault();
-        setOpen((v) => !v);
+        setOpen((v) => (v ? false : !hasActiveModal()));
       }
     };
-    const onOpen = () => setOpen((v) => !v);
+    const onOpen = () => setOpen((v) => v || !hasActiveModal());
     window.addEventListener('keydown', onKey);
     window.addEventListener('macaron:shortcuts', onOpen);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('macaron:shortcuts', onOpen);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) queueMicrotask(() => closeBtnRef.current?.focus());
   }, [open]);
 
   if (!open) return null;
@@ -69,7 +75,7 @@ export function ShortcutsHelp() {
           ))}
         </div>
         <div className="confirm-actions">
-          <button className="ghost" type="button" onClick={() => setOpen(false)}>Close</button>
+          <button ref={closeBtnRef} className="ghost" type="button" onClick={() => setOpen(false)}>Close</button>
         </div>
       </div>
     </div>

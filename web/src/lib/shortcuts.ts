@@ -1,7 +1,7 @@
-// Single source of truth for the keyboard shortcuts macaron actually binds.
+// Catalogue for the keyboard shortcuts macaron actually binds.
 // The which-key-style help sheet (components/ShortcutsHelp.tsx) renders straight
-// from this list, so the discoverability surface can never drift from what the
-// handlers do — add a shortcut here the moment you wire one up in the UI.
+// from this list. Add a shortcut here the moment you wire one up in the UI so the
+// discoverability surface stays in sync with the handlers.
 //
 // The handlers themselves still live next to the behaviour they trigger
 // (composer send / history in views/Session.tsx, the Shift+Tab permission cycle

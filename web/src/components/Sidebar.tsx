@@ -302,10 +302,10 @@ export function Sidebar() {
         onClick={() => window.dispatchEvent(new CustomEvent('macaron:shortcuts'))}
         title="Keyboard shortcuts"
       >
-        <span>⌨</span>
+        <span aria-hidden="true">⌨</span>
         <span>Shortcuts</span>
         <span className="sb-spacer" />
-        <kbd className="sb-shortcuts-kbd">?</kbd>
+        <kbd className="sb-shortcuts-kbd" aria-hidden="true">?</kbd>
       </button>
 
       <Link className="sb-settings-link" to="/settings">

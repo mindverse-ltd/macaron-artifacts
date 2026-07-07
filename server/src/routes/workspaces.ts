@@ -159,13 +159,14 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
               liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
               endRun(capturedSid);
             }
-            // Same post-turn follow-up as the resume path: a throwaway,
+            // Same post-turn follow-up as the resume path: stream a throwaway,
             // persistSession:false query resuming this fresh session (shared
             // prefix → cache hit). Best-effort; never blocks the turn close.
             if (!clientGone && capturedSid) {
               try {
-                const questions = await runFollowup({ resume: capturedSid, cwd, model, envOverrides: providerEnv });
-                if (!clientGone) safeSend({ type: 'followup', questions });
+                for await (const delta of runFollowup({ resume: capturedSid, cwd, model, envOverrides: providerEnv })) {
+                  if (!clientGone) safeSend({ type: 'followup_delta', text: delta });
+                }
               } catch {
                 /* swallow: follow-up is enrichment, never fatal */
               }

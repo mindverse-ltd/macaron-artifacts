@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { api, basename, type Message, type SessionDetail } from '../lib/api';
 import { streamSession } from '../lib/sse';
 import { getLive, subscribeLive, clearLive, startNewSession } from '../lib/liveStore';
-import { extractPartialCode } from '../lib/partialJson';
+import { extractPartialCode, parseFollowups } from '../lib/partialJson';
 import {
   THINKING_VERBS,
   SPINNER_FRAMES,
@@ -803,10 +803,12 @@ export function Session(props: SessionProps = {}) {
     });
   }, [sending, polling, sid, project]);
   const [liveUser, setLiveUser] = useState<string>('');
-  // Suggested follow-up questions the server emits after each turn (a
-  // throwaway cache-hit query). Cleared on every new send / session switch.
-  const [followups, setFollowups] = useState<string[]>([]);
-  useEffect(() => setFollowups([]), [sid]);
+  // Raw follow-up text streamed after each turn (a throwaway cache-hit
+  // query). Parsed incrementally with partial-json; cleared on every new
+  // send / session switch.
+  const [followupRaw, setFollowupRaw] = useState('');
+  const followups = useMemo(() => parseFollowups(followupRaw), [followupRaw]);
+  useEffect(() => setFollowupRaw(''), [sid]);
   // Single ordered timeline for the current turn: text chunks and tool
   // calls/permissions are interleaved in the same array so the render
   // matches Claude's actual "text → tool → text → tool" sequencing. Previous
@@ -1056,8 +1058,8 @@ export function Session(props: SessionProps = {}) {
       setOutputTokens(s.outputTokens);
       // Follow-ups arrive over the liveStore path (startNewSession, i.e. the
       // first turn of a brand-new session) the same way streamSession's
-      // onFollowup delivers them on later turns.
-      setFollowups(s.followups ?? []);
+      // onFollowupDelta delivers them on later turns.
+      setFollowupRaw(s.followupRaw ?? '');
       // Project liveStore timeline → Session Item shape (fresh objects so
       // React notices identity changes even when the underlying entry was
       // mutated in-place).
@@ -1223,7 +1225,7 @@ export function Session(props: SessionProps = {}) {
       const sentImages = images;
       setInput('');
       setImages([]);
-      setFollowups([]);
+      setFollowupRaw('');
       // Persist to prompt history + reset navigation state.
       const nextHistory = pushHistory(project, text);
       setHistory(nextHistory);
@@ -1413,7 +1415,7 @@ export function Session(props: SessionProps = {}) {
             // and a page refresh reloads the canonical jsonl.
             setSending(false);
           },
-          onFollowup: (qs) => setFollowups(qs),
+          onFollowupDelta: (t) => setFollowupRaw((prev) => prev + t),
         },
       );
     },

@@ -45,10 +45,9 @@ export type LiveState = {
   // usage events. -1 = no signal received yet (indicator falls back to a
   // len/4 estimate). Reset to -1 at the start of each new turn.
   outputTokens: number;
-  // Suggested follow-up questions the server emits after each turn. The
-  // streamSession path sets these via onFollowup; the startNewSession path
-  // (first turn of a brand-new session) buffers them here for applyState.
-  followups?: string[];
+  // Raw (unparsed) follow-up text streamed after each turn. The WebUI parses
+  // this incrementally with partial-json; we only buffer the accumulated text.
+  followupRaw?: string;
   done: boolean;
   error?: string;
 };
@@ -255,10 +254,10 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
                   s.outputTokens = p.outputTokens;
                   notify(sid);
                 }
-              } else if (sid && p.type === 'followup') {
+              } else if (sid && p.type === 'followup_delta') {
                 const s = states.get(sid);
                 if (s) {
-                  s.followups = Array.isArray(p.questions) ? p.questions : [];
+                  s.followupRaw = (s.followupRaw || '') + p.text;
                   notify(sid);
                 }
               } else if (sid && p.type === 'done') {

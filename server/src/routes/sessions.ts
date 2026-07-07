@@ -300,15 +300,17 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
           else if (ev.kind === 'done') {
             safeSend({ type: 'done', exitCode: ev.exitCode });
             endRun(sid);
-            // After the main turn: fire a throwaway follow-up-suggestions
-            // query resuming the same session (shared prefix → provider
-            // cache hit, near-free). persistSession:false keeps it off disk
-            // so the original transcript is never appended to. Best-effort —
-            // any failure is swallowed so it never blocks the turn's close.
+            // After the main turn: stream a throwaway follow-up-suggestions
+            // query resuming the same session (shared prefix → provider cache
+            // hit, near-free). persistSession:false keeps it off disk. Each
+            // text delta is forwarded as a `followup_delta` event; the WebUI
+            // accumulates + parses incrementally with partial-json. Best-effort
+            // — any failure is swallowed, never blocks the turn's close.
             if (!clientGone) {
               try {
-                const questions = await runFollowup({ resume: sid, cwd, model: providerModel, envOverrides: providerEnv });
-                if (!clientGone) safeSend({ type: 'followup', questions });
+                for await (const delta of runFollowup({ resume: sid, cwd, model: providerModel, envOverrides: providerEnv })) {
+                  if (!clientGone) safeSend({ type: 'followup_delta', text: delta });
+                }
               } catch {
                 /* swallow: follow-up is enrichment, never fatal */
               }

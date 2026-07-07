@@ -316,10 +316,11 @@ export type FollowupOptions = {
   envOverrides?: Record<string, string> | null;
 };
 
-// Returns up to 5 suggested follow-up questions, or [] on any failure
-// (parse error, provider error, empty). Never throws — callers treat the
-// result as best-effort enrichment of the just-completed turn.
-export async function runFollowup(opts: FollowupOptions): Promise<string[]> {
+// Yields raw text deltas of the model's JSON-array reply. The route forwards
+// these as `followup_delta` SSE events; the WebUI accumulates and parses them
+// incrementally with partial-json (Allow.ARR) so chips appear as they stream.
+// Parsing lives client-side — here we only relay text, never interpret it.
+export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string> {
   const stream = query({
     prompt: FOLLOWUP_PROMPT,
     options: {
@@ -329,29 +330,26 @@ export async function runFollowup(opts: FollowupOptions): Promise<string[]> {
       // No tools, no MCP, no permission callback — pure text generation.
       allowedTools: [],
       persistSession: false,
+      // Stream content_block_delta text so the route can relay it; without
+      // this the SDK only emits the final `result` and there's nothing to forward.
+      includePartialMessages: true,
       abortController: opts.abortController,
       ...(opts.envOverrides ? { env: opts.envOverrides } : {}),
     },
   });
   let raw = '';
   for await (const m of stream as AsyncIterable<SDKMessage>) {
-    if (m.type === 'result' && !m.is_error) {
-      const r = m as unknown as { result?: string };
-      if (r.result) raw = r.result;
+    if (m.type === 'stream_event') {
+      const ev = m.event;
+      if (ev.type === 'content_block_delta') {
+        const d = ev.delta as { type?: string; text?: string };
+        if (d?.type === 'text_delta' && d.text) {
+          raw += d.text;
+          yield d.text;
+        }
+      }
     }
   }
-  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  questions=${raw ? 'ok' : 'empty'}`);
-  if (!raw) return [];
-  // The model is told to emit only a JSON array, but it sometimes wraps it in
-  // prose or fences — extract the first [...] span and tolerate trailing text.
-  const match = raw.match(/\[[\s\S]*\]/);
-  if (!match) return [];
-  try {
-    const parsed = JSON.parse(match[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((x): x is string => typeof x === 'string').slice(0, 5);
-  } catch {
-    return [];
-  }
+  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  raw=${raw ? 'ok' : 'empty'}`);
 }
 

@@ -19,6 +19,7 @@ import { useConfirm } from '../components/Confirm';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
+import { playSound } from '../lib/sound';
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
 
 const RENDER_UI_TOOL = 'mcp__macaron__render_ui';
@@ -793,6 +794,7 @@ export function Session(props: SessionProps = {}) {
     }
     if (!streamedRef.current) return;
     streamedRef.current = false;
+    playSound('complete');
     notify({
       title: 'Macaron · session ready',
       body: `${sid.slice(0, 8)} finished a turn`,
@@ -1332,6 +1334,7 @@ export function Session(props: SessionProps = {}) {
             // approval — otherwise a session in a background tab can
             // silently stall. requireInteraction keeps it visible until
             // acted on.
+            playSound('permission');
             notify({
               title: 'Macaron · permission needed',
               body: `${toolName} wants to run` + (
@@ -1384,6 +1387,7 @@ export function Session(props: SessionProps = {}) {
             setOutputTokens((cur) => (ot > cur ? ot : cur));
           },
           onError: (err) => {
+            playSound('error');
             setLiveTurn((cur) => {
               const last = cur[cur.length - 1];
               const chunk = `\n[error] ${err}`;

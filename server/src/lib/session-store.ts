@@ -292,23 +292,32 @@ export async function resolveSessionCwd(project: string, sid: string): Promise<s
   return cwd;
 }
 
-// Resolve a claude project name to its working directory. The name itself is
-// claude-cli's cwd encoding, but a big first-line paste can push `cwd` past
-// HEAD_BYTES, so prefer the cwd embedded in an actual jsonl when we can read
-// one and fall back to decoding the name.
-export async function resolveProjectCwd(project: string): Promise<string> {
-  let cwd = decodeClaudeProjectName(project);
+// Resolve a claude project name to its working directory. Prefer the cwd
+// embedded in an actual jsonl (a big first-line paste can push `cwd` past
+// HEAD_BYTES, so decoding the name is the fallback). We only fall back to
+// decodeClaudeProjectName when the project is actually registered under
+// CLAUDE_PROJECTS: that decode (`-` -> `/`) is attacker-controllable, and
+// callers that hand the result to the filesystem as a *root* (routes/files.ts)
+// would otherwise turn the `:project` route param into an arbitrary-root
+// traversal (e.g. `-etc` -> `/etc`). Returns null for an unregistered project;
+// callers must treat null as "unknown project" (404), never as a servable root.
+export async function resolveProjectCwd(project: string): Promise<string | null> {
+  let files: string[];
+  const projDir = path.join(CLAUDE_PROJECTS, project);
   try {
-    const projDir = path.join(CLAUDE_PROJECTS, project);
-    for (const f of await fs.readdir(projDir)) {
-      if (!f.endsWith('.jsonl')) continue;
-      const meta = await readSessionSummary(path.join(projDir, f));
-      if (meta?.cwd) return meta.cwd;
-    }
+    files = await fs.readdir(projDir);
   } catch {
-    /* no sessions yet — fall back to decoded name */
+    return null; // no such project dir — reject rather than decode a root
   }
-  return cwd;
+  for (const f of files) {
+    if (!f.endsWith('.jsonl')) continue;
+    const meta = await readSessionSummary(path.join(projDir, f));
+    if (meta?.cwd) return meta.cwd;
+  }
+  // Registered project whose cwd we couldn't recover from any jsonl: fall back
+  // to the decoded name (the original big-paste behavior), now gated on the dir
+  // existing above so an unregistered `-etc` can never reach this.
+  return decodeClaudeProjectName(project);
 }
 
 export async function listAllSessions(): Promise<SessionListItem[]> {

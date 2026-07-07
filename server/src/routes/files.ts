@@ -55,6 +55,16 @@ async function loadIgnore(root: string, rel: string): Promise<ReturnType<typeof 
   return ig;
 }
 
+// True if a relative path is hidden by .gitignore or ALWAYS_HIDE. Used to keep
+// read/write consistent with list — otherwise the tree hides .env / .git while
+// read still serves them by name and write can clobber them (#23 asks for a
+// .gitignore-aware explorer, not just a .gitignore-aware *listing*).
+async function isIgnored(root: string, rel: string): Promise<boolean> {
+  const dir = path.dirname(rel);
+  const ig = await loadIgnore(root, dir === '.' ? '' : dir);
+  return ig.ignores(rel.split(path.sep).join('/'));
+}
+
 export async function registerFileRoutes(app: FastifyInstance): Promise<void> {
   // List one directory (lazy — the tree fetches children on expand). `path`
   // is relative to the project cwd; '' or omitted = root.
@@ -62,6 +72,7 @@ export async function registerFileRoutes(app: FastifyInstance): Promise<void> {
     '/api/files/:project/list',
     async (req, reply) => {
       const root = await resolveProjectCwd(req.params.project);
+      if (!root) return reply.status(404).send({ error: 'unknown project' });
       const rel = req.query.path || '';
       const abs = await confine(root, rel);
       if (!abs) return reply.status(403).send({ error: 'path escapes project root' });
@@ -108,10 +119,13 @@ export async function registerFileRoutes(app: FastifyInstance): Promise<void> {
     '/api/files/:project/read',
     async (req, reply) => {
       const root = await resolveProjectCwd(req.params.project);
+      if (!root) return reply.status(404).send({ error: 'unknown project' });
       const rel = req.query.path || '';
       if (!rel) return reply.status(400).send({ error: 'path required' });
       const abs = await confine(root, rel);
       if (!abs) return reply.status(403).send({ error: 'path escapes project root' });
+      // Hidden in the tree must mean hidden by name too — don't serve .env / .git.
+      if (await isIgnored(root, rel)) return reply.status(403).send({ error: 'path is ignored' });
 
       let st;
       try {
@@ -139,6 +153,7 @@ export async function registerFileRoutes(app: FastifyInstance): Promise<void> {
     '/api/files/:project/write',
     async (req, reply) => {
       const root = await resolveProjectCwd(req.params.project);
+      if (!root) return reply.status(404).send({ error: 'unknown project' });
       const rel = String(req.body?.path || '');
       if (!rel) return reply.status(400).send({ error: 'path required' });
       if (typeof req.body?.content !== 'string') {
@@ -146,6 +161,9 @@ export async function registerFileRoutes(app: FastifyInstance): Promise<void> {
       }
       const abs = await confine(root, rel, 'parent');
       if (!abs) return reply.status(403).send({ error: 'path escapes project root' });
+      // Refuse writes to ignored paths (.git internals, node_modules, gitignored
+      // secrets) — same gate as read, so the tree's hidden set is enforced.
+      if (await isIgnored(root, rel)) return reply.status(403).send({ error: 'path is ignored' });
 
       try {
         const parent = await fs.stat(path.dirname(abs));

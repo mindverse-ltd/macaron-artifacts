@@ -33,8 +33,9 @@ function readToken(): string | null {
 
 function parseWindow(w: Record<string, unknown> | undefined): RateLimitWindow | null {
   if (!w) return null;
+  const utilization = Number(w.utilization ?? 0);
   return {
-    utilization: Math.round(Number(w.utilization ?? 0)),
+    utilization: Number.isFinite(utilization) ? Math.round(utilization) : 0,
     resetsAt: typeof w.resets_at === 'string' ? w.resets_at : null,
   };
 }
@@ -46,7 +47,7 @@ export async function fetchOAuthUsage(): Promise<OAuthUsage | null> {
 
   const token = readToken();
   if (!token) {
-    cache = { data: null, expiresAt: Date.now() + ERROR_TTL_MS };
+    cache = { data: null, expiresAt: Date.now() + CACHE_TTL_MS };
     return null;
   }
 

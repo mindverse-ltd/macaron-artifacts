@@ -10,7 +10,7 @@ import { api, type UsageResponse, type RateLimitWindow } from '../lib/api';
 function formatReset(iso: string | null): string | null {
   if (!iso) return null;
   const diffMs = new Date(iso).getTime() - Date.now();
-  if (diffMs <= 0) return null;
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return null;
   const totalMin = Math.ceil(diffMs / 60_000);
   if (totalMin < 60) return `${totalMin}m`;
   const h = Math.floor(totalMin / 60);

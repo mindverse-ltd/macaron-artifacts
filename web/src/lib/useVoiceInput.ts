@@ -35,6 +35,11 @@ export function useVoiceInput(onTranscript: (text: string) => void, onError?: (m
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  // Guards the async getUserMedia window: a second tap (state hasn't flipped to
+  // 'recording' yet) or an unmount mid-permission-prompt must not start a
+  // second stream or a recorder on a dead component.
+  const startingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // Feature-gate on both a configured backend and browser capability.
   useEffect(() => {
@@ -53,11 +58,15 @@ export function useVoiceInput(onTranscript: (text: string) => void, onError?: (m
   }, []);
 
   const start = useCallback(async () => {
-    if (state !== 'idle') return;
+    if (state !== 'idle' || startingRef.current) return;
+    startingRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
+      // Unmounted (or cleaned up) while the permission prompt was open — drop
+      // the stream instead of leaving the mic hot on a dead component.
+      if (!mountedRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
       streamRef.current = stream;
       const mimeType = pickMimeType();
       const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -93,6 +102,8 @@ export function useVoiceInput(onTranscript: (text: string) => void, onError?: (m
           ? 'no microphone found'
           : `microphone error: ${err.message}`;
       onError?.(msg);
+    } finally {
+      startingRef.current = false;
     }
   }, [state, cleanup, onTranscript, onError]);
 
@@ -105,7 +116,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, onError?: (m
     else if (state === 'idle') void start();
   }, [state, start, stop]);
 
-  useEffect(() => cleanup, [cleanup]);
+  useEffect(() => () => { mountedRef.current = false; cleanup(); }, [cleanup]);
 
   return { available, state, toggle };
 }

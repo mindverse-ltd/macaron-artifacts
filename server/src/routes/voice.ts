@@ -37,6 +37,8 @@ export async function registerVoiceRoutes(app: FastifyInstance): Promise<void> {
     const fd = new FormData();
     fd.append('file', new Blob([buf], { type: mimeType }), `recording.${ext}`);
     fd.append('model', STT_MODEL);
+    // Pin JSON so a backend defaulting to text/plain doesn't make r.json() throw.
+    fd.append('response_format', 'json');
     if (STT_LANGUAGE) fd.append('language', STT_LANGUAGE);
 
     try {
@@ -44,6 +46,8 @@ export async function registerVoiceRoutes(app: FastifyInstance): Promise<void> {
         method: 'POST',
         headers: { Authorization: `Bearer ${STT_API_KEY}` },
         body: fd,
+        // A hung backend would otherwise leave the client stuck in 'transcribing'.
+        signal: AbortSignal.timeout(30_000),
       });
       if (!r.ok) {
         const detail = (await r.text()).slice(0, 500);

@@ -1753,7 +1753,9 @@ export function Session(props: SessionProps = {}) {
               className={`icon-btn mic-btn${voice.state === 'recording' ? ' recording' : ''}`}
               title={voice.state === 'recording' ? 'Stop recording' : voice.state === 'transcribing' ? 'Transcribing…' : 'Voice input'}
               aria-label="Voice input"
-              disabled={sending || voice.state === 'transcribing'}
+              // Keep the button live while recording even if a send starts —
+              // it's the only way to stop the recorder, else the mic stays hot.
+              disabled={voice.state === 'transcribing' || (sending && voice.state !== 'recording')}
               onClick={() => voice.toggle()}
             >
               {voice.state === 'transcribing' ? (

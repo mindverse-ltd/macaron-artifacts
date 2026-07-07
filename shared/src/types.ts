@@ -86,3 +86,16 @@ export type HealthResponse = { ok: boolean; model: string };
 export type ConfigResponse = {
   macaron: { base: string; model: string; configured: boolean };
 };
+
+// Zero-config remote access. The server can start one tunnel at a time via an
+// installed CLI (`cloudflared` or `ngrok`) that exposes the local port on a
+// public URL, which the Settings page surfaces as a link + QR code.
+export type TunnelProvider = 'cloudflared' | 'ngrok';
+export type TunnelStatus = 'stopped' | 'starting' | 'running' | 'error';
+export type TunnelState = {
+  status: TunnelStatus;
+  provider: TunnelProvider | null;
+  url: string | null;
+  startedAt: number | null;
+  error: string | null;
+};

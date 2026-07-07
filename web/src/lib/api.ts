@@ -8,6 +8,8 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  TunnelProvider,
+  TunnelState,
 } from '@macaron/shared';
 
 import type {
@@ -15,6 +17,8 @@ import type {
   WorkspaceDetailResponse,
   SessionDetail,
   HealthResponse,
+  TunnelProvider,
+  TunnelState,
 } from '@macaron/shared';
 
 export async function getJSON<T>(url: string): Promise<T> {
@@ -135,6 +139,15 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
       },
     ),
+
+  tunnelStatus: () => getJSON<TunnelState>('/api/tunnel/status'),
+  startTunnel: (provider: TunnelProvider) =>
+    req<TunnelState>('/api/tunnel/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider }),
+    }),
+  stopTunnel: () => req<TunnelState>('/api/tunnel/stop', { method: 'POST' }),
 };
 
 export function basename(p: string): string {

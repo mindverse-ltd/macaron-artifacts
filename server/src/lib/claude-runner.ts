@@ -312,7 +312,6 @@ export type FollowupOptions = {
   resume: string;
   cwd: string;
   model?: string;
-  abortController?: AbortController;
   envOverrides?: Record<string, string> | null;
 };
 
@@ -333,23 +332,22 @@ export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string
       // Stream content_block_delta text so the route can relay it; without
       // this the SDK only emits the final `result` and there's nothing to forward.
       includePartialMessages: true,
-      abortController: opts.abortController,
       ...(opts.envOverrides ? { env: opts.envOverrides } : {}),
     },
   });
-  let raw = '';
+  let got = false;
   for await (const m of stream as AsyncIterable<SDKMessage>) {
     if (m.type === 'stream_event') {
       const ev = m.event;
       if (ev.type === 'content_block_delta') {
         const d = ev.delta as { type?: string; text?: string };
         if (d?.type === 'text_delta' && d.text) {
-          raw += d.text;
+          got = true;
           yield d.text;
         }
       }
     }
   }
-  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  raw=${raw ? 'ok' : 'empty'}`);
+  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  raw=${got ? 'ok' : 'empty'}`);
 }
 

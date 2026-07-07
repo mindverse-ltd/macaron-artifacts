@@ -306,13 +306,20 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
             // text delta is forwarded as a `followup_delta` event; the WebUI
             // accumulates + parses incrementally with partial-json. Best-effort
             // — any failure is swallowed, never blocks the turn's close.
+            // `followup_done` always fires (even on failure/abort) so the
+            // client can tear down its live-store subscription — without it,
+            // the first-turn path clears the store on `done` and loses every
+            // delta that streams afterward.
             if (!clientGone) {
               try {
                 for await (const delta of runFollowup({ resume: sid, cwd, model: providerModel, envOverrides: providerEnv })) {
-                  if (!clientGone) safeSend({ type: 'followup_delta', text: delta });
+                  if (clientGone) break;
+                  safeSend({ type: 'followup_delta', text: delta });
                 }
               } catch {
                 /* swallow: follow-up is enrichment, never fatal */
+              } finally {
+                if (!clientGone) safeSend({ type: 'followup_done' });
               }
             }
             if (!clientGone) sseDone(reply);

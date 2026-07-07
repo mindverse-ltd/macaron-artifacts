@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, basename, type Message, type SessionDetail } from '../lib/api';
 import { streamSession } from '../lib/sse';
-import { getLive, subscribeLive, clearLive, startNewSession } from '../lib/liveStore';
+import { getLive, subscribeLive, clearLive, clearFollowup, subscribeFollowup, startNewSession } from '../lib/liveStore';
 import { extractPartialCode, parseFollowups } from '../lib/partialJson';
 import {
   THINKING_VERBS,
@@ -808,7 +808,20 @@ export function Session(props: SessionProps = {}) {
   // send / session switch.
   const [followupRaw, setFollowupRaw] = useState('');
   const followups = useMemo(() => parseFollowups(followupRaw), [followupRaw]);
-  useEffect(() => setFollowupRaw(''), [sid]);
+  // First-turn follow-ups stream over an independent live-store channel that
+  // outlives the main turn's `done` (which clears the live store). 2nd+ turns
+  // deliver follow-ups via streamSession's onFollowupDelta instead.
+  useEffect(() => {
+    if (!isPending) return;
+    const unsub = subscribeFollowup(sid, (text, done) => {
+      if (done) return;
+      setFollowupRaw((prev) => prev + text);
+    });
+    return () => {
+      unsub();
+      clearFollowup(sid);
+    };
+  }, [sid, isPending]);
   // Single ordered timeline for the current turn: text chunks and tool
   // calls/permissions are interleaved in the same array so the render
   // matches Claude's actual "text → tool → text → tool" sequencing. Previous
@@ -1012,6 +1025,7 @@ export function Session(props: SessionProps = {}) {
     setData(null);
     setLiveTurn([]);
     setLiveUser('');
+    setFollowupRaw('');
     setShown(PAGE_SIZE);
     if (isNew) return; // no jsonl yet — empty state until first send
     // For brand-new sessions the jsonl may not exist yet — suppress the 404 error.
@@ -1059,7 +1073,7 @@ export function Session(props: SessionProps = {}) {
       // Follow-ups arrive over the liveStore path (startNewSession, i.e. the
       // first turn of a brand-new session) the same way streamSession's
       // onFollowupDelta delivers them on later turns.
-      setFollowupRaw(s.followupRaw ?? '');
+      setFollowupRaw('');
       // Project liveStore timeline → Session Item shape (fresh objects so
       // React notices identity changes even when the underlying entry was
       // mutated in-place).
@@ -1122,6 +1136,9 @@ export function Session(props: SessionProps = {}) {
         setPolling(false);
         setSending(false);
         clearLive(sid);
+        // Follow-up suggestions stream AFTER `done` over an independent
+        // channel (subscribeFollowup), so clearing the live store here is
+        // safe — the stop semantics are identical to before the feature.
         // Let the parent (draft-tile owner) drop this sid from its
         // pending set so a later refresh doesn't re-enter this branch.
         onPendingConsumed?.();

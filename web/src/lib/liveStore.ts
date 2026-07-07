@@ -45,9 +45,6 @@ export type LiveState = {
   // usage events. -1 = no signal received yet (indicator falls back to a
   // len/4 estimate). Reset to -1 at the start of each new turn.
   outputTokens: number;
-  // Raw (unparsed) follow-up text streamed after each turn. The WebUI parses
-  // this incrementally with partial-json; we only buffer the accumulated text.
-  followupRaw?: string;
   done: boolean;
   error?: string;
 };
@@ -64,6 +61,11 @@ function appendText(items: LiveTurnItem[], text: string): void {
 
 const states = new Map<string, LiveState>();
 const watchers = new Map<string, Set<(s: LiveState) => void>>();
+// Follow-up suggestions are an "add-on" stream: they arrive AFTER the main
+// turn's `done` (which clears the live store), so they ride a separate
+// channel with its own subscribers — independent of `states`/`watchers`
+// lifecycle. This keeps the main turn's stop semantics untouched.
+const followupWatchers = new Map<string, Set<(text: string, done: boolean) => void>>();
 
 export function getLive(sid: string): LiveState | undefined {
   return states.get(sid);
@@ -93,6 +95,27 @@ function notify(sid: string): void {
 export function clearLive(sid: string): void {
   states.delete(sid);
   watchers.delete(sid);
+}
+
+// Subscribe to the add-on follow-up stream for a session. Callback fires per
+// text delta and once with done=true when the stream ends. Independent of
+// clearLive — the main turn may finish (and clear the live store) before any
+// follow-up arrives, so this channel outlives it.
+export function subscribeFollowup(sid: string, cb: (text: string, done: boolean) => void): () => void {
+  let set = followupWatchers.get(sid);
+  if (!set) {
+    set = new Set();
+    followupWatchers.set(sid, set);
+  }
+  set.add(cb);
+  return () => {
+    set!.delete(cb);
+    if (set!.size === 0) followupWatchers.delete(sid);
+  };
+}
+
+export function clearFollowup(sid: string): void {
+  followupWatchers.delete(sid);
 }
 
 export type NewSessionOptions = {
@@ -255,11 +278,11 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
                   notify(sid);
                 }
               } else if (sid && p.type === 'followup_delta') {
-                const s = states.get(sid);
-                if (s) {
-                  s.followupRaw = (s.followupRaw || '') + p.text;
-                  notify(sid);
-                }
+                // Rides the independent follow-up channel — survives clearLive
+                // (the main turn's `done` clears states before this arrives).
+                followupWatchers.get(sid)?.forEach((cb) => cb(p.text, false));
+              } else if (sid && p.type === 'followup_done') {
+                followupWatchers.get(sid)?.forEach((cb) => cb('', true));
               } else if (sid && p.type === 'done') {
                 const s = states.get(sid);
                 if (s) {

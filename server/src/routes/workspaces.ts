@@ -162,13 +162,18 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             // Same post-turn follow-up as the resume path: stream a throwaway,
             // persistSession:false query resuming this fresh session (shared
             // prefix → cache hit). Best-effort; never blocks the turn close.
+            // `followup_done` always fires so the client can tear down its
+            // live-store subscription (see sessions.ts for the full rationale).
             if (!clientGone && capturedSid) {
               try {
                 for await (const delta of runFollowup({ resume: capturedSid, cwd, model, envOverrides: providerEnv })) {
-                  if (!clientGone) safeSend({ type: 'followup_delta', text: delta });
+                  if (clientGone) break;
+                  safeSend({ type: 'followup_delta', text: delta });
                 }
               } catch {
                 /* swallow: follow-up is enrichment, never fatal */
+              } finally {
+                if (!clientGone) safeSend({ type: 'followup_done' });
               }
             }
             if (!clientGone) sseDone(reply);

@@ -20,22 +20,28 @@ export function encodeClaudeProjectName(cwd: string): string {
 
 const REGISTRY_FILE = path.join(PROJECTS_ROOT, '.macaron-projects.json');
 const cwdByProject = new Map<string, string>();
-let loaded = false;
 
-async function loadRegistry(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
-  try {
-    const raw = JSON.parse(await fs.readFile(REGISTRY_FILE, 'utf8')) as unknown;
-    if (!raw || typeof raw !== 'object') return;
-    for (const [project, cwd] of Object.entries(raw)) {
-      if (typeof project === 'string' && typeof cwd === 'string') cwdByProject.set(project, cwd);
+// Memoize the in-flight load promise, not a boolean. A boolean flag flipped
+// before the `await` lets a second caller see "loaded" while the map is still
+// empty, so it reads undefined and falls back to lossy decoding — the exact
+// stranded-project failure this file exists to prevent. Sharing the promise
+// makes every concurrent caller await the same populated result.
+let loadPromise: Promise<void> | undefined;
+
+function loadRegistry(): Promise<void> {
+  return (loadPromise ??= (async () => {
+    try {
+      const raw = JSON.parse(await fs.readFile(REGISTRY_FILE, 'utf8')) as unknown;
+      if (!raw || typeof raw !== 'object') return;
+      for (const [project, cwd] of Object.entries(raw)) {
+        if (typeof project === 'string' && typeof cwd === 'string') cwdByProject.set(project, cwd);
+      }
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // Corrupt registry should not block existing session-backed projects.
+      }
     }
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-      // Corrupt registry should not block existing session-backed projects.
-    }
-  }
+  })());
 }
 
 async function persistRegistry(): Promise<void> {

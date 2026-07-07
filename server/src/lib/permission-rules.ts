@@ -26,12 +26,20 @@ let cache: PermFile | null = null;
 const sessionRules = new Map<string, Set<string>>();
 
 // Commands where the second word is the real verb — keep it in the key so
-// `git status` doesn't unlock `git push`.
-const TWO_WORD = new Set(['git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'bunx', 'pnpx', 'docker', 'cargo', 'go', 'kubectl']);
+// `git status` doesn't unlock `git push`. `sudo` is here for safety: without
+// it every `sudo <x>` collapses to `Bash(sudo)`, so remembering a benign
+// `sudo ls` would silently auto-approve `sudo rm -rf /`.
+const TWO_WORD = new Set(['sudo', 'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'bunx', 'pnpx', 'docker', 'cargo', 'go', 'kubectl']);
 
 // Split a shell line into sub-commands on unquoted && || ; | & operators.
 // Quoted/backtick spans are treated opaquely so a separator inside a string
 // doesn't mis-split (same limitation the references ship with).
+//
+// KNOWN GAP: `$(...)` / backtick command substitution is NOT a split boundary,
+// so `echo $(rm -rf /)` keys as `Bash(echo)` while the shell still runs the
+// inner command. Auto-approving it requires the user to have already remembered
+// the outer prefix; we accept that (matches every reference WebUI) rather than
+// shipping a full shell parser to the trust boundary.
 function splitCompound(cmd: string): string[] {
   const parts: string[] = [];
   let cur = '';
@@ -116,11 +124,20 @@ export function rememberSession(sid: string, keys: string[]): void {
   for (const k of keys) set.add(k);
 }
 
+// Serialize project writes: the load/edit/persist below is a read-modify-write
+// with an await in the middle, so two concurrent sessions remembering for the
+// same cwd could otherwise read the same stale array and clobber each other.
+let writeChain: Promise<void> = Promise.resolve();
+
 export async function rememberProject(cwd: string, keys: string[]): Promise<void> {
   if (!cwd || keys.length === 0) return;
-  if (!cache) cache = await load();
-  const cur = new Set(cache.projects[cwd] || []);
-  for (const k of keys) cur.add(k);
-  cache.projects[cwd] = [...cur];
-  await persist();
+  const run = writeChain.then(async () => {
+    if (!cache) cache = await load();
+    const cur = new Set(cache.projects[cwd] || []);
+    for (const k of keys) cur.add(k);
+    cache.projects[cwd] = [...cur];
+    await persist();
+  });
+  writeChain = run.catch(() => {}); // keep the chain alive even if one write fails
+  return run;
 }

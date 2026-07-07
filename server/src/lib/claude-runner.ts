@@ -184,7 +184,12 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
             });
             if (decision.decision === 'allow') {
               if (decision.scope === 'session') rememberSession(currentSid, keys);
-              else if (decision.scope === 'always') await rememberProject(opts.cwd, keys);
+              // A persist failure must not strand the callback: the user already
+              // clicked Allow, so log and proceed rather than leaving the SDK's
+              // pending promise (and their tool call) hung forever.
+              else if (decision.scope === 'always') {
+                try { await rememberProject(opts.cwd, keys); } catch (e) { console.error('[permission-rules] persist failed:', e); }
+              }
               push({ kind: 'permission_resolved', id, decision: 'allow' });
               return { behavior: 'allow', updatedInput: input };
             }

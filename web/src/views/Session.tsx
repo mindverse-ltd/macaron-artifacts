@@ -803,6 +803,10 @@ export function Session(props: SessionProps = {}) {
     });
   }, [sending, polling, sid, project]);
   const [liveUser, setLiveUser] = useState<string>('');
+  // Suggested follow-up questions the server emits after each turn (a
+  // throwaway cache-hit query). Cleared on every new send / session switch.
+  const [followups, setFollowups] = useState<string[]>([]);
+  useEffect(() => setFollowups([]), [sid]);
   // Single ordered timeline for the current turn: text chunks and tool
   // calls/permissions are interleaved in the same array so the render
   // matches Claude's actual "text → tool → text → tool" sequencing. Previous
@@ -1050,6 +1054,10 @@ export function Session(props: SessionProps = {}) {
       if (!s) return;
       setLiveUser(s.userText);
       setOutputTokens(s.outputTokens);
+      // Follow-ups arrive over the liveStore path (startNewSession, i.e. the
+      // first turn of a brand-new session) the same way streamSession's
+      // onFollowup delivers them on later turns.
+      setFollowups(s.followups ?? []);
       // Project liveStore timeline → Session Item shape (fresh objects so
       // React notices identity changes even when the underlying entry was
       // mutated in-place).
@@ -1215,6 +1223,7 @@ export function Session(props: SessionProps = {}) {
       const sentImages = images;
       setInput('');
       setImages([]);
+      setFollowups([]);
       // Persist to prompt history + reset navigation state.
       const nextHistory = pushHistory(project, text);
       setHistory(nextHistory);
@@ -1404,6 +1413,7 @@ export function Session(props: SessionProps = {}) {
             // and a page refresh reloads the canonical jsonl.
             setSending(false);
           },
+          onFollowup: (qs) => setFollowups(qs),
         },
       );
     },
@@ -1505,6 +1515,19 @@ export function Session(props: SessionProps = {}) {
       */}
       <div className="thread tui" ref={threadRef}>
         {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} />}
+        {/* Suggested follow-ups from the post-turn throwaway query. Rendered
+            ABOVE liveTurn in DOM (so BELOW it visually — column-reverse)
+            i.e. just above the input area, right under the latest reply.
+            Clicking fills the textarea (setInput), doesn't auto-send. */}
+        {followups.length > 0 && !sending && (
+          <div className="ti-followups">
+            {followups.map((q, i) => (
+              <button key={i} className="ti-followup-chip" onClick={() => setInput(q)}>
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Single ordered timeline for the current turn. Items are appended
             to `liveTurn` in exact SSE arrival order, so reversing here
             (thread is column-reverse) puts the newest at the visual bottom

@@ -85,6 +85,7 @@ export type SessionStreamHandlers = {
   onUsage?: (u: { outputTokens: number; thinkingTokens?: number }) => void;
   onError?: (msg: string) => void;
   onDone?: () => void;
+  onFollowup?: (questions: string[]) => void;
 };
 
 export async function streamSession(
@@ -143,6 +144,7 @@ export async function streamSession(
         else if (p.type === 'usage') h.onUsage?.(p);
         else if (p.type === 'error') h.onError?.(p.error);
         else if (p.type === 'warn') console.warn('[claude]', p.text);
+        else if (p.type === 'followup') h.onFollowup?.(p.questions);
       } catch {
         /* ignore */
       }

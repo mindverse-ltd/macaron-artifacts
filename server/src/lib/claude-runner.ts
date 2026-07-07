@@ -286,3 +286,72 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
   }
 }
 
+// Follow-up question suggestions: a second, throwaway query that resumes the
+// just-finished session so it shares the LLM prefix with the main turn —
+// provider-side prompt caching kicks in, so it's near-free. persistSession:
+// false keeps this off disk (the original transcript is never appended to),
+// and allowedTools: [] means the model can only emit text. The prompt is a
+// no-tools-guard (à la Piebald's summarization guard) fused with promplate's
+// suggest.j2 content shape: user-perspective, 2-5 items, JSON list, same
+// language/tone as the user.
+const FOLLOWUP_PROMPT = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+You already have the full conversation above as context — tool calls will be rejected and waste your only turn.
+
+Your task: envisage 2-5 possible follow-up questions the USER could ask next to continue this conversation productively.
+
+Rules:
+- User's perspective: questions the user would ask the assistant, not the reverse.
+- Each fundamentally different in intent (dive deeper / pivot / verify / request an example / challenge an assumption).
+- 2-8 words each, concise, no duplication, no platitudes like "thanks".
+- Use THE SAME LANGUAGE and tone as the user's most recent message.
+
+Output ONLY a JSON array of strings, nothing else. Example:
+["how does caching actually work here?","can you show a smaller example?","what breaks if I skip persistSession?"]`;
+
+export type FollowupOptions = {
+  resume: string;
+  cwd: string;
+  model?: string;
+  abortController?: AbortController;
+  envOverrides?: Record<string, string> | null;
+};
+
+// Returns up to 5 suggested follow-up questions, or [] on any failure
+// (parse error, provider error, empty). Never throws — callers treat the
+// result as best-effort enrichment of the just-completed turn.
+export async function runFollowup(opts: FollowupOptions): Promise<string[]> {
+  const stream = query({
+    prompt: FOLLOWUP_PROMPT,
+    options: {
+      cwd: opts.cwd,
+      resume: opts.resume,
+      model: opts.model,
+      // No tools, no MCP, no permission callback — pure text generation.
+      allowedTools: [],
+      persistSession: false,
+      abortController: opts.abortController,
+      ...(opts.envOverrides ? { env: opts.envOverrides } : {}),
+    },
+  });
+  let raw = '';
+  for await (const m of stream as AsyncIterable<SDKMessage>) {
+    if (m.type === 'result' && !m.is_error) {
+      const r = m as unknown as { result?: string };
+      if (r.result) raw = r.result;
+    }
+  }
+  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  questions=${raw ? 'ok' : 'empty'}`);
+  if (!raw) return [];
+  // The model is told to emit only a JSON array, but it sometimes wraps it in
+  // prose or fences — extract the first [...] span and tolerate trailing text.
+  const match = raw.match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[0]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === 'string').slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+

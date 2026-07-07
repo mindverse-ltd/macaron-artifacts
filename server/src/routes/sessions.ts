@@ -12,7 +12,7 @@ import {
 } from '../lib/session-store.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveGet } from '../lib/live-registry.js';
-import { runClaude, type AttachedImage } from '../lib/claude-runner.js';
+import { runClaude, runFollowup, type AttachedImage } from '../lib/claude-runner.js';
 import { getActiveProviderEnv, getActiveProviderRaw } from '../lib/settings-store.js';
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
 import { resolvePending } from '../lib/permission-registry.js';
@@ -300,6 +300,19 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
           else if (ev.kind === 'done') {
             safeSend({ type: 'done', exitCode: ev.exitCode });
             endRun(sid);
+            // After the main turn: fire a throwaway follow-up-suggestions
+            // query resuming the same session (shared prefix → provider
+            // cache hit, near-free). persistSession:false keeps it off disk
+            // so the original transcript is never appended to. Best-effort —
+            // any failure is swallowed so it never blocks the turn's close.
+            if (!clientGone) {
+              try {
+                const questions = await runFollowup({ resume: sid, cwd, model: providerModel, envOverrides: providerEnv });
+                if (!clientGone) safeSend({ type: 'followup', questions });
+              } catch {
+                /* swallow: follow-up is enrichment, never fatal */
+              }
+            }
             if (!clientGone) sseDone(reply);
           }
         }

@@ -65,7 +65,7 @@ const watchers = new Map<string, Set<(s: LiveState) => void>>();
 // turn's `done` (which clears the live store), so they ride a separate
 // channel with its own subscribers — independent of `states`/`watchers`
 // lifecycle. This keeps the main turn's stop semantics untouched.
-const followupWatchers = new Map<string, Set<(text: string, done: boolean) => void>>();
+const followupWatchers = new Map<string, Set<(text: string) => void>>();
 
 export function getLive(sid: string): LiveState | undefined {
   return states.get(sid);
@@ -98,10 +98,9 @@ export function clearLive(sid: string): void {
 }
 
 // Subscribe to the add-on follow-up stream for a session. Callback fires per
-// text delta and once with done=true when the stream ends. Independent of
-// clearLive — the main turn may finish (and clear the live store) before any
-// follow-up arrives, so this channel outlives it.
-export function subscribeFollowup(sid: string, cb: (text: string, done: boolean) => void): () => void {
+// text delta. Independent of clearLive — the main turn may finish (and clear
+// the live store) before any follow-up arrives, so this channel outlives it.
+export function subscribeFollowup(sid: string, cb: (text: string) => void): () => void {
   let set = followupWatchers.get(sid);
   if (!set) {
     set = new Set();
@@ -276,9 +275,7 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
               } else if (sid && p.type === 'followup_delta') {
                 // Rides the independent follow-up channel — survives clearLive
                 // (the main turn's `done` clears states before this arrives).
-                followupWatchers.get(sid)?.forEach((cb) => cb(p.text, false));
-              } else if (sid && p.type === 'followup_done') {
-                followupWatchers.get(sid)?.forEach((cb) => cb('', true));
+                followupWatchers.get(sid)?.forEach((cb) => cb(p.text));
               } else if (sid && p.type === 'done') {
                 const s = states.get(sid);
                 if (s) {

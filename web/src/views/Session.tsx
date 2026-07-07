@@ -819,8 +819,8 @@ export function Session(props: SessionProps = {}) {
   useEffect(() => {
     const gen = ++followupGen.current;
     setFollowupRaw('');
-    return subscribeFollowup(sid, (text, done) => {
-      if (done || followupGen.current !== gen) return;
+    return subscribeFollowup(sid, (text) => {
+      if (followupGen.current !== gen) return;
       setFollowupRaw((prev) => prev + text);
     });
   }, [sid]);

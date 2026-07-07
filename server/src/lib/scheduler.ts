@@ -74,7 +74,13 @@ export async function fireSchedule(schedule: Schedule, advance = true): Promise<
       stream = runCodex({ prompt: schedule.prompt, cwd: schedule.cwd, abortController });
     } else {
       const { model, env } = getActiveProviderEnv();
-      stream = runClaude({ prompt: schedule.prompt, cwd: schedule.cwd, model, envOverrides: env, abortController });
+      // A scheduled fire is headless — no client is attached to answer the
+      // canUseTool permission prompts a 'default'-mode run raises, so it would
+      // park forever on the first tool call. Force bypassPermissions so tools
+      // auto-approve (claude-runner wires allowDangerouslySkipPermissions off
+      // this). Matches unattended semantics; codex already runs with approval
+      // policy 'never'.
+      stream = runClaude({ prompt: schedule.prompt, cwd: schedule.cwd, model, envOverrides: env, abortController, permissionMode: 'bypassPermissions' });
     }
     // Register the run under the sid as soon as we learn it so /stop can abort.
     const wrapped = (async function* () {

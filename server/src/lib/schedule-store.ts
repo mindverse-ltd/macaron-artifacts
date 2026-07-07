@@ -127,6 +127,9 @@ export async function recordRun(id: string, result: { sessionId: string | null; 
   s.lastRunAt = now;
   s.lastStatus = result.ok ? 'ok' : 'error';
   if (result.sessionId) s.lastSessionId = result.sessionId;
+  // +1s so a recurring cron doesn't recompute the slot we just fired and
+  // re-fire it on the next tick. A run slower than ~55s on a per-minute cron
+  // could skip a slot; acceptable for v1.
   const next = computeNextRun(s.pattern, new Date(now + 1000));
   s.nextRunAt = next;
   if (next === null) s.status = 'done';

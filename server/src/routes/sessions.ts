@@ -310,7 +310,10 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
             // client can tear down its live-store subscription — without it,
             // the first-turn path clears the store on `done` and loses every
             // delta that streams afterward.
-            if (!clientGone) {
+            // Only on a clean finish (exitCode 0): a Stop (abort → -1) or a
+            // mid-turn error must stay byte-identical to pre-feature behavior,
+            // never spinning up a follow-up query on an aborted transcript.
+            if (!clientGone && ev.exitCode === 0) {
               try {
                 for await (const delta of runFollowup({ resume: sid, cwd, model: providerModel, envOverrides: providerEnv })) {
                   if (clientGone) break;

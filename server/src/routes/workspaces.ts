@@ -164,7 +164,8 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             // prefix → cache hit). Best-effort; never blocks the turn close.
             // `followup_done` always fires so the client can tear down its
             // live-store subscription (see sessions.ts for the full rationale).
-            if (!clientGone && capturedSid) {
+            // Gated on exitCode 0 so an abort/error stays identical to before.
+            if (!clientGone && capturedSid && ev.exitCode === 0) {
               try {
                 for await (const delta of runFollowup({ resume: capturedSid, cwd, model, envOverrides: providerEnv })) {
                   if (clientGone) break;

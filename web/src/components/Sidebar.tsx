@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { api, basename, type Workspace, type SessionListItem } from '../lib/api';
+import { api, basename, type Workspace, type SessionListItem, type WorktreeInfo } from '../lib/api';
 import { useToast } from './Toast';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
@@ -25,6 +25,9 @@ export function Sidebar() {
   // Per-workspace set of canvas-pinned sids, so the session rows can show
   // + / ✓ toggles. Re-reads from localStorage whenever a canvas changes.
   const [canvasBy, setCanvasBy] = useState<Record<string, string[]>>({});
+  // sessionId → active worktree, so a session row's context menu can offer
+  // merge/discard only for sessions that actually run in a worktree.
+  const [worktrees, setWorktrees] = useState<Record<string, WorktreeInfo>>({});
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
@@ -43,6 +46,10 @@ export function Sidebar() {
         }),
       );
       setWorkspaces(results);
+      try {
+        const wt = await api.worktrees();
+        setWorktrees(Object.fromEntries(wt.worktrees.map((w) => [w.sessionId, w])));
+      } catch {}
     } catch {}
   }, []);
 
@@ -137,10 +144,8 @@ export function Sidebar() {
   const sessMenu = (w: WsData, s: SessionListItem, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: [
+    const wt = worktrees[s.sessionId];
+    const items: MenuItem[] = [
         {
           icon: '◎',
           label: 'Focus Session',
@@ -165,8 +170,36 @@ export function Sidebar() {
             }
           },
         },
-        'separator',
-        {
+    ];
+    if (wt) {
+      items.push('separator', {
+        icon: '⭱',
+        label: wt.dirty ? 'Merge worktree (commit first)' : 'Merge worktree → base',
+        onClick: async () => {
+          try {
+            await api.mergeWorktree(s.sessionId);
+            toast(`merged ${wt.branch} → ${wt.baseBranch}`);
+            loadData();
+          } catch (err) {
+            toast(`merge failed: ${(err as Error).message}`);
+          }
+        },
+      }, {
+        icon: '🗑',
+        label: 'Discard worktree',
+        danger: true,
+        onClick: async () => {
+          try {
+            await api.discardWorktree(s.sessionId, wt.dirty === true);
+            toast(`discarded ${wt.branch}`);
+            loadData();
+          } catch (err) {
+            toast(`discard failed: ${(err as Error).message}`);
+          }
+        },
+      });
+    }
+    items.push('separator', {
           icon: '✕',
           label: 'Delete Session',
           danger: true,
@@ -179,9 +212,8 @@ export function Sidebar() {
               toast(`delete failed: ${(err as Error).message}`);
             }
           },
-        },
-      ],
     });
+    setCtxMenu({ x: e.clientX, y: e.clientY, items });
   };
 
   return (

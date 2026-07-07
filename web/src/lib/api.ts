@@ -8,6 +8,7 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  WorktreeInfo,
 } from '@macaron/shared';
 
 import type {
@@ -15,6 +16,7 @@ import type {
   WorkspaceDetailResponse,
   SessionDetail,
   HealthResponse,
+  WorktreeInfo,
 } from '@macaron/shared';
 
 export async function getJSON<T>(url: string): Promise<T> {
@@ -135,6 +137,11 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
       },
     ),
+  worktrees: () => getJSON<{ worktrees: WorktreeInfo[] }>('/api/worktrees'),
+  mergeWorktree: (sid: string) =>
+    req<{ ok: true; merged: true }>(`/api/worktrees/${encodeURIComponent(sid)}/merge`, { method: 'POST' }),
+  discardWorktree: (sid: string, force = false) =>
+    req<{ ok: true }>(`/api/worktrees/${encodeURIComponent(sid)}/discard${force ? '?force=1' : ''}`, { method: 'POST' }),
 };
 
 export function basename(p: string): string {

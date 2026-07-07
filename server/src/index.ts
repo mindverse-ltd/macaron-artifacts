@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { HOST, PORT, WEB_DIST } from './config.js';
 import { warmSettingsCache } from './lib/settings-store.js';
+import { warmWorktreeCache } from './lib/worktree-store.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
 import { checkGenUI } from './lib/genui-check.js';
 
@@ -12,6 +13,7 @@ process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = process.env.CLAUDE_CODE_STREAM_CL
 import { registerHealthRoutes } from './routes/health.js';
 import { registerWorkspaceRoutes } from './routes/workspaces.js';
 import { registerSessionRoutes } from './routes/sessions.js';
+import { registerWorktreeRoutes } from './routes/worktrees.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
@@ -30,6 +32,7 @@ await app.register(async (instance) => {
   await registerRelayRoutes(instance);
   await registerWorkspaceRoutes(instance);
   await registerSessionRoutes(instance);
+  await registerWorktreeRoutes(instance);
   await registerCodexRoutes(instance);
 });
 
@@ -67,6 +70,7 @@ if (existsSync(WEB_DIST)) {
 
 try {
   await warmSettingsCache();
+  await warmWorktreeCache();
   await warmCodexConfigCache();
   await app.listen({ host: HOST, port: PORT });
   app.log.info(`macaron server listening on http://${HOST}:${PORT}`);

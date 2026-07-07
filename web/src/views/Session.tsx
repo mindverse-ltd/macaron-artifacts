@@ -854,6 +854,9 @@ export function Session(props: SessionProps = {}) {
   const permissionModeRef = useRef<PermissionMode>('default');
   permissionModeRef.current = permissionMode;
   const [images, setImages] = useState<AttachedImage[]>([]);
+  // New-session-only: run the first turn in a dedicated git worktree+branch so
+  // parallel sessions in one repo don't share a working tree. Ignored on resume.
+  const [isolate, setIsolate] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1243,6 +1246,7 @@ export function Session(props: SessionProps = {}) {
             text,
             permissionMode,
             images: sentImages.map((i) => ({ mimeType: i.mimeType, dataUrl: i.dataUrl })),
+            isolate,
           });
           if (onCreated) {
             // Canvas draft-tile path: hand the real sid to the parent so it
@@ -1407,7 +1411,7 @@ export function Session(props: SessionProps = {}) {
         },
       );
     },
-    [project, sid, input, sending, load, images, permissionMode, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
+    [project, sid, input, sending, load, images, permissionMode, isolate, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
   );
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1663,6 +1667,24 @@ export function Session(props: SessionProps = {}) {
             busyCompact={busyCompact}
             onCompact={() => void handleCompact()}
           />
+          {isNew && (
+            <button
+              type="button"
+              className={`icon-btn iso-toggle${isolate ? ' active' : ''}`}
+              title={isolate ? 'Isolated: runs in a dedicated git worktree + branch' : 'Run in a dedicated git worktree + branch (no-op if not a git repo)'}
+              aria-label="Toggle worktree isolation"
+              aria-pressed={isolate}
+              onClick={() => setIsolate((v) => !v)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="9" r="3" />
+                <path d="M6 9v6" />
+                <path d="M18 12a6 6 0 0 1-6 6H9" />
+              </svg>
+            </button>
+          )}
           <div className="session-input-spacer" />
           {sending ? (
             <button

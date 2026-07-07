@@ -80,6 +80,22 @@ export type SessionDetail = {
   mcpCount?: number;
 };
 
+// A per-session git worktree: the session's agent runs with cwd pointing at
+// `worktreePath` (a dedicated branch off `baseBranch`), so parallel sessions
+// in one repo never stomp each other's uncommitted changes. `exists` reflects
+// whether the worktree dir is still on disk (users can delete it manually);
+// `dirty` is set from `git status --porcelain` when the tree is present.
+export type WorktreeInfo = {
+  sessionId: string;
+  repoRoot: string;
+  worktreePath: string;
+  branch: string;
+  baseBranch: string;
+  status: 'active' | 'merged' | 'discarded';
+  exists: boolean;
+  dirty?: boolean;
+};
+
 export type WorkspacesResponse = { workspaces: Workspace[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
 export type HealthResponse = { ok: boolean; model: string };

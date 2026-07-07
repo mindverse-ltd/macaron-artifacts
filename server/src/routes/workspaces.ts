@@ -13,6 +13,7 @@ import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, type AttachedImage } from '../lib/claude-runner.js';
 import { registerRun, endRun } from '../lib/active-runs.js';
 import { getActiveProviderEnv } from '../lib/settings-store.js';
+import { createWorktree, bindWorktree, type PendingWorktree } from '../lib/worktree-store.js';
 
 type Params = { project: string };
 type NewSessionBody = {
@@ -20,6 +21,10 @@ type NewSessionBody = {
   model?: string;
   permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
   images?: AttachedImage[];
+  // When true, run this session in a dedicated git worktree + branch off the
+  // repo's current HEAD, so it doesn't share the working tree with siblings.
+  // Silently no-ops if the derived cwd isn't a git work tree.
+  isolate?: boolean;
 };
 
 export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<void> {
@@ -83,6 +88,19 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
         return reply.status(400).send({ error: `cwd unusable: ${cwd} (${(e as Error).message})` });
       }
 
+      // Optional worktree isolation: create a dedicated branch+worktree off the
+      // repo's HEAD and run the agent there. Created BEFORE the run so cwd
+      // exists; the record is bound to the sessionId once the SDK emits it.
+      let pendingWt: PendingWorktree | null = null;
+      if (req.body?.isolate) {
+        try {
+          pendingWt = await createWorktree(cwd);
+          if (pendingWt) cwd = pendingWt.worktreePath;
+        } catch (e) {
+          return reply.status(400).send({ error: `worktree create failed: ${(e as Error).message}` });
+        }
+      }
+
       startSSE(reply);
       sseSend(reply, { type: 'starting', cwd });
 
@@ -114,6 +132,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             capturedSid = ev.sessionId;
             liveStart(capturedSid, { cwd });
             registerRun(capturedSid, abortController);
+            if (pendingWt) bindWorktree(capturedSid, pendingWt).catch(() => {});
             livePush(capturedSid, { type: 'user-text', text });
             safeSend({ type: 'meta', cwd, sessionId: capturedSid });
           } else if (ev.kind === 'delta') {

@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs';
+import { watch } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import type { FastifyReply } from 'fastify';
 import type { SystemEvent } from '@macaron/shared';
@@ -13,7 +13,6 @@ import { sseSend } from './sse.js';
 // the client to refetch its (already cheap, mtime-cached) workspace list.
 
 const subs = new Set<FastifyReply>();
-const watchers: FSWatcher[] = [];
 const DEBOUNCE_MS = 400;
 const debounce = new Map<SystemEvent['engine'], ReturnType<typeof setTimeout>>();
 
@@ -23,6 +22,7 @@ export function subscribeSystemEvents(reply: FastifyReply): void {
 }
 
 function broadcast(engine: SystemEvent['engine']): void {
+  if (subs.size === 0) return;
   const prev = debounce.get(engine);
   if (prev) clearTimeout(prev);
   debounce.set(
@@ -55,7 +55,6 @@ async function watchTree(dir: string, engine: SystemEvent['engine']): Promise<vo
       broadcast(engine);
     });
     w.on('error', () => {});
-    watchers.push(w);
   } catch {
     // Recursive watch is unsupported on some platforms/filesystems. Degrade
     // silently — clients still have their interval poll as a fallback.

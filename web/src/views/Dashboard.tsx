@@ -35,10 +35,16 @@ export function Dashboard() {
   useEffect(() => {
     load();
     // Live-refresh when a claude session changes on disk — including runs
-    // started outside the WebUI in a terminal. No interval poll needed here.
-    return subscribeSystemEvents((ev) => {
+    // started outside the WebUI in a terminal. Keep a slow poll as an SSE
+    // fallback, matching the workspace/sidebar views.
+    const t = setInterval(load, 30_000);
+    const unsub = subscribeSystemEvents((ev) => {
       if (ev.engine === 'claude') void load();
     });
+    return () => {
+      clearInterval(t);
+      unsub();
+    };
   }, [load]);
 
   return (

@@ -16,6 +16,7 @@ type PtySession = {
   scrollback: string;
   subs: Set<FastifyReply>;
   exited: boolean;
+  exitCode: number;
   reaper?: NodeJS.Timeout;
 };
 
@@ -55,6 +56,7 @@ export function getOrCreatePty(tid: string, opts: { cwd: string; cols: number; r
     scrollback: '',
     subs: new Set(),
     exited: false,
+    exitCode: 0,
   };
   sessions.set(tid, s);
 
@@ -65,6 +67,7 @@ export function getOrCreatePty(tid: string, opts: { cwd: string; cols: number; r
   });
   proc.onExit(({ exitCode }) => {
     s.exited = true;
+    s.exitCode = exitCode;
     broadcast(s, { type: 'exit', exitCode });
     for (const sub of s.subs) {
       try {
@@ -96,7 +99,7 @@ export function ptySubscribe(tid: string, reply: FastifyReply): boolean {
   }
   if (s.exited) {
     try {
-      sseSend(reply, { type: 'exit', exitCode: 0 });
+      sseSend(reply, { type: 'exit', exitCode: s.exitCode });
       reply.raw.write('data: [DONE]\n\n');
       reply.raw.end();
     } catch {
@@ -125,7 +128,9 @@ export function ptyInput(tid: string, data: string): boolean {
 export function ptyResize(tid: string, cols: number, rows: number): boolean {
   const s = sessions.get(tid);
   if (!s || s.exited) return false;
-  if (cols < 1 || rows < 1) return false;
+  // NaN slips past a plain `< 1` guard (NaN < 1 === false), so an empty
+  // resize body would reach node-pty's resize() with NaN — reject explicitly.
+  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) return false;
   s.cols = cols;
   s.rows = rows;
   try {

@@ -1,7 +1,7 @@
 // SSE consumers for the /api/codex/threads endpoints. Parses `data:` frames
 // into typed events the chat view can consume with simple callbacks.
 
-import { authHeaders } from '../lib/auth';
+import { authedFetch } from '../lib/auth';
 
 export type CodexStreamEvent =
   | { type: 'starting'; cwd?: string }
@@ -67,18 +67,18 @@ async function pump(resp: Response, h: CodexStreamHandlers): Promise<void> {
 }
 
 export async function startCodexThread(body: Body, h: CodexStreamHandlers): Promise<void> {
-  const resp = await fetch('/api/codex/threads', {
+  const resp = await authedFetch('/api/codex/threads', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...authHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
   await pump(resp, h);
 }
 
 export async function sendCodexMessage(sid: string, body: Body, h: CodexStreamHandlers): Promise<void> {
-  const resp = await fetch(`/api/codex/threads/${encodeURIComponent(sid)}/message`, {
+  const resp = await authedFetch(`/api/codex/threads/${encodeURIComponent(sid)}/message`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...authHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
   await pump(resp, h);

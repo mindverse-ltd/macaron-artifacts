@@ -9,7 +9,10 @@ export function isLoopback(ip: string | undefined): boolean {
 }
 
 export function isLoopbackHost(host: string): boolean {
-  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  // Match the whole IPv4 loopback block 127.0.0.0/8, mirroring isLoopback — a
+  // 127.x bind (e.g. 127.0.0.2) is still fully local and must not trip the
+  // "exposed to the network" auto-generate path.
+  return host === 'localhost' || host === '::1' || host === '127.0.0.1' || host.startsWith('127.');
 }
 
 // Constant-time string compare that also resists length leaks.
@@ -38,6 +41,16 @@ function isExemptPath(url: string): boolean {
   return url === '/api/health' || url.startsWith('/api/auth/');
 }
 
+// The path to match the guard against: the resolved route pattern, which
+// Fastify has already percent-decoded (e.g. /api/workspaces/:project). Matching
+// the raw req.url instead lets an encoded request like /%61pi/... (== /api/...)
+// slip past the prefix check while the router still dispatches it to the real
+// handler. No matched route (static assets, SPA fallback) → req.url, which
+// stays open by intent.
+function routePath(req: FastifyRequest): string {
+  return req.routeOptions?.url ?? req.url;
+}
+
 export function extractToken(req: FastifyRequest): string {
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) return header.slice(7);
@@ -49,7 +62,8 @@ export function extractToken(req: FastifyRequest): string {
 // request that isn't from loopback and doesn't carry a valid token.
 export function makeAuthHook(token: string) {
   return function authHook(req: FastifyRequest, reply: FastifyReply, done: HookHandlerDoneFunction): void {
-    if (!token || isLoopback(req.ip) || !isProtectedPath(req.url) || isExemptPath(req.url)) return done();
+    const path = routePath(req);
+    if (!token || isLoopback(req.ip) || !isProtectedPath(path) || isExemptPath(path)) return done();
     if (tokensMatch(extractToken(req), token)) return done();
     reply.code(401).send({ error: 'authentication required', authRequired: true });
   };

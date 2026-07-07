@@ -289,11 +289,10 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
 // Follow-up question suggestions: a second, throwaway query that resumes the
 // just-finished session so it shares the LLM prefix with the main turn —
 // provider-side prompt caching kicks in, so it's near-free. persistSession:
-// false keeps this off disk (the original transcript is never appended to),
-// and allowedTools: [] means the model can only emit text. The prompt is a
-// no-tools-guard (à la Piebald's summarization guard) fused with promplate's
-// suggest.j2 content shape: user-perspective, 2-5 items, JSON list, same
-// language/tone as the user.
+// false keeps this off disk (the original transcript is never appended to).
+// The prompt is a no-tools-guard (à la Piebald's summarization guard) fused
+// with promplate's suggest.j2 content shape: user-perspective, 2-5 items,
+// JSON list, same language/tone as the user.
 const FOLLOWUP_PROMPT = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 You already have the full conversation above as context — tool calls will be rejected and waste your only turn.
 
@@ -326,8 +325,17 @@ export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string
       cwd: opts.cwd,
       resume: opts.resume,
       model: opts.model,
-      // No tools, no MCP, no permission callback — pure text generation.
-      allowedTools: [],
+      // Advertise the exact same toolset as runClaude so this request's
+      // tools+system+messages prefix is byte-identical to the main turn's —
+      // that's what makes the provider's prompt cache hit. That takes both
+      // the same mcpServers AND a canUseTool callback: without one the SDK
+      // drops its interactive tools (AskUserQuestion, EnterPlanMode, …) and
+      // injects a "tools no longer available" system block, breaking the
+      // prefix. Ours just denies, so nothing can ever execute; maxTurns: 1
+      // keeps a stray tool_use from spiraling into an agentic loop.
+      mcpServers: { macaron: macaronMcpServer },
+      canUseTool: async () => ({ behavior: 'deny', message: 'text-only query', interrupt: true }),
+      maxTurns: 1,
       persistSession: false,
       // Stream content_block_delta text so the route can relay it; without
       // this the SDK only emits the final `result` and there's nothing to forward.
@@ -336,6 +344,7 @@ export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string
     },
   });
   let got = false;
+  let cacheRead = -1;
   for await (const m of stream as AsyncIterable<SDKMessage>) {
     if (m.type === 'stream_event') {
       const ev = m.event;
@@ -346,8 +355,11 @@ export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string
           yield d.text;
         }
       }
+    } else if (m.type === 'result') {
+      const u = (m as { usage?: { cache_read_input_tokens?: number } }).usage;
+      if (typeof u?.cache_read_input_tokens === 'number') cacheRead = u.cache_read_input_tokens;
     }
   }
-  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  raw=${got ? 'ok' : 'empty'}`);
+  console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  text=${got ? 'ok' : 'empty'}  cache_read=${cacheRead < 0 ? '?' : cacheRead}`);
 }
 

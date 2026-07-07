@@ -104,7 +104,10 @@ async function isDirty(worktreePath: string): Promise<boolean> {
   try {
     return (await git(worktreePath, ['status', '--porcelain'])).length > 0;
   } catch {
-    return false;
+    // Fail closed: a status error (index.lock, corrupt index, maxBuffer
+    // overflow on a huge untracked set) must not downgrade a possibly-dirty
+    // tree to "clean" and let the discard guard force-remove real work.
+    return true;
   }
 }
 
@@ -136,6 +139,10 @@ export async function createWorktree(baseCwd: string): Promise<PendingWorktree |
   const repoRoot = await git(baseCwd, ['rev-parse', '--show-toplevel']);
   return withRepoLock(repoRoot, async () => {
     const baseBranch = await git(baseCwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    // A detached HEAD reports the literal "HEAD". There's no base branch to
+    // fast-forward at merge time (`rebase HEAD` no-ops, `branch -f HEAD` is
+    // fatal), so refuse up front instead of leaking an unmergeable worktree.
+    if (baseBranch === 'HEAD') throw new Error('cannot isolate: base repo is in detached HEAD state (check out a branch first)');
     const baseCommit = await git(baseCwd, ['rev-parse', 'HEAD']);
     const shortid = randomUUID().slice(0, 8);
     const branch = `macaron/${shortid}`;

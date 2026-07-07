@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, basename, type Workspace, type SessionListItem } from '../lib/api';
 import { useToast } from './Toast';
@@ -28,6 +28,7 @@ export function Sidebar() {
   // sid currently in inline-rename mode (its name span becomes an <input>).
   const [renamingSid, setRenamingSid] = useState<string>('');
   const [renameDraft, setRenameDraft] = useState<string>('');
+  const renameDoneRef = useRef(false);
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
@@ -138,11 +139,14 @@ export function Sidebar() {
   };
 
   const startRename = (s: SessionListItem) => {
+    renameDoneRef.current = false;
     setRenamingSid(s.sessionId);
     setRenameDraft(s.label || '');
   };
 
   const commitRename = async (project: string, sid: string) => {
+    if (renameDoneRef.current) return;
+    renameDoneRef.current = true;
     const name = renameDraft.trim();
     setRenamingSid('');
     try {
@@ -295,7 +299,10 @@ export function Sidebar() {
                             onBlur={() => commitRename(w.project, s.sessionId)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') commitRename(w.project, s.sessionId);
-                              else if (e.key === 'Escape') setRenamingSid('');
+                              else if (e.key === 'Escape') {
+                                renameDoneRef.current = true;
+                                setRenamingSid('');
+                              }
                             }}
                           />
                         ) : (

@@ -1700,6 +1700,7 @@ export function Session(props: SessionProps = {}) {
         sending={sending}
         currentTodo={currentTodo}
         latestUsage={data?.latestUsage}
+        contextBreakdown={data?.contextBreakdown}
         claudeMdCount={data?.claudeMdCount}
         mcpCount={data?.mcpCount}
       />

@@ -1841,6 +1841,45 @@ textarea:focus, select:focus, input:focus {
 .status-context-label { color: var(--text-2); font-weight: 500; }
 .status-context-pct { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .status-context-tokens { color: var(--muted); font-size: 11.5px; }
+
+/* Segmented context bar: colored slices per source + hover/focus popover.
+   The track shares .status-bar-track sizing; segments sit left-to-right and
+   the uncovered remainder reads as free space (the track's own background). */
+.status-context-seg { position: relative; display: inline-flex; outline: none; }
+.status-context-seg .status-bar-track { display: flex; cursor: default; }
+.status-seg-fill { height: 100%; }
+.status-seg-fill:first-child { border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
+.status-seg-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 190px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+.status-context-seg:hover .status-seg-pop,
+.status-context-seg:focus-visible .status-seg-pop,
+.status-context-seg:focus-within .status-seg-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.status-seg-pop-title { color: var(--text-2); font-weight: 600; font-size: 11px; margin-bottom: 6px; }
+.status-seg-pop-title span { color: var(--muted); font-weight: 400; }
+.status-seg-pop-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; line-height: 1.7; }
+.status-seg-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.status-seg-pop-label { color: var(--text-2); flex: 1 1 auto; }
+.status-seg-pop-tok { color: var(--muted); font-variant-numeric: tabular-nums; }
+.status-seg-pop-pct { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
 .status-bar-track {
   position: relative;
   width: 140px;

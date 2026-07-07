@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type {
   Block,
+  ContextBreakdown,
   Message,
   SessionDetail,
   SessionListItem,
@@ -355,6 +356,14 @@ export async function readSessionMessages(project: string, sid: string): Promise
   // bar shows this / model window. Cache tokens are counted toward the
   // window fill because they take up real slots.
   let latestUsage: UsageSnapshot | undefined;
+  // Char tallies for the estimated context breakdown. Accumulated here (not
+  // client-side) because tool_result text is truncated to 4000 chars below
+  // before it ships — a big file read would otherwise be misattributed to
+  // system overhead. char/4 ≈ tokens; only the ratios between segments matter.
+  let msgChars = 0;
+  let thinkChars = 0;
+  let toolCallChars = 0;
+  let toolResultChars = 0;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
@@ -408,11 +417,15 @@ export async function readSessionMessages(project: string, sid: string): Promise
           blocks.push({ kind: 'text', text: c });
         } else if (Array.isArray(c)) {
           for (const b of c) {
-            if (b.type === 'text' && b.text) blocks.push({ kind: 'text', text: b.text });
-            else if (b.type === 'thinking' && b.thinking)
+            if (b.type === 'text' && b.text) { blocks.push({ kind: 'text', text: b.text }); msgChars += b.text.length; }
+            else if (b.type === 'thinking' && b.thinking) {
               blocks.push({ kind: 'thinking', text: b.thinking });
-            else if (b.type === 'tool_use')
+              thinkChars += b.thinking.length;
+            }
+            else if (b.type === 'tool_use') {
               blocks.push({ kind: 'tool_use', id: b.id, name: b.name, input: b.input });
+              toolCallChars += (b.name?.length || 0) + JSON.stringify(b.input ?? '').length;
+            }
             else if (b.type === 'image' && b.source?.type === 'base64' && b.source?.data) {
               // The CLI persists user-attached images as base64 in the
               // jsonl. Ship them through so the WebUI can render inline
@@ -431,6 +444,7 @@ export async function readSessionMessages(project: string, sid: string): Promise
                     ? b.content.map((x: { text?: string }) => x.text || '').join('\n')
                     : '';
               blocks.push({ kind: 'tool_result', toolUseId: b.tool_use_id, text: t.slice(0, 4000) });
+              toolResultChars += t.length;
             }
           }
         }
@@ -462,6 +476,13 @@ export async function readSessionMessages(project: string, sid: string): Promise
     countMcpServers(),
   ]);
 
+  const contextBreakdown = buildContextBreakdown(latestUsage, {
+    msgChars,
+    thinkChars,
+    toolCallChars,
+    toolResultChars,
+  });
+
   return {
     kind: 'claude',
     sessionId: sid,
@@ -472,9 +493,39 @@ export async function readSessionMessages(project: string, sid: string): Promise
     truncated,
     totalBytes: st.size,
     latestUsage,
+    contextBreakdown,
     claudeMdCount,
     mcpCount,
   };
+}
+
+// Estimate the used-context split from transcript char tallies. `total` is the
+// exact usage sum the Context bar shows; measured segments (~chars/4) are
+// clamped to fit under it, and whatever's left is the un-itemizable system +
+// tool-def + MCP + CLAUDE.md overhead. Returns undefined without a usage sample.
+function buildContextBreakdown(
+  usage: UsageSnapshot | undefined,
+  chars: { msgChars: number; thinkChars: number; toolCallChars: number; toolResultChars: number },
+): ContextBreakdown | undefined {
+  if (!usage) return undefined;
+  const total = usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
+  if (total <= 0) return undefined;
+  const tok = (c: number) => Math.ceil(c / 4);
+  let messages = tok(chars.msgChars);
+  let thinking = tok(chars.thinkChars);
+  let toolCalls = tok(chars.toolCallChars);
+  let toolResults = tok(chars.toolResultChars);
+  const measured = messages + thinking + toolCalls + toolResults;
+  // Overshoot (rare: tail-truncated head, char/4 drift) → scale segments to fit.
+  if (measured > total && measured > 0) {
+    const k = total / measured;
+    messages = Math.floor(messages * k);
+    thinking = Math.floor(thinking * k);
+    toolCalls = Math.floor(toolCalls * k);
+    toolResults = Math.floor(toolResults * k);
+  }
+  const system = Math.max(0, total - (messages + thinking + toolCalls + toolResults));
+  return { system, messages, toolCalls, toolResults, thinking, total };
 }
 
 async function countClaudeMd(cwd: string): Promise<number> {

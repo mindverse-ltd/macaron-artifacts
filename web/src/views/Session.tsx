@@ -32,6 +32,7 @@ type AttachedImage = { id: string; name: string; mimeType: string; dataUrl: stri
 // (macaron's runner is single-shot — one `/message` POST per turn — so there
 // is no persistent stdin to inject into) and auto-sent when the turn finishes.
 type QueuedMessage = { id: string; text: string };
+const queueId = (prefix = 'q') => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -745,7 +746,8 @@ function PendingQueue({
           <button
             type="button"
             className="pending-item-text"
-            title="Edit — pull back into the composer"
+            title={q.text}
+            aria-label="Edit queued message"
             onClick={() => onEdit(q.id)}
           >
             {q.text}
@@ -1491,7 +1493,7 @@ export function Session(props: SessionProps = {}) {
   const enqueue = useCallback((text: string) => {
     const t = text.trim();
     if (!t) return;
-    setQueue((q) => [...q, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text: t }]);
+    setQueue((q) => [...q, { id: queueId(), text: t }]);
   }, []);
 
   // The composer's submit path: while a turn runs, Enter/Send queues the text
@@ -1519,7 +1521,7 @@ export function Session(props: SessionProps = {}) {
   const handleSendNow = useCallback(() => {
     const text = input.trim();
     if (!text) return;
-    setQueue((q) => [{ id: `q-now-${Date.now()}`, text }, ...q]);
+    setQueue((q) => [{ id: queueId('q-now'), text }, ...q]);
     setInput('');
     setHistoryIdx(null);
     draftInputRef.current = '';
@@ -1545,16 +1547,18 @@ export function Session(props: SessionProps = {}) {
   // the queue). If the composer already holds a draft, keep that safe by
   // prepending it back onto the queue front.
   const editQueued = useCallback((id: string) => {
+    const target = queue.find((m) => m.id === id);
+    if (!target) return;
+    const draft = input.trim();
+    const draftId = draft ? queueId('q-draft') : '';
     setQueue((q) => {
-      const target = q.find((m) => m.id === id);
-      if (!target) return q;
+      if (!q.some((m) => m.id === id)) return q;
       const rest = q.filter((m) => m.id !== id);
-      const draft = input.trim();
-      setInput(target.text);
-      if (draft) return [{ id: `q-${Date.now()}-draft`, text: draft }, ...rest];
+      if (draft) return [{ id: draftId, text: draft }, ...rest];
       return rest;
     });
-  }, [input]);
+    setInput(target.text);
+  }, [input, queue]);
 
   // Idle-edge dequeue: when a turn finishes (running true→false), auto-send the
   // next queued message. Edge-guarded so exactly one message goes per turn —

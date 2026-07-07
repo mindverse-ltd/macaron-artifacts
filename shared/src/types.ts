@@ -86,3 +86,30 @@ export type HealthResponse = { ok: boolean; model: string };
 export type ConfigResponse = {
   macaron: { base: string; model: string; configured: boolean };
 };
+
+// A custom subagent definition (~/.claude/agents/<name>.md). `prompt` is the
+// markdown body after the frontmatter — it becomes the agent's system prompt.
+// `tools` is the frontmatter allowlist; empty = inherit all tools.
+export type AgentFile = {
+  name: string;
+  description: string;
+  tools: string[];
+  model: string;
+  prompt: string;
+};
+
+export type AgentsResponse = { agents: AgentFile[] };
+
+// One subagent (child session) spawned from a parent transcript. The parent's
+// assistant `tool_use` block whose `name === 'Agent'` carries the same
+// `toolUseId`; the child's own transcript lives in a sibling
+// `<sid>/subagents/agent-<agentId>.jsonl` file.
+export type SubagentInfo = {
+  agentId: string;
+  agentType: string;
+  description: string;
+  toolUseId: string;
+};
+
+export type SubagentsResponse = { subagents: SubagentInfo[] };
+

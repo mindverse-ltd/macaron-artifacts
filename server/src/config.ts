@@ -13,6 +13,9 @@ export const MACARON_MODEL = process.env.MACARON_MODEL || 'macaron-0.6';
 
 export const HOME = os.homedir();
 export const CLAUDE_PROJECTS = path.join(HOME, '.claude', 'projects');
+// Custom subagent definitions live here as `<name>.md` (YAML frontmatter +
+// system-prompt body). Claude Code scans this dir at user scope.
+export const CLAUDE_AGENTS = path.join(HOME, '.claude', 'agents');
 
 // Web root (repo's web/ dir). Same hop from compiled location in both dev (tsx src/) and prod (node dist/).
 // src/config.ts → ../../web  (and after build: dist/config.js → ../../web)

@@ -8,6 +8,8 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  AgentFile,
+  SubagentInfo,
 } from '@macaron/shared';
 
 import type {
@@ -15,6 +17,8 @@ import type {
   WorkspaceDetailResponse,
   SessionDetail,
   HealthResponse,
+  AgentsResponse,
+  SubagentsResponse,
 } from '@macaron/shared';
 
 export async function getJSON<T>(url: string): Promise<T> {
@@ -48,6 +52,14 @@ export type ProviderInput = {
   endpoint: string;
   model: string;
   apiKey?: string;
+};
+
+export type AgentInput = {
+  name: string;
+  description: string;
+  tools: string[];
+  model: string;
+  prompt: string;
 };
 
 async function req<T>(url: string, init: RequestInit): Promise<T> {
@@ -134,6 +146,34 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       },
+    ),
+
+  // Custom subagents (~/.claude/agents/*.md). Mutations return the full list
+  // so the caller replaces state in one shot, matching the provider CRUD.
+  agents: () => getJSON<AgentsResponse>('/api/agents'),
+  createAgent: (input: AgentInput) =>
+    req<AgentsResponse>('/api/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  updateAgent: (name: string, patch: Partial<Omit<AgentInput, 'name'>>) =>
+    req<AgentsResponse>(`/api/agents/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  deleteAgent: (name: string) =>
+    req<AgentsResponse>(`/api/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // Subagent child sessions spawned from a transcript.
+  subagents: (project: string, sid: string) =>
+    getJSON<SubagentsResponse>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/subagents`,
+    ),
+  subagent: (project: string, sid: string, agentId: string) =>
+    getJSON<SessionDetail>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/subagents/${encodeURIComponent(agentId)}`,
     ),
 };
 

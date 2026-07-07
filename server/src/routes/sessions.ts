@@ -5,8 +5,10 @@ import {
   decodeClaudeProjectName,
   deleteSession,
   duplicateSession,
+  listSubagents,
   readSessionMessages,
   readSessionSummary,
+  readSubagentMessages,
   rewindSession,
   writeCompactedSession,
 } from '../lib/session-store.js';
@@ -33,6 +35,26 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       return reply.status(404).send({ error: (e as Error).message });
     }
   });
+
+  // List the subagents (child sessions) spawned from this transcript. Each is
+  // linked to a parent `Agent` tool_use via `toolUseId` so the WebUI can turn
+  // an inline Agent tool card into a drill-in link.
+  app.get<{ Params: Params }>(
+    '/api/sessions/claude/:project/:sid/subagents',
+    async ({ params }) => ({ subagents: await listSubagents(params.project, params.sid) }),
+  );
+
+  // Read one subagent's full transcript, same shape as a normal session.
+  app.get<{ Params: Params & { agentId: string } }>(
+    '/api/sessions/claude/:project/:sid/subagents/:agentId',
+    async ({ params }, reply) => {
+      try {
+        return await readSubagentMessages(params.project, params.sid, params.agentId);
+      } catch (e) {
+        return reply.status(404).send({ error: (e as Error).message });
+      }
+    },
+  );
 
   app.delete<{ Params: Params }>('/api/sessions/claude/:project/:sid', async ({ params }, reply) => {
     try {

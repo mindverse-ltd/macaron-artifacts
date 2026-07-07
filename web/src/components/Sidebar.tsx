@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, basename, type Workspace, type SessionListItem, type WorktreeInfo } from '../lib/api';
 import { useToast } from './Toast';
+import { useConfirm } from './Confirm';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
   getCanvasSids,
@@ -31,6 +32,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const loadData = useCallback(async () => {
     try {
@@ -190,11 +192,29 @@ export function Sidebar() {
         danger: true,
         onClick: async () => {
           try {
-            await api.discardWorktree(s.sessionId, wt.dirty === true);
+            await api.discardWorktree(s.sessionId, false);
             toast(`discarded ${wt.branch}`);
             loadData();
           } catch (err) {
-            toast(`discard failed: ${(err as Error).message}`);
+            const msg = (err as Error).message;
+            if (!msg.includes('409')) {
+              toast(`discard failed: ${msg}`);
+              return;
+            }
+            const ok = await confirm({
+              title: 'Discard dirty worktree?',
+              body: `Uncommitted changes on ${wt.branch} will be lost.`,
+              confirmLabel: 'Discard',
+              destructive: true,
+            });
+            if (!ok) return;
+            try {
+              await api.discardWorktree(s.sessionId, true);
+              toast(`discarded ${wt.branch}`);
+              loadData();
+            } catch (err2) {
+              toast(`discard failed: ${(err2 as Error).message}`);
+            }
           }
         },
       });

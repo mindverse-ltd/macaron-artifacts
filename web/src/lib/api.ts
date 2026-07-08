@@ -153,7 +153,7 @@ export const api = {
       `/api/files/${encodeURIComponent(project)}/list?path=${encodeURIComponent(path)}`,
     ),
   readFile: async (project: string, path: string): Promise<FileReadResponse> => {
-    const r = await fetch(
+    const r = await authedFetch(
       `/api/files/${encodeURIComponent(project)}/read?path=${encodeURIComponent(path)}`,
     );
     if (!r.ok) {

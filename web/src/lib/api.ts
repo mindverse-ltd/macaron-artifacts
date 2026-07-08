@@ -16,9 +16,10 @@ import type {
   SessionDetail,
   HealthResponse,
 } from '@macaron/shared';
+import { authedFetch } from './auth';
 
 export async function getJSON<T>(url: string): Promise<T> {
-  const r = await fetch(url);
+  const r = await authedFetch(url);
   if (!r.ok) throw new Error(`http ${r.status}`);
   return r.json() as Promise<T>;
 }
@@ -52,7 +53,7 @@ export type ProviderInput = {
 };
 
 async function req<T>(url: string, init: RequestInit): Promise<T> {
-  const r = await fetch(url, init);
+  const r = await authedFetch(url, init);
   if (!r.ok) throw new Error(`http ${r.status}: ${(await r.text()).slice(0, 200)}`);
   return r.json() as Promise<T>;
 }
@@ -103,7 +104,7 @@ export const api = {
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
     ),
   deleteSession: async (project: string, sid: string): Promise<void> => {
-    const r = await fetch(
+    const r = await authedFetch(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
       { method: 'DELETE' },
     );

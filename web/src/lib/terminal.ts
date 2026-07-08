@@ -2,6 +2,12 @@
 // canvas' opaque-string sid slot: its sid is `term:<uuid>`, and the server
 // keys the PTY by the `<uuid>` part. Input/resize/kill go over POST; the
 // output stream is a sibling SSE endpoint (see Terminal.tsx).
+//
+// /api/terminal/* is auth-gated (server/src/lib/auth.ts): POSTs ride the token
+// via authedFetch's Authorization header, and the stream — a browser
+// EventSource, which can't set headers — carries it as a `?token=` query param,
+// the other credential the server accepts.
+import { authedFetch, getToken } from './auth';
 
 const TERMINAL_PREFIX = 'term:';
 
@@ -26,7 +32,9 @@ function base(project: string, sid: string): string {
 }
 
 export function terminalStreamUrl(project: string, sid: string, cols: number, rows: number): string {
-  return `${base(project, sid)}/stream?cols=${cols}&rows=${rows}`;
+  const url = `${base(project, sid)}/stream?cols=${cols}&rows=${rows}`;
+  const t = getToken();
+  return t ? `${url}&token=${encodeURIComponent(t)}` : url;
 }
 
 // Keystrokes must arrive in order. Chain each input POST behind the previous
@@ -39,7 +47,7 @@ export function sendTerminalInput(project: string, sid: string, data: string): v
   const next = prev
     .catch(() => {})
     .then(() =>
-      fetch(url, {
+      authedFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data }),
@@ -49,7 +57,7 @@ export function sendTerminalInput(project: string, sid: string, data: string): v
 }
 
 export function sendTerminalResize(project: string, sid: string, cols: number, rows: number): void {
-  void fetch(`${base(project, sid)}/resize`, {
+  void authedFetch(`${base(project, sid)}/resize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cols, rows }),
@@ -57,6 +65,6 @@ export function sendTerminalResize(project: string, sid: string, cols: number, r
 }
 
 export function killTerminal(project: string, sid: string): void {
-  void fetch(`${base(project, sid)}/kill`, { method: 'POST' }).catch(() => {});
+  void authedFetch(`${base(project, sid)}/kill`, { method: 'POST' }).catch(() => {});
   inputChains.delete(sid);
 }

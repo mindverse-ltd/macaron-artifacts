@@ -12,6 +12,8 @@ export type {
   DirListing,
   CreateShareResponse,
   SharedSessionResponse,
+  UsageResponse,
+  RateLimitWindow,
   ConfigFileId,
   ConfigFileFormat,
   ConfigFileMeta,
@@ -29,6 +31,7 @@ import type {
   DirListing,
   CreateShareResponse,
   SharedSessionResponse,
+  UsageResponse,
   ConfigFileId,
   ConfigFileMeta,
   ConfigFile,
@@ -101,6 +104,7 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
   settings: () => getJSON<PublicSettings>('/api/settings'),
+  usage: () => getJSON<UsageResponse>('/api/usage'),
 
   addProvider: (input: ProviderInput) =>
     req<{ id: string; settings: PublicSettings }>('/api/settings/providers', {

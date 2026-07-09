@@ -5,6 +5,7 @@ import { useToast } from './Toast';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DirPicker } from './DirPicker';
 import { encodeClaudeProjectName, setPendingCwd } from '../lib/newSession';
+import { RateLimitMeters } from './RateLimitMeters';
 import {
   getCanvasSids,
   toggleCanvasSid,
@@ -425,6 +426,7 @@ export function Sidebar() {
       </Link>
 
       <footer className="sb-footer">
+        <RateLimitMeters />
         <div className={'sb-status sb-status-' + status}>
           {status === 'ok'
             ? `online · ${model}`

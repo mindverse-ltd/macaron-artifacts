@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api, basename, type Message, type SessionDetail, type PrContext } from '../lib/api';
+import { sessionToMarkdown } from '@macaron/shared';
+import { api, basename, downloadTextFile, type Message, type SessionDetail, type PrContext } from '../lib/api';
 import { streamSession } from '../lib/sse';
 import { getLive, subscribeLive, clearLive, subscribeFollowup, startNewSession } from '../lib/liveStore';
 import { hasActiveModal } from '../lib/modal';
@@ -85,7 +86,7 @@ function isNoisyUserText(t: string): boolean {
   return false;
 }
 
-function flatten(messages: Message[]): Item[] {
+export function flatten(messages: Message[]): Item[] {
   const out: Item[] = [];
   let i = 0;
   let lastTool: Extract<Item, { kind: 'tool' }> | null = null;
@@ -641,7 +642,7 @@ function PermissionItem({
   );
 }
 
-function ItemView({
+export function ItemView({
   it,
   onRewind,
   onFork,
@@ -703,12 +704,14 @@ function SessionActionsMenu({
   busyPr,
   onCompact,
   onCreatePr,
+  onExport,
 }: {
   disabled: boolean;
   busyCompact: boolean;
   busyPr: boolean;
   onCompact: () => void;
   onCreatePr: () => void;
+  onExport: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -760,6 +763,20 @@ function SessionActionsMenu({
                 {busyPr ? 'Opening PR…' : 'Create PR'}
               </span>
               <span className="actions-menu-sub">Push branch → open a pull request</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="actions-menu-item"
+            disabled={disabled}
+            onClick={() => {
+              setOpen(false);
+              onExport();
+            }}
+          >
+            <span className="actions-menu-body">
+              <span className="actions-menu-label">Export to Markdown</span>
+              <span className="actions-menu-sub">Download the transcript as a .md file</span>
             </span>
           </button>
           <button
@@ -1213,6 +1230,16 @@ export function Session(props: SessionProps = {}) {
     const recap = firstPrompt ? `${firstPrompt}\n\n` : '';
     return `${recap}---\n_Opened from a Macaron session._`;
   }, [firstPrompt]);
+
+  // Export: serialize the loaded transcript to Markdown and download it —
+  // client-side, no server round-trip (we already hold the parsed messages).
+  const handleExport = useCallback(() => {
+    if (!data) return;
+    const md = sessionToMarkdown(data);
+    const name = `${basename(data.cwd) || 'session'}-${sid.slice(0, 8)}.md`;
+    downloadTextFile(name, md);
+    toast(`Exported ${name}`);
+  }, [data, sid, toast]);
 
   // Permission decision: POST to server; server resolves the pending
   // canUseTool promise. Optimistically update the local card so it doesn't
@@ -2034,6 +2061,7 @@ export function Session(props: SessionProps = {}) {
             busyPr={busyPr}
             onCompact={() => void handleCompact()}
             onCreatePr={() => void handleOpenPr()}
+            onExport={handleExport}
           />
           <div className="session-input-spacer" />
           {sending ? (

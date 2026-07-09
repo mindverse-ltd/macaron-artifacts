@@ -11,6 +11,8 @@ export type {
   PrContext,
   CreatePrRequest,
   CreatePrResult,
+  CreateShareResponse,
+  SharedSessionResponse,
   ConfigFileId,
   ConfigFileFormat,
   ConfigFileMeta,
@@ -28,6 +30,8 @@ import type {
   PrContext,
   CreatePrRequest,
   CreatePrResult,
+  CreateShareResponse,
+  SharedSessionResponse,
   ConfigFileId,
   ConfigFileMeta,
   ConfigFile,
@@ -182,6 +186,15 @@ export const api = {
     );
     if (!r.ok) throw new Error(`http ${r.status}`);
   },
+  setSessionLabel: (project: string, sid: string, name: string) =>
+    req<{ ok: true; label: string }>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/label`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      },
+    ),
   duplicateSession: (project: string, sid: string) =>
     req<{ ok: true; newSid: string }>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/duplicate`,
@@ -245,6 +258,20 @@ export const api = {
         body: JSON.stringify(input),
       },
     ),
+  createShare: (project: string, sid: string) =>
+    req<CreateShareResponse>('/api/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project, sid }),
+    }),
+  revokeShare: (project: string, sid: string) =>
+    req<{ ok: boolean }>('/api/share/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project, sid }),
+    }),
+  sharedSession: (token: string) =>
+    getJSON<SharedSessionResponse>(`/api/public/share/${encodeURIComponent(token)}`),
   listFiles: (project: string, path = '') =>
     getJSON<FileListResponse>(
       `/api/files/${encodeURIComponent(project)}/list?path=${encodeURIComponent(path)}`,
@@ -273,6 +300,20 @@ export function basename(p: string): string {
   if (!p) return '';
   const parts = p.split('/').filter(Boolean);
   return parts[parts.length - 1] || p;
+}
+
+// Trigger a client-side download of `text` as a file named `name`. Used by the
+// session Markdown export — no server round-trip since the WebUI already holds
+// the parsed transcript.
+export function downloadTextFile(name: string, text: string, mime = 'text/markdown'): void {
+  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function fmtAgo(ms: number): string {

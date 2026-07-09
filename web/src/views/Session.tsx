@@ -1260,13 +1260,17 @@ export function Session(props: SessionProps = {}) {
   }, [liveUser, liveTurn, liveUserImages]);
 
   const send = useCallback(
-    async (e?: FormEvent) => {
-      e?.preventDefault();
-      const text = input.trim();
+    async (e?: FormEvent | string) => {
+      // A string arg is a programmatic send (the $macaron/chat bridge); a
+      // FormEvent is the composer submit. Bridge text bypasses the input box.
+      const override = typeof e === 'string' ? e : undefined;
+      if (typeof e !== 'string') e?.preventDefault();
+      const text = (override ?? input).trim();
       if ((!text && images.length === 0) || sending) return;
-      const sentImages = images;
-      setInput('');
-      setImages([]);
+      // A bridge send carries only its own text — leave the user's in-progress
+      // composer draft and attachments untouched.
+      const sentImages = override ? [] : images;
+      if (!override) { setInput(''); setImages([]); }
       // New turn ⇒ new follow-up generation: clears the chips and invalidates
       // any deltas still streaming from the previous turn's follow-up query.
       const fGen = resetFollowups();
@@ -1467,6 +1471,22 @@ export function Session(props: SessionProps = {}) {
     },
     [project, sid, input, sending, load, images, permissionMode, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
   );
+
+  // $macaron/chat bridge: a sandboxed render_ui widget calls sendUserMessage,
+  // and the shim (web/public/genui-shim/chat.mjs) dispatches the payload to
+  // this global slot, which relays it into send() as a programmatic user turn.
+  // Only the focused session registers — canvas multi-tile mounts share one
+  // slot, so the widget the user is actually looking at owns the bridge.
+  useEffect(() => {
+    if (!focused) return;
+    const g = globalThis as unknown as { __macaron_chatBridge?: (p: { text: string; data?: unknown }) => void };
+    const bridge = (p: { text: string; data?: unknown }) => {
+      const body = p.data !== undefined ? `${p.text}\n\n\`\`\`json\n${JSON.stringify(p.data, null, 2)}\n\`\`\`` : p.text;
+      void send(body);
+    };
+    g.__macaron_chatBridge = bridge;
+    return () => { if (g.__macaron_chatBridge === bridge) delete g.__macaron_chatBridge; };
+  }, [focused, send]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

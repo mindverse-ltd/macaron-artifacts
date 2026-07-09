@@ -24,7 +24,7 @@ export async function registerSessionRoutes(app) {
         // lossy and would send walkCommands to a non-existent dir, dropping
         // every project-scoped command (see resolveProjectCwd).
         const cwd = await resolveProjectCwd(params.project);
-        return { commands: await listSlashCommands(cwd) };
+        return { commands: await listSlashCommands(cwd || '') };
     });
     app.delete('/api/sessions/claude/:project/:sid', async ({ params }, reply) => {
         try {

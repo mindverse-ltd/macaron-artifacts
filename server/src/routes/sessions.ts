@@ -44,7 +44,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       // lossy and would send walkCommands to a non-existent dir, dropping
       // every project-scoped command (see resolveProjectCwd).
       const cwd = await resolveProjectCwd(params.project);
-      return { commands: await listSlashCommands(cwd) };
+      return { commands: await listSlashCommands(cwd || '') };
     },
   );
 

@@ -120,9 +120,6 @@ importers:
       '@esm.sh/tsx':
         specifier: ^1.5.3
         version: 1.5.3
-      '@fontsource/maple-mono':
-        specifier: ^5.2.6
-        version: 5.2.6
       '@number-flow/react':
         specifier: ^0.6.1
         version: 0.6.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -689,9 +686,6 @@ packages:
 
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
-
-  '@fontsource/maple-mono@5.2.6':
-    resolution: {integrity: sha512-+VAD7z8nyTkaiz2/Ww639Z5Kp/YJIL4dNMQxydqSMafNb5nKxFeoRq6W3g9WJ04IcBjdBmn0dKFNk90lyz7K+w==}
 
   '@genui/diagnostics@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@2c00556':
     resolution: {integrity: sha512-T0MwNqaj0VsCFWm0fyY/AJ4DYXLfz71Y+emOdHQtGl54UZy2MTSNuNyLB7dEq4yLbt36jEWozPGOCLYQAdmQ1w==, tarball: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@2c00556}
@@ -3779,8 +3773,6 @@ snapshots:
       react-dom: 19.2.7(react@19.2.7)
 
   '@floating-ui/utils@0.2.11': {}
-
-  '@fontsource/maple-mono@5.2.6': {}
 
   '@genui/diagnostics@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@2c00556(typescript@5.9.3)':
     dependencies:

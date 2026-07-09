@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import '@fontsource/maple-mono/400.css';
-import '@fontsource/maple-mono/700.css';
+import '../assets/fonts/jetbrains-maple-mono/jetbrains-maple-mono.css';
 import '@xterm/xterm/css/xterm.css';
 import {
   terminalStreamUrl,
@@ -32,14 +31,14 @@ const THEME = {
 // monospace stack instead of var(--font-mono).
 const TERMINAL_FONT_SIZE = 12;
 const TERMINAL_FONT =
-  '"Maple Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+  '"JetBrains Maple Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 
 async function loadTerminalFont(): Promise<void> {
   const fonts = document.fonts;
   if (!fonts?.load) return;
   await Promise.all([
-    fonts.load(`${TERMINAL_FONT_SIZE}px "Maple Mono"`),
-    fonts.load(`700 ${TERMINAL_FONT_SIZE}px "Maple Mono"`),
+    fonts.load(`${TERMINAL_FONT_SIZE}px "JetBrains Maple Mono"`),
+    fonts.load(`700 ${TERMINAL_FONT_SIZE}px "JetBrains Maple Mono"`),
   ]);
 }
 

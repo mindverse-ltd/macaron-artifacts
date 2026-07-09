@@ -4,7 +4,9 @@ import fastifyStatic from '@fastify/static';
 import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
 import { makeAuthHook, redactTokenInUrl, resolveToken } from './lib/auth.js';
 import { warmSettingsCache } from './lib/settings-store.js';
+import { warmPermissionRulesCache } from './lib/permission-rules.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
+import { warmCodexTitlesCache } from './lib/codex-titles.js';
 import { checkGenUI } from './lib/genui-check.js';
 // Claude Agent SDK kills MCP tool calls after 60s by default. Macaron renders
 // for complex UIs can take 30-120s, so raise the ceiling to 5 min.
@@ -16,6 +18,7 @@ import { registerSessionRoutes } from './routes/sessions.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
+import { registerTerminalRoutes } from './routes/terminal.js';
 const app = Fastify({
     logger: {
         level: process.env.MACARON_LOG_LEVEL || 'info',
@@ -51,6 +54,7 @@ await app.register(async (instance) => {
     await registerWorkspaceRoutes(instance);
     await registerSessionRoutes(instance);
     await registerCodexRoutes(instance);
+    await registerTerminalRoutes(instance);
 });
 // Static assets + SPA fallback. In dev (vite dev server on :5173 with proxy),
 // WEB_DIST may not exist — just register a 404 handler in that case.
@@ -84,7 +88,9 @@ else {
 }
 try {
     await warmSettingsCache();
+    await warmPermissionRulesCache();
     await warmCodexConfigCache();
+    await warmCodexTitlesCache();
     await app.listen({ host: HOST, port: PORT });
     app.log.info(`macaron server listening on http://${HOST}:${PORT}`);
     if (authGenerated) {

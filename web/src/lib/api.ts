@@ -10,6 +10,8 @@ export type {
   HealthResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  UsageResponse,
+  RateLimitWindow,
   GitStatus,
   GitFileStatus,
   GitBranches,
@@ -29,6 +31,7 @@ import type {
   HealthResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  UsageResponse,
   GitStatus,
   GitBranches,
   ConfigFileId,
@@ -103,6 +106,7 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
   settings: () => getJSON<PublicSettings>('/api/settings'),
+  usage: () => getJSON<UsageResponse>('/api/usage'),
 
   addProvider: (input: ProviderInput) =>
     req<{ id: string; settings: PublicSettings }>('/api/settings/providers', {
@@ -317,6 +321,20 @@ export function basename(p: string): string {
   if (!p) return '';
   const parts = p.split('/').filter(Boolean);
   return parts[parts.length - 1] || p;
+}
+
+// Trigger a client-side download of `text` as a file named `name`. Used by the
+// session Markdown export — no server round-trip since the WebUI already holds
+// the parsed transcript.
+export function downloadTextFile(name: string, text: string, mime = 'text/markdown'): void {
+  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function fmtAgo(ms: number): string {

@@ -31,8 +31,10 @@ import {
   type CodexRuntimeOptions,
 } from '../lib/codex-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
+import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
 import type { AttachedImage } from '../lib/claude-runner.js';
+import type { SessionStreamEvent } from '@macaron/shared';
 
 type SidParams = { sid: string };
 type NewThreadBody = { text?: string; cwd?: string; images?: AttachedImage[] };
@@ -95,6 +97,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     reply: Parameters<typeof startSSE>[0],
     stream: ReturnType<typeof runCodex>,
     sid: string | null,
+    live: { cwd: string; text: string },
   ) => {
     let clientGone = false;
     reply.raw.on('close', () => { clientGone = true; });
@@ -103,26 +106,43 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
       try { sseSend(reply, payload); } catch { clientGone = true; }
     };
     let capturedSid = sid;
+    // Mirror the Claude route: the primary client is written directly, while a
+    // parallel copy of every event lands in the live registry so a browser
+    // refresh mid-turn can reattach via the snapshot-then-live /live endpoint.
+    let liveStarted = false;
+    const ensureLive = () => {
+      if (liveStarted || !capturedSid) return;
+      liveStarted = true;
+      liveStart(capturedSid, { cwd: live.cwd });
+      if (live.text) livePush(capturedSid, { type: 'user-text', text: live.text });
+    };
+    ensureLive(); // resume already knows the sid; a new thread waits for `session`
+    const relay = (payload: SessionStreamEvent) => {
+      safeSend(payload);
+      if (capturedSid) livePush(capturedSid, payload);
+    };
     (async () => {
       for await (const ev of stream) {
         if (ev.kind === 'session' && !capturedSid) {
           capturedSid = ev.sessionId;
+          ensureLive();
           safeSend({ type: 'meta', sessionId: capturedSid });
-        } else if (ev.kind === 'delta') safeSend({ type: 'delta', text: ev.text });
-        else if (ev.kind === 'tool_use') safeSend({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
-        else if (ev.kind === 'tool_result') safeSend({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
-        else if (ev.kind === 'usage') safeSend({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
-        else if (ev.kind === 'message') safeSend({ type: 'event', subtype: ev.subtype });
-        else if (ev.kind === 'error') safeSend({ type: 'error', error: ev.error });
+        } else if (ev.kind === 'delta') relay({ type: 'delta', text: ev.text });
+        else if (ev.kind === 'tool_use') relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
+        else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
+        else if (ev.kind === 'usage') relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
+        else if (ev.kind === 'message') relay({ type: 'event', event: 'system', subtype: ev.subtype });
+        else if (ev.kind === 'error') relay({ type: 'error', error: ev.error });
         else if (ev.kind === 'done') {
           safeSend({ type: 'done', exitCode: ev.exitCode });
-          if (capturedSid) endRun(capturedSid);
+          if (capturedSid) { liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode }); endRun(capturedSid); }
           if (!clientGone) sseDone(reply);
         }
       }
     })().catch((e: unknown) => {
-      if (capturedSid) endRun(capturedSid);
-      safeSend({ type: 'error', error: (e as Error).message });
+      const msg = (e as Error).message;
+      if (capturedSid) { liveEnd(capturedSid, { type: 'done', exitCode: -1, error: msg }); endRun(capturedSid); }
+      safeSend({ type: 'error', error: msg });
       if (!clientGone) sseDone(reply);
     });
   };
@@ -157,7 +177,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         yield ev;
       }
     })();
-    pipeCodexToSSE(reply, wrapped as ReturnType<typeof runCodex>, null);
+    pipeCodexToSSE(reply, wrapped as ReturnType<typeof runCodex>, null, { cwd, text });
   });
 
   app.post<{ Params: SidParams; Body: MessageBody }>(
@@ -180,13 +200,36 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
       sseSend(reply, { type: 'meta', sessionId: sid, cwd });
       const abortController = new AbortController();
       registerRun(sid, abortController);
-      pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController }), sid);
+      pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController }), sid, { cwd, text });
     },
   );
 
   app.post<{ Params: SidParams }>('/api/codex/threads/:sid/stop', async ({ params }, reply) => {
     const ok = abortRun(params.sid);
     return reply.send({ ok, running: ok });
+  });
+
+  // SSE: reattach to an in-flight Codex turn. Replays the current snapshot
+  // (liveGet), then forwards live events until the turn ends — so a browser
+  // refresh mid-turn picks the stream back up instead of waiting for the
+  // rollout to land on disk. Mirrors the Claude route's /live handler.
+  app.get<{ Params: SidParams }>('/api/codex/threads/:sid/live', async ({ params }, reply) => {
+    startSSE(reply);
+    const ls = liveGet(params.sid);
+    // Only an in-flight turn is worth reattaching to. A finished turn's data
+    // is already (or imminently) on disk and the frontend reloads it there on
+    // done, so replaying an ended turn would double it against the disk-derived
+    // history — treat ended as not-live.
+    if (!ls || ls.ended) {
+      sseSend(reply, { type: 'live-end', reason: 'not-live' });
+      sseDone(reply);
+      return;
+    }
+    for (const ev of ls.events) {
+      try { sseSend(reply, ev); } catch { return; }
+    }
+    ls.subs.add(reply);
+    reply.raw.on('close', () => ls.subs.delete(reply));
   });
 
   // --- Config ------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { api, basename, type Workspace, type SessionListItem, type WorktreeInfo } from '../lib/api';
+import { api, basename, HttpError, type Workspace, type SessionListItem, type WorktreeInfo } from '../lib/api';
 import { useToast } from './Toast';
 import { useConfirm } from './Confirm';
 import { ContextMenu, type MenuItem } from './ContextMenu';
@@ -259,14 +259,17 @@ export function Sidebar() {
         label: 'Discard worktree',
         danger: true,
         onClick: async () => {
-          try {
-            await api.discardWorktree(s.sessionId, false);
+          const attempt = async (force: boolean) => {
+            await api.discardWorktree(s.sessionId, force);
             toast(`discarded ${wt.branch}`);
             loadData();
+          };
+          try {
+            await attempt(false);
           } catch (err) {
-            const msg = (err as Error).message;
-            if (!msg.includes('409')) {
-              toast(`discard failed: ${msg}`);
+            // 409 = dirty tree: prompt before force-discarding real work.
+            if (!(err instanceof HttpError) || err.status !== 409) {
+              toast(`discard failed: ${(err as Error).message}`);
               return;
             }
             const ok = await confirm({
@@ -277,9 +280,7 @@ export function Sidebar() {
             });
             if (!ok) return;
             try {
-              await api.discardWorktree(s.sessionId, true);
-              toast(`discarded ${wt.branch}`);
-              loadData();
+              await attempt(true);
             } catch (err2) {
               toast(`discard failed: ${(err2 as Error).message}`);
             }

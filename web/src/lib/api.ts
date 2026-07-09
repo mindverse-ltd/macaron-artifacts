@@ -44,9 +44,26 @@ import type {
 } from '@macaron/shared';
 import { authedFetch } from './auth';
 
+// Thrown by every non-2xx response. Carries the status so callers can branch on
+// it (e.g. worktree discard's 409 → confirm-dirty prompt) instead of grepping
+// the message string.
+export class HttpError extends Error {
+  constructor(readonly status: number, body: string) {
+    let message = '';
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed.error === 'string') message = parsed.error;
+    } catch {
+      /* non-JSON error body */
+    }
+    super(message || (body ? `http ${status}: ${body.slice(0, 200)}` : `http ${status}`));
+    this.name = 'HttpError';
+  }
+}
+
 export async function getJSON<T>(url: string): Promise<T> {
   const r = await authedFetch(url);
-  if (!r.ok) throw new Error(`http ${r.status}`);
+  if (!r.ok) throw new HttpError(r.status, await r.text().catch(() => ''));
   return r.json() as Promise<T>;
 }
 
@@ -101,17 +118,7 @@ export type McpServerInput = {
 
 async function req<T>(url: string, init: RequestInit): Promise<T> {
   const r = await authedFetch(url, init);
-  if (!r.ok) {
-    const text = await r.text();
-    let message = '';
-    try {
-      const parsed = JSON.parse(text) as { error?: unknown };
-      if (typeof parsed.error === 'string') message = parsed.error;
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new Error(message || (text ? `http ${r.status}: ${text.slice(0, 200)}` : `http ${r.status}`));
-  }
+  if (!r.ok) throw new HttpError(r.status, await r.text().catch(() => ''));
   return r.json() as Promise<T>;
 }
 

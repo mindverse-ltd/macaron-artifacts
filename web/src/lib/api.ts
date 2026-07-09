@@ -285,6 +285,20 @@ export function basename(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
+// Trigger a client-side download of `text` as a file named `name`. Used by the
+// session Markdown export — no server round-trip since the WebUI already holds
+// the parsed transcript.
+export function downloadTextFile(name: string, text: string, mime = 'text/markdown'): void {
+  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function fmtAgo(ms: number): string {
   if (!ms) return '—';
   const s = Math.floor((Date.now() - ms) / 1000);

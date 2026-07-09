@@ -84,7 +84,7 @@ function isNoisyUserText(t: string): boolean {
   return false;
 }
 
-function flatten(messages: Message[]): Item[] {
+export function flatten(messages: Message[]): Item[] {
   const out: Item[] = [];
   let i = 0;
   let lastTool: Extract<Item, { kind: 'tool' }> | null = null;
@@ -681,7 +681,7 @@ function PlanApprovalItem({
   );
 }
 
-function ItemView({
+export function ItemView({
   it,
   onRewind,
   onFork,

@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { api, basename, type Message, type SessionDetail } from '../lib/api';
 import { streamSession } from '../lib/sse';
 import { getLive, subscribeLive, clearLive, subscribeFollowup, startNewSession } from '../lib/liveStore';
+import { hasActiveModal } from '../lib/modal';
 import { extractPartialCode, parseFollowups } from '../lib/partialJson';
 import {
   THINKING_VERBS,
@@ -68,7 +69,7 @@ type Item =
   | { id: string; kind: 'live-assistant'; text: string }
   // Pending / resolved permission gate. Rendered as an inline card with
   // Allow/Deny buttons while `status === 'pending'`.
-  | { id: string; kind: 'permission'; permissionId: string; toolName: string; input: unknown; status: 'pending' | 'allow' | 'deny' };
+  | { id: string; kind: 'permission'; permissionId: string; toolName: string; input: unknown; suggestion?: { label: string }; status: 'pending' | 'allow' | 'deny' };
 
 const TODO_WRITE_NAMES = new Set(['TodoWrite', 'todo_write']);
 const isTodoWriteTool = (name: string) => TODO_WRITE_NAMES.has(name);
@@ -558,19 +559,21 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   );
 }
 
-// Inline permission gate — Allow / Deny buttons that POST the decision back
-// so the SDK's canUseTool callback resumes with the user's choice.
+// Inline permission gate. Deny / Allow-once always show; Session / Always
+// appear when the server sent a `suggestion` (i.e. there's a concrete rule to
+// remember) and POST the decision with a scope so canUseTool persists it.
 function PermissionItem({
   it,
   onDecide,
 }: {
   it: Extract<Item, { kind: 'permission' }>;
-  onDecide: (permissionId: string, decision: 'allow' | 'deny') => void;
+  onDecide: (permissionId: string, decision: 'allow' | 'deny', scope?: 'once' | 'session' | 'always') => void;
 }) {
   // Only pending gates are worth showing — once resolved, the tool block
   // above already tells the story (Bash ran / didn't run).
   if (it.status !== 'pending') return null;
   const header = toolHeader(it.toolName, it.input);
+  const remember = it.suggestion?.label;
   return (
     <div className="ti-perm">
       <span className="ti-perm-icon">🔒</span>
@@ -592,11 +595,31 @@ function PermissionItem({
         </button>
         <button
           type="button"
-          className="primary small"
-          onClick={() => onDecide(it.permissionId, 'allow')}
+          className="ghost small"
+          onClick={() => onDecide(it.permissionId, 'allow', 'once')}
         >
-          Allow
+          Allow once
         </button>
+        {remember && (
+          <button
+            type="button"
+            className="ghost small"
+            title={`Don't ask again this session for: ${remember}`}
+            onClick={() => onDecide(it.permissionId, 'allow', 'session')}
+          >
+            Session
+          </button>
+        )}
+        {remember && (
+          <button
+            type="button"
+            className="primary small"
+            title={`Always allow in this project: ${remember}`}
+            onClick={() => onDecide(it.permissionId, 'allow', 'always')}
+          >
+            Always
+          </button>
+        )}
       </span>
     </div>
   );
@@ -609,7 +632,7 @@ function ItemView({
 }: {
   it: Item;
   onRewind?: (uuid: string) => void;
-  onPermissionDecide?: (permissionId: string, decision: 'allow' | 'deny') => void;
+  onPermissionDecide?: (permissionId: string, decision: 'allow' | 'deny', scope?: 'once' | 'session' | 'always') => void;
 }) {
   switch (it.kind) {
     case 'user':
@@ -1062,7 +1085,7 @@ export function Session(props: SessionProps = {}) {
   // linger in "pending" — the server will echo a permission_resolved event
   // that overwrites the same status field anyway.
   const handlePermissionDecide = useCallback(
-    (permissionId: string, decision: 'allow' | 'deny') => {
+    (permissionId: string, decision: 'allow' | 'deny', scope: 'once' | 'session' | 'always' = 'once') => {
       setLiveTurn((cur) =>
         cur.map((t) =>
           t.kind === 'permission' && t.permissionId === permissionId
@@ -1070,7 +1093,7 @@ export function Session(props: SessionProps = {}) {
             : t,
         ),
       );
-      api.permissionDecision(permissionId, decision).catch((e) => {
+      api.permissionDecision(permissionId, decision, { scope }).catch((e) => {
         toast(`permission ${decision} failed: ${(e as Error).message}`);
       });
     },
@@ -1128,7 +1151,7 @@ export function Session(props: SessionProps = {}) {
       bypassPermissions: 'Bypass all',
     };
     const onKey = (e: Event) => {
-      if (!focused) return; // canvas tiles only respond when active
+      if (!focused || hasActiveModal()) return; // canvas tiles only respond when active and no modal is covering them
       const ke = e as unknown as { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean; preventDefault: () => void };
       if (ke.key !== 'Tab' || !ke.shiftKey || ke.ctrlKey || ke.metaKey || ke.altKey) return;
       ke.preventDefault();
@@ -1176,6 +1199,7 @@ export function Session(props: SessionProps = {}) {
               permissionId: t.permissionId,
               toolName: t.toolName,
               input: t.input,
+              suggestion: t.suggestion,
               status: t.status,
             };
           }
@@ -1335,8 +1359,9 @@ export function Session(props: SessionProps = {}) {
 
   const send = useCallback(
     async (opts?: { text?: string; images?: AttachedImage[] }) => {
-      // `opts` present = programmatic send (auto-dequeue / send-now) with the
-      // given text; absent = the user submitting the composer's current draft.
+      // `opts` present = programmatic send (auto-dequeue / send-now / the
+      // $macaron/chat bridge) with the given text; absent = the user submitting
+      // the composer's current draft.
       const text = (opts?.text ?? input).trim();
       const sentImages = opts ? (opts.images ?? []) : images;
       if ((!text && sentImages.length === 0) || sending) return;
@@ -1459,7 +1484,7 @@ export function Session(props: SessionProps = {}) {
               }
             } catch { /* tolerate parse fail; stream still delivers */ }
           },
-          onPermissionRequest: ({ id, toolName, input }) => {
+          onPermissionRequest: ({ id, toolName, input, suggestion }) => {
             // Nudge the user via native notification when a tool needs
             // approval — otherwise a session in a background tab can
             // silently stall. requireInteraction keeps it visible until
@@ -1485,6 +1510,7 @@ export function Session(props: SessionProps = {}) {
                 permissionId: id,
                 toolName,
                 input,
+                suggestion,
                 status: 'pending',
               },
             ]);
@@ -1545,79 +1571,6 @@ export function Session(props: SessionProps = {}) {
     [project, sid, input, sending, load, images, permissionMode, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
   );
 
-  // Enqueue a message typed while a turn is running. macaron's runner is
-  // single-shot (no stdin into the live turn), so we hold it client-side and
-  // auto-send it once the turn finishes.
-  const enqueue = useCallback((text: string) => {
-    const t = text.trim();
-    if (!t) return;
-    setQueue((q) => [...q, { id: queueId(), text: t }]);
-  }, []);
-
-  // The composer's submit path: while a turn runs, Enter/Send queues the text
-  // instead of being blocked; when idle it sends immediately. Images ride the
-  // immediate path only (first increment), so they stay attached while busy.
-  const submitComposer = useCallback(() => {
-    const text = input.trim();
-    if (!text && images.length === 0) return;
-    if (sending) {
-      if (!text) return; // nothing queueable (images can't be queued yet)
-      enqueue(text);
-      setInput('');
-      setHistoryIdx(null);
-      draftInputRef.current = '';
-      return;
-    }
-    void send();
-  }, [input, images, sending, enqueue, send]);
-
-  // Send now: interrupt the running turn and send this message next. macaron's
-  // only interrupt primitive is /stop (abort the subprocess), so we push the
-  // text to the FRONT of the queue and stop — the idle-edge dequeue effect
-  // below then sends it first. Graceful mid-tool steer would need the SDK's
-  // streaming-input mode, which the single-shot runner doesn't use (follow-up).
-  const handleSendNow = useCallback(() => {
-    const text = input.trim();
-    if (!text) return;
-    setQueue((q) => [{ id: queueId('q-now'), text }, ...q]);
-    setInput('');
-    setHistoryIdx(null);
-    draftInputRef.current = '';
-    void handleStop();
-  }, [input, handleStop]);
-
-  const removeQueued = useCallback((id: string) => {
-    setQueue((q) => q.filter((m) => m.id !== id));
-  }, []);
-
-  const moveQueued = useCallback((id: string, dir: -1 | 1) => {
-    setQueue((q) => {
-      const i = q.findIndex((m) => m.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= q.length) return q;
-      const next = [...q];
-      [next[i], next[j]] = [next[j]!, next[i]!];
-      return next;
-    });
-  }, []);
-
-  // Edit a queued message: pull it back into the composer (removing it from
-  // the queue). If the composer already holds a draft, keep that safe by
-  // prepending it back onto the queue front.
-  const editQueued = useCallback((id: string) => {
-    const target = queue.find((m) => m.id === id);
-    if (!target) return;
-    const draft = input.trim();
-    const draftId = draft ? queueId('q-draft') : '';
-    setQueue((q) => {
-      if (!q.some((m) => m.id === id)) return q;
-      const rest = q.filter((m) => m.id !== id);
-      if (draft) return [{ id: draftId, text: draft }, ...rest];
-      return rest;
-    });
-    setInput(target.text);
-  }, [input, queue]);
-
   // Idle-edge dequeue: when a turn finishes (running true→false), auto-send the
   // next queued message. Edge-guarded so exactly one message goes per turn —
   // send() flips `sending` back to true synchronously, re-arming the guard.
@@ -1632,6 +1585,20 @@ export function Session(props: SessionProps = {}) {
       void send({ text: head!.text });
     }
   }, [sending, polling, queue, send]);
+
+  // Chat bridge: a sandboxed render_ui widget imports sendUserMessage from
+  // '$macaron/chat', and the shim (web/public/genui-shim/chat.mjs) dispatches
+  // the payload to this host global slot ('$app/chat'), which relays it into
+  // send() as a programmatic user turn. Only the focused session registers —
+  // canvas multi-tile mounts share one slot, so the widget the user is actually
+  // looking at owns the bridge.
+  useEffect(() => {
+    if (!focused) return;
+    const g = globalThis as unknown as { '$app/chat'?: (prompt: string) => void };
+    const bridge = (prompt: string) => { void send({ text: prompt }); };
+    g['$app/chat'] = bridge;
+    return () => { if (g['$app/chat'] === bridge) delete g['$app/chat']; };
+  }, [focused, send]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

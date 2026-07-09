@@ -272,9 +272,6 @@ async function cwdFromProjectSessions(project, files) {
     }
     return null;
 }
-export async function resolveProjectCwd(project) {
-    return (await cwdFromProjectSessions(project)) ?? decodeClaudeProjectName(project);
-}
 // Directories never worth walking for an @-mention: build output, vendored
 // deps, caches. Mirrors fafawlf/claude-code-web's skip-list. Applied on top
 // of the repo's own `.gitignore` (loaded per root below).
@@ -368,6 +365,36 @@ export async function resolveSessionCwd(project, sid) {
     }
     catch { /* fall back to decoded project name */ }
     return cwd;
+}
+// Resolve a claude project name to its working directory. Prefer the cwd
+// embedded in an actual jsonl (a big first-line paste can push `cwd` past
+// HEAD_BYTES, so decoding the name is the fallback). We only fall back to
+// decodeClaudeProjectName when the project is actually registered under
+// CLAUDE_PROJECTS: that decode (`-` -> `/`) is attacker-controllable, and
+// callers that hand the result to the filesystem as a *root* (routes/files.ts)
+// would otherwise turn the `:project` route param into an arbitrary-root
+// traversal (e.g. `-etc` -> `/etc`). Returns null for an unregistered project;
+// callers must treat null as "unknown project" (404), never as a servable root.
+export async function resolveProjectCwd(project) {
+    let files;
+    const projDir = path.join(CLAUDE_PROJECTS, project);
+    try {
+        files = await fs.readdir(projDir);
+    }
+    catch {
+        return null; // no such project dir — reject rather than decode a root
+    }
+    for (const f of files) {
+        if (!f.endsWith('.jsonl'))
+            continue;
+        const meta = await readSessionSummary(path.join(projDir, f));
+        if (meta?.cwd)
+            return meta.cwd;
+    }
+    // Registered project whose cwd we couldn't recover from any jsonl: fall back
+    // to the decoded name (the original big-paste behavior), now gated on the dir
+    // existing above so an unregistered `-etc` can never reach this.
+    return decodeClaudeProjectName(project);
 }
 export async function listAllSessions() {
     let projects;

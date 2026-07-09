@@ -61,6 +61,9 @@ export async function registerWorkspaceRoutes(app) {
         // Derive cwd from any existing session in this project, else decode the
         // project name (which mirrors claude-cli's encoding).
         const cwd = await resolveProjectCwd(project);
+        if (!cwd) {
+            return reply.status(404).send({ error: 'unknown project' });
+        }
         try {
             const st = await fs.stat(cwd);
             if (!st.isDirectory())

@@ -367,9 +367,11 @@ function SystemEventItem({ eventType, text }: { eventType: string; text: string 
 function UserItem({
   parts,
   onRewind,
+  onFork,
 }: {
   parts: MsgPart[];
   onRewind?: () => void;
+  onFork?: () => void;
 }) {
   const hasNonEmptyText = parts.some((p) => p.kind === 'text' && p.text);
   const hasImage = parts.some((p) => p.kind === 'image');
@@ -388,6 +390,17 @@ function UserItem({
           ),
         )}
       </div>
+      {onFork && (
+        <button
+          type="button"
+          className="ti-user-fork"
+          onClick={onFork}
+          title="Fork a new session from before this message"
+          aria-label="Fork"
+        >
+          ⑂ fork
+        </button>
+      )}
       {onRewind && (
         <button
           type="button"
@@ -712,12 +725,14 @@ function PermissionItem({
 function ItemView({
   it,
   onRewind,
+  onFork,
   onPermissionDecide,
   project,
   sid,
 }: {
   it: Item;
   onRewind?: (uuid: string) => void;
+  onFork?: (uuid: string) => void;
   onPermissionDecide?: (permissionId: string, decision: 'allow' | 'deny', scope?: 'once' | 'session' | 'always') => void;
   project?: string;
   sid?: string;
@@ -730,6 +745,7 @@ function ItemView({
           onRewind={
             onRewind && it.uuid ? () => onRewind(it.uuid!) : undefined
           }
+          onFork={onFork && it.uuid ? () => onFork(it.uuid!) : undefined}
         />
       );
     case 'live-user':
@@ -1094,6 +1110,7 @@ export function Session(props: SessionProps = {}) {
   const confirm = useConfirm();
   const [busyCompact, setBusyCompact] = useState(false);
   const [busyRewind, setBusyRewind] = useState(false);
+  const [busyFork, setBusyFork] = useState(false);
   // Messages the user lined up while the current turn was still streaming.
   // Auto-sent one at a time as each turn completes (see the dequeue effect).
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
@@ -1153,6 +1170,26 @@ export function Session(props: SessionProps = {}) {
       }
     },
     [busyRewind, confirm, project, sid, toast],
+  );
+
+  // Fork: non-destructive branch. Copy the transcript up to (excluding) the
+  // picked message into a fresh sid and navigate there — Workspace pins it as
+  // a new focused tile. The original session is untouched, so no confirm.
+  const handleFork = useCallback(
+    async (uuid: string) => {
+      if (busyFork) return;
+      setBusyFork(true);
+      try {
+        const r = await api.forkSession(project, sid, uuid);
+        toast(`forked → ${r.newSid.slice(0, 8)}`);
+        navigate(`/w/${encodeURIComponent(project)}/s/${encodeURIComponent(r.newSid)}`);
+      } catch (e) {
+        toast(`fork failed: ${(e as Error).message}`);
+      } finally {
+        setBusyFork(false);
+      }
+    },
+    [busyFork, navigate, project, sid, toast],
   );
 
   // Compact: replace the transcript with a provider-generated recap.
@@ -1872,7 +1909,7 @@ export function Session(props: SessionProps = {}) {
           <ItemView key={it.id} it={it} project={project} sid={sid} />
         ))}
         {[...tail].reverse().map((it) => (
-          <ItemView key={it.id} it={it} onRewind={handleRewind} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} />
         ))}
         {hidden > 0 && (
           <button className="ghost load-earlier" onClick={() => setShown((s) => s + PAGE_SIZE)}>

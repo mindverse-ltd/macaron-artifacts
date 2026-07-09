@@ -122,6 +122,9 @@ export type NewSessionOptions = {
   text: string;
   permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
   images?: Array<{ mimeType: string; dataUrl: string }>;
+  // Run the new session in a dedicated git worktree + branch off the repo's
+  // HEAD. No-ops server-side if cwd isn't a git work tree.
+  isolate?: boolean;
   // Absolute directory to start in — set by the directory picker for a
   // brand-new workspace. Omitted for sessions started inside an existing one.
   cwd?: string;
@@ -144,6 +147,7 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
         text,
         permissionMode: opts.permissionMode,
         images: opts.images,
+        isolate: opts.isolate,
         cwd: opts.cwd,
       }),
     })

@@ -5,6 +5,8 @@ export type {
   Block,
   Message,
   SessionDetail,
+  MessageSearchHit,
+  MessageSearchResponse,
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
@@ -12,8 +14,10 @@ export type {
   DirListing,
   CreateShareResponse,
   SharedSessionResponse,
+  WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
+  SlashCommand,
   ConfigFileId,
   ConfigFileFormat,
   ConfigFileMeta,
@@ -27,11 +31,14 @@ import type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   SessionDetail,
+  MessageSearchResponse,
   HealthResponse,
   DirListing,
   CreateShareResponse,
   SharedSessionResponse,
+  WorktreeInfo,
   UsageResponse,
+  CommandsResponse,
   ConfigFileId,
   ConfigFileMeta,
   ConfigFile,
@@ -174,6 +181,10 @@ export const api = {
     return r.json() as Promise<ConfigFile>;
   },
   workspaces: () => getJSON<WorkspacesResponse>('/api/workspaces'),
+  searchMessages: (q: string, limit = 30) =>
+    getJSON<MessageSearchResponse>(
+      `/api/search/messages?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
   listDirs: (path?: string) =>
     getJSON<DirListing>(`/api/fs/dirs?path=${encodeURIComponent(path ?? '')}`),
   workspace: (project: string) =>
@@ -181,6 +192,10 @@ export const api = {
   session: (project: string, sid: string) =>
     getJSON<SessionDetail>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
+    ),
+  commands: (project: string) =>
+    getJSON<CommandsResponse>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/commands`,
     ),
   deleteSession: async (project: string, sid: string): Promise<void> => {
     const r = await authedFetch(
@@ -206,12 +221,12 @@ export const api = {
   permissionDecision: (
     id: string,
     decision: 'allow' | 'deny',
-    opts?: { scope?: 'once' | 'session' | 'always'; reason?: string },
+    opts?: { scope?: 'once' | 'session' | 'always'; reason?: string; mode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' },
   ) =>
     req<{ ok: boolean }>('/api/permission-decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, decision, scope: opts?.scope, reason: opts?.reason }),
+      body: JSON.stringify({ id, decision, scope: opts?.scope, reason: opts?.reason, mode: opts?.mode }),
     }),
   stopSession: (project: string, sid: string) =>
     req<{ ok: boolean; running: boolean }>(
@@ -258,6 +273,11 @@ export const api = {
     }),
   sharedSession: (token: string) =>
     getJSON<SharedSessionResponse>(`/api/public/share/${encodeURIComponent(token)}`),
+  worktrees: () => getJSON<{ worktrees: WorktreeInfo[] }>('/api/worktrees'),
+  mergeWorktree: (sid: string) =>
+    req<{ ok: true; merged: true }>(`/api/worktrees/${encodeURIComponent(sid)}/merge`, { method: 'POST' }),
+  discardWorktree: (sid: string, force = false) =>
+    req<{ ok: true }>(`/api/worktrees/${encodeURIComponent(sid)}/discard${force ? '?force=1' : ''}`, { method: 'POST' }),
   listFiles: (project: string, path = '') =>
     getJSON<FileListResponse>(
       `/api/files/${encodeURIComponent(project)}/list?path=${encodeURIComponent(path)}`,

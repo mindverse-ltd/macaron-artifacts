@@ -70,6 +70,20 @@ export type UsageSnapshot = {
   model?: string;
 };
 
+// Estimated split of the used context window by source. macaron only sees
+// the aggregate `usage` number from the jsonl (not Anthropic's SDK-internal
+// per-category counts), so we measure the visible transcript and treat the
+// fixed prompt overhead as the residual: system = total − everything measured.
+// `total` stays the exact usage sum, so only the internal split is an estimate.
+export type ContextBreakdown = {
+  system: number; // system prompt + tool defs + MCP + CLAUDE.md (residual, not itemizable)
+  messages: number; // user + assistant text
+  toolCalls: number; // tool_use inputs
+  toolResults: number; // tool_result content (file reads, command output)
+  thinking: number; // extended-thinking blocks
+  total: number; // matches the Context bar's usage sum
+};
+
 export type SessionDetail = {
   kind: SessionKind;
   sessionId: string;
@@ -80,6 +94,7 @@ export type SessionDetail = {
   truncated?: boolean;
   totalBytes?: number;
   latestUsage?: UsageSnapshot;
+  contextBreakdown?: ContextBreakdown;
   // Environment counters for the status bar. Both are best-effort: MCPs
   // read from ~/.claude/settings.json; CLAUDE.md walks known locations.
   claudeMdCount?: number;

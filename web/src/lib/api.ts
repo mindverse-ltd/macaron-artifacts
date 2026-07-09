@@ -13,6 +13,7 @@ export type {
   FileSearchResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
   SlashCommand,
@@ -34,6 +35,7 @@ import type {
   FileSearchResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  WorktreeInfo,
   UsageResponse,
   CommandsResponse,
   ConfigFileId,
@@ -272,6 +274,11 @@ export const api = {
     }),
   sharedSession: (token: string) =>
     getJSON<SharedSessionResponse>(`/api/public/share/${encodeURIComponent(token)}`),
+  worktrees: () => getJSON<{ worktrees: WorktreeInfo[] }>('/api/worktrees'),
+  mergeWorktree: (sid: string) =>
+    req<{ ok: true; merged: true }>(`/api/worktrees/${encodeURIComponent(sid)}/merge`, { method: 'POST' }),
+  discardWorktree: (sid: string, force = false) =>
+    req<{ ok: true }>(`/api/worktrees/${encodeURIComponent(sid)}/discard${force ? '?force=1' : ''}`, { method: 'POST' }),
   listFiles: (project: string, path = '') =>
     getJSON<FileListResponse>(
       `/api/files/${encodeURIComponent(project)}/list?path=${encodeURIComponent(path)}`,

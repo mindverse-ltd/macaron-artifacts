@@ -24,6 +24,10 @@ type NewSessionBody = {
   // repo's current HEAD, so it doesn't share the working tree with siblings.
   // Silently no-ops if the derived cwd isn't a git work tree.
   isolate?: boolean;
+  // Absolute directory to start the session in. Set by the directory picker
+  // for brand-new workspaces; when present it wins over deriving cwd from the
+  // (lossy) project name, so a session can begin in any folder on disk.
+  cwd?: string;
 };
 
 function firstQuery(v: unknown): string | undefined {
@@ -88,11 +92,19 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
       // The `model` body field is currently ignored — provider is global.
       const { model, env: providerEnv } = getActiveProviderEnv();
 
-      // Derive cwd from any existing session in this project, else decode the
-      // project name (which mirrors claude-cli's encoding).
-      const cwd = await resolveProjectCwd(project);
-      if (!cwd) {
-        return reply.status(404).send({ error: 'unknown project' });
+      // The directory picker supplies an explicit cwd for brand-new projects.
+      // Otherwise use the guarded project resolver so an arbitrary route param
+      // can never decode into a filesystem root.
+      const explicitCwd = String(req.body?.cwd || '').trim();
+      let cwd: string;
+      if (explicitCwd) {
+        cwd = explicitCwd;
+      } else {
+        const resolvedCwd = await resolveProjectCwd(project);
+        if (!resolvedCwd) {
+          return reply.status(404).send({ error: 'unknown project' });
+        }
+        cwd = resolvedCwd;
       }
 
       try {

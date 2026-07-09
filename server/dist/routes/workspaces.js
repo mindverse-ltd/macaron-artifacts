@@ -4,9 +4,10 @@ import { CLAUDE_PROJECTS } from '../config.js';
 import { decodeClaudeProjectName, groupWorkspaces, listAllSessions, readSessionSummary, } from '../lib/session-store.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
-import { runClaude } from '../lib/claude-runner.js';
+import { runClaude, runFollowup } from '../lib/claude-runner.js';
 import { registerRun, endRun } from '../lib/active-runs.js';
-import { getActiveProviderEnv } from '../lib/settings-store.js';
+import { getActiveProviderEnv, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
+import { createWorktree, bindWorktree, cleanupPendingWorktree } from '../lib/worktree-store.js';
 export async function registerWorkspaceRoutes(app) {
     app.get('/api/workspaces', async () => {
         const sessions = await listAllSessions();
@@ -64,6 +65,20 @@ export async function registerWorkspaceRoutes(app) {
         catch (e) {
             return reply.status(400).send({ error: `cwd unusable: ${cwd} (${e.message})` });
         }
+        // Optional worktree isolation: create a dedicated branch+worktree off the
+        // repo's HEAD and run the agent there. Created BEFORE the run so cwd
+        // exists; the record is bound to the sessionId once the SDK emits it.
+        let pendingWt = null;
+        if (req.body?.isolate) {
+            try {
+                pendingWt = await createWorktree(cwd);
+                if (pendingWt)
+                    cwd = pendingWt.worktreePath;
+            }
+            catch (e) {
+                return reply.status(400).send({ error: `worktree create failed: ${e.message}` });
+            }
+        }
         startSSE(reply);
         sseSend(reply, { type: 'starting', cwd });
         // Pass an abortController so a later `/stop` (from the Session view
@@ -94,6 +109,8 @@ export async function registerWorkspaceRoutes(app) {
                     capturedSid = ev.sessionId;
                     liveStart(capturedSid, { cwd });
                     registerRun(capturedSid, abortController);
+                    if (pendingWt)
+                        bindWorktree(capturedSid, pendingWt).catch(() => { });
                     livePush(capturedSid, { type: 'user-text', text });
                     safeSend({ type: 'meta', cwd, sessionId: capturedSid });
                 }
@@ -127,7 +144,7 @@ export async function registerWorkspaceRoutes(app) {
                         livePush(capturedSid, payload);
                 }
                 else if (ev.kind === 'permission_request') {
-                    const payload = { type: 'permission_request', id: ev.id, toolName: ev.toolName, input: ev.input };
+                    const payload = { type: 'permission_request', id: ev.id, toolName: ev.toolName, input: ev.input, suggestion: ev.suggestion };
                     safeSend(payload);
                     if (capturedSid)
                         livePush(capturedSid, payload);
@@ -160,13 +177,36 @@ export async function registerWorkspaceRoutes(app) {
                         liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
                         endRun(capturedSid);
                     }
+                    // Same post-turn follow-up as the resume path: stream a throwaway,
+                    // persistSession:false query resuming this fresh session (shared
+                    // prefix → cache hit). Best-effort; never blocks the turn close.
+                    // Gated on exitCode 0 so an abort/error stays identical to before.
+                    if (!clientGone && capturedSid && ev.exitCode === 0 && getFollowupSuggestionsEnabled()) {
+                        try {
+                            for await (const delta of runFollowup({ resume: capturedSid, cwd, model, envOverrides: providerEnv })) {
+                                if (clientGone)
+                                    break;
+                                safeSend({ type: 'followup_delta', text: delta });
+                            }
+                        }
+                        catch {
+                            /* swallow: follow-up is enrichment, never fatal */
+                        }
+                    }
                     if (!clientGone)
                         sseDone(reply);
                 }
             }
+            // Stream ended without ever emitting a session (startup failure: bad
+            // provider/auth/model). Tear down the pre-created worktree so it doesn't
+            // leak untracked — bindWorktree only runs when capturedSid is set.
+            if (pendingWt && !capturedSid)
+                await cleanupPendingWorktree(pendingWt);
         })().catch((e) => {
             const msg = e.message;
             safeSend({ type: 'error', error: msg });
+            if (pendingWt && !capturedSid)
+                cleanupPendingWorktree(pendingWt).catch(() => { });
             if (capturedSid) {
                 liveEnd(capturedSid, { type: 'done', exitCode: -1, error: msg });
                 endRun(capturedSid);

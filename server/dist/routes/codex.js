@@ -13,8 +13,10 @@ import { promises as fs } from 'node:fs';
 import { deleteCodexSession, listCodexSessions, readCodexSessionMessages, } from '../lib/codex-store.js';
 import { groupWorkspaces } from '../lib/session-store.js';
 import { runCodex } from '../lib/codex-runner.js';
+import { maybeGenerateCodexTitle } from '../lib/codex-title.js';
 import { CODEX_SYSTEM_PROVIDER_ID, createCodexProvider, deleteCodexProvider, readPublicCodexSettings, setActiveCodexProvider, updateCodexProvider, updateCodexRuntime, } from '../lib/codex-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
+import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
 export async function registerCodexRoutes(app) {
     // --- Threads -----------------------------------------------------------
@@ -60,7 +62,7 @@ export async function registerCodexRoutes(app) {
         }
     });
     // --- Send / resume -----------------------------------------------------
-    const pipeCodexToSSE = (reply, stream, sid) => {
+    const pipeCodexToSSE = (reply, stream, sid, live) => {
         let clientGone = false;
         reply.raw.on('close', () => { clientGone = true; });
         const safeSend = (payload) => {
@@ -74,36 +76,65 @@ export async function registerCodexRoutes(app) {
             }
         };
         let capturedSid = sid;
+        // Mirror the Claude route: the primary client is written directly, while a
+        // parallel copy of every event lands in the live registry so a browser
+        // refresh mid-turn can reattach via the snapshot-then-live /live endpoint.
+        let liveStarted = false;
+        const ensureLive = () => {
+            if (liveStarted || !capturedSid)
+                return;
+            liveStarted = true;
+            liveStart(capturedSid, { cwd: live.cwd });
+            if (live.text)
+                livePush(capturedSid, { type: 'user-text', text: live.text });
+        };
+        ensureLive(); // resume already knows the sid; a new thread waits for `session`
+        const relay = (payload) => {
+            safeSend(payload);
+            if (capturedSid)
+                livePush(capturedSid, payload);
+        };
         (async () => {
             for await (const ev of stream) {
                 if (ev.kind === 'session' && !capturedSid) {
                     capturedSid = ev.sessionId;
+                    ensureLive();
                     safeSend({ type: 'meta', sessionId: capturedSid });
                 }
                 else if (ev.kind === 'delta')
-                    safeSend({ type: 'delta', text: ev.text });
+                    relay({ type: 'delta', text: ev.text });
                 else if (ev.kind === 'tool_use')
-                    safeSend({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
+                    relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
                 else if (ev.kind === 'tool_result')
-                    safeSend({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
+                    relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
                 else if (ev.kind === 'usage')
-                    safeSend({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
+                    relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
                 else if (ev.kind === 'message')
-                    safeSend({ type: 'event', subtype: ev.subtype });
+                    relay({ type: 'event', event: 'system', subtype: ev.subtype });
                 else if (ev.kind === 'error')
-                    safeSend({ type: 'error', error: ev.error });
+                    relay({ type: 'error', error: ev.error });
                 else if (ev.kind === 'done') {
                     safeSend({ type: 'done', exitCode: ev.exitCode });
-                    if (capturedSid)
+                    if (capturedSid) {
+                        liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
                         endRun(capturedSid);
+                    }
+                    // Name the thread from its opening exchange once the turn's rollout
+                    // has landed. Fire-and-forget: no-op if already titled, never blocks
+                    // the response, failures swallowed.
+                    if (capturedSid && ev.exitCode === 0)
+                        void maybeGenerateCodexTitle(capturedSid).catch(() => { });
                     if (!clientGone)
                         sseDone(reply);
                 }
             }
         })().catch((e) => {
-            if (capturedSid)
+            const msg = e.message;
+            if (capturedSid) {
+                liveEnd(capturedSid, { type: 'done', exitCode: -1, error: msg });
                 endRun(capturedSid);
-            safeSend({ type: 'error', error: e.message });
+            }
+            safeSend({ type: 'error', error: msg });
             if (!clientGone)
                 sseDone(reply);
         });
@@ -141,7 +172,7 @@ export async function registerCodexRoutes(app) {
                 yield ev;
             }
         })();
-        pipeCodexToSSE(reply, wrapped, null);
+        pipeCodexToSSE(reply, wrapped, null, { cwd, text });
     });
     app.post('/api/codex/threads/:sid/message', async (req, reply) => {
         const sid = req.params.sid;
@@ -163,11 +194,38 @@ export async function registerCodexRoutes(app) {
         sseSend(reply, { type: 'meta', sessionId: sid, cwd });
         const abortController = new AbortController();
         registerRun(sid, abortController);
-        pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController }), sid);
+        pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController }), sid, { cwd, text });
     });
     app.post('/api/codex/threads/:sid/stop', async ({ params }, reply) => {
         const ok = abortRun(params.sid);
         return reply.send({ ok, running: ok });
+    });
+    // SSE: reattach to an in-flight Codex turn. Replays the current snapshot
+    // (liveGet), then forwards live events until the turn ends — so a browser
+    // refresh mid-turn picks the stream back up instead of waiting for the
+    // rollout to land on disk. Mirrors the Claude route's /live handler.
+    app.get('/api/codex/threads/:sid/live', async ({ params }, reply) => {
+        startSSE(reply);
+        const ls = liveGet(params.sid);
+        // Only an in-flight turn is worth reattaching to. A finished turn's data
+        // is already (or imminently) on disk and the frontend reloads it there on
+        // done, so replaying an ended turn would double it against the disk-derived
+        // history — treat ended as not-live.
+        if (!ls || ls.ended) {
+            sseSend(reply, { type: 'live-end', reason: 'not-live' });
+            sseDone(reply);
+            return;
+        }
+        for (const ev of ls.events) {
+            try {
+                sseSend(reply, ev);
+            }
+            catch {
+                return;
+            }
+        }
+        ls.subs.add(reply);
+        reply.raw.on('close', () => ls.subs.delete(reply));
     });
     // --- Config ------------------------------------------------------------
     app.get('/api/codex/config', async () => readPublicCodexSettings());

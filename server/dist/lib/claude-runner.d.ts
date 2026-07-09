@@ -10,6 +10,9 @@ export type RunnerEvent = {
     kind: 'delta';
     text: string;
 } | {
+    kind: 'reasoning';
+    text: string;
+} | {
     kind: 'tool_use';
     id: string;
     name: string;
@@ -42,6 +45,9 @@ export type RunnerEvent = {
     id: string;
     toolName: string;
     input: unknown;
+    suggestion?: {
+        label: string;
+    };
 } | {
     kind: 'permission_resolved';
     id: string;

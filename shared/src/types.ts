@@ -24,6 +24,9 @@ export type SessionListItem = {
   gitBranch?: string;
   sessionId: string;
   preview: string;
+  // Generated human-readable label. Codex-only for now (see codex-title.ts);
+  // the sidebar prefers it over `preview` when present.
+  title?: string;
   messageCount: number;
   messageCountSuffix?: string;
   mtime: number;
@@ -98,9 +101,25 @@ export type CreatePrRequest = { title: string; body: string; draft: boolean };
 // `created` is false when we short-circuited to an already-open PR.
 export type CreatePrResult = { url: string; created: boolean };
 
+// ---- File explorer -------------------------------------------------------
+// A single entry in a directory listing. `path` is relative to the project
+// cwd (root = ''), so the web tree can request children without knowing the
+// absolute path (the server re-resolves + confines it).
+export type FileEntry = {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size?: number;
+  mtime?: number;
+};
+
+export type FileListResponse = { root: string; path: string; entries: FileEntry[] };
+export type FileReadResponse = { path: string; content: string; size: number };
+
 export type WorkspacesResponse = { workspaces: Workspace[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
 export type HealthResponse = { ok: boolean; model: string };
+export type AuthStatusResponse = { required: boolean };
 export type ConfigResponse = {
   macaron: { base: string; model: string; configured: boolean };
 };

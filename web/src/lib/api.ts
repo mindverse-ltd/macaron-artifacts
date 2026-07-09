@@ -11,6 +11,9 @@ export type {
   PrContext,
   CreatePrRequest,
   CreatePrResult,
+  FileEntry,
+  FileListResponse,
+  FileReadResponse,
 } from '@macaron/shared';
 
 import type {
@@ -21,10 +24,13 @@ import type {
   PrContext,
   CreatePrRequest,
   CreatePrResult,
+  FileListResponse,
+  FileReadResponse,
 } from '@macaron/shared';
+import { authedFetch } from './auth';
 
 export async function getJSON<T>(url: string): Promise<T> {
-  const r = await fetch(url);
+  const r = await authedFetch(url);
   if (!r.ok) throw new Error(`http ${r.status}`);
   return r.json() as Promise<T>;
 }
@@ -58,7 +64,7 @@ export type ProviderInput = {
 };
 
 async function req<T>(url: string, init: RequestInit): Promise<T> {
-  const r = await fetch(url, init);
+  const r = await authedFetch(url, init);
   if (!r.ok) throw new Error(`http ${r.status}: ${(await r.text()).slice(0, 200)}`);
   return r.json() as Promise<T>;
 }
@@ -109,7 +115,7 @@ export const api = {
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
     ),
   deleteSession: async (project: string, sid: string): Promise<void> => {
-    const r = await fetch(
+    const r = await authedFetch(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
       { method: 'DELETE' },
     );
@@ -120,11 +126,15 @@ export const api = {
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/duplicate`,
       { method: 'POST' },
     ),
-  permissionDecision: (id: string, decision: 'allow' | 'deny', reason?: string) =>
+  permissionDecision: (
+    id: string,
+    decision: 'allow' | 'deny',
+    opts?: { scope?: 'once' | 'session' | 'always'; reason?: string },
+  ) =>
     req<{ ok: boolean }>('/api/permission-decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, decision, reason }),
+      body: JSON.stringify({ id, decision, scope: opts?.scope, reason: opts?.reason }),
     }),
   stopSession: (project: string, sid: string) =>
     req<{ ok: boolean; running: boolean }>(
@@ -165,6 +175,28 @@ export const api = {
         body: JSON.stringify(input),
       },
     ),
+  listFiles: (project: string, path = '') =>
+    getJSON<FileListResponse>(
+      `/api/files/${encodeURIComponent(project)}/list?path=${encodeURIComponent(path)}`,
+    ),
+  readFile: async (project: string, path: string): Promise<FileReadResponse> => {
+    const r = await authedFetch(
+      `/api/files/${encodeURIComponent(project)}/read?path=${encodeURIComponent(path)}`,
+    );
+    if (!r.ok) {
+      // Surface the server's reason (e.g. "binary file", "file too large") so
+      // the editor can show a helpful placeholder instead of "http 415".
+      const body = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error || `http ${r.status}`);
+    }
+    return r.json() as Promise<FileReadResponse>;
+  },
+  writeFile: (project: string, path: string, content: string) =>
+    req<{ ok: true; bytes: number }>(`/api/files/${encodeURIComponent(project)}/write`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content }),
+    }),
 };
 
 export function basename(p: string): string {

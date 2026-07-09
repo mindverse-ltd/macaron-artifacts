@@ -28,6 +28,10 @@ type NewSessionBody = {
   // repo's current HEAD, so it doesn't share the working tree with siblings.
   // Silently no-ops if the derived cwd isn't a git work tree.
   isolate?: boolean;
+  // Absolute directory to start the session in. Set by the directory picker
+  // for brand-new workspaces; when present it wins over deriving cwd from the
+  // (lossy) project name, so a session can begin in any folder on disk.
+  cwd?: string;
 };
 
 export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<void> {
@@ -70,23 +74,25 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
       // The `model` body field is currently ignored — provider is global.
       const { model, env: providerEnv } = getActiveProviderEnv();
 
-      // Derive cwd from any existing session in this project, else the cwd
-      // registered by the New-Project wizard, else decode the project name
-      // (which mirrors claude-cli's encoding but is lossy for fresh dirs).
-      let cwd = (await lookupProjectCwd(project)) || decodeClaudeProjectName(project);
-      try {
-        const projDir = path.join(CLAUDE_PROJECTS, project);
-        const files = await fs.readdir(projDir);
-        for (const f of files) {
-          if (!f.endsWith('.jsonl')) continue;
-          const meta = await readSessionSummary(path.join(projDir, f));
-          if (meta?.cwd) {
-            cwd = meta.cwd;
-            break;
+      // The directory picker supplies an explicit cwd. Otherwise prefer an
+      // existing session, then the New-Project registry, then the encoded key.
+      const explicitCwd = String(req.body?.cwd || '').trim();
+      let cwd = explicitCwd || (await lookupProjectCwd(project)) || decodeClaudeProjectName(project);
+      if (!explicitCwd) {
+        try {
+          const projDir = path.join(CLAUDE_PROJECTS, project);
+          const files = await fs.readdir(projDir);
+          for (const f of files) {
+            if (!f.endsWith('.jsonl')) continue;
+            const meta = await readSessionSummary(path.join(projDir, f));
+            if (meta?.cwd) {
+              cwd = meta.cwd;
+              break;
+            }
           }
+        } catch {
+          /* no sessions yet — fall back to decoded name */
         }
-      } catch {
-        /* no sessions yet — fall back to decoded name */
       }
 
       try {

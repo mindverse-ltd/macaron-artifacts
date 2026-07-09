@@ -4,6 +4,8 @@ import { api, basename, HttpError, type Workspace, type SessionListItem, type Wo
 import { useToast } from './Toast';
 import { useConfirm } from './Confirm';
 import { ContextMenu, type MenuItem } from './ContextMenu';
+import { DirPicker } from './DirPicker';
+import { encodeClaudeProjectName, setPendingCwd } from '../lib/newSession';
 import { RateLimitMeters } from './RateLimitMeters';
 import { NewProjectModal } from './NewProjectModal';
 import {
@@ -27,6 +29,7 @@ export function Sidebar() {
   const [model, setModel] = useState('');
   const [ctxMenu, setCtxMenu] = useState<{ items: MenuItem[]; x: number; y: number } | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Per-workspace set of canvas-pinned sids, so the session rows can show
   // + / ✓ toggles. Re-reads from localStorage whenever a canvas changes.
   const [canvasBy, setCanvasBy] = useState<Record<string, string[]>>({});
@@ -126,6 +129,16 @@ export function Sidebar() {
     const m = location.pathname.match(/^\/w\/([^/]+)/);
     return m ? decodeURIComponent(m[1]!) : '';
   })();
+
+  // Directory picker → start a session in any folder on disk. Encode the
+  // chosen path to its project key (claude-cli style), stash the raw cwd for
+  // the first-send POST, then navigate to that workspace so a draft opens.
+  const onPickDir = (cwd: string) => {
+    setPickerOpen(false);
+    const project = encodeClaudeProjectName(cwd);
+    setPendingCwd(project, cwd);
+    navigate(`/w/${encodeURIComponent(project)}`);
+  };
 
 
   const wsMenu = (w: WsData, e: React.MouseEvent) => {
@@ -317,15 +330,26 @@ export function Sidebar() {
 
       <div className="sb-label">
         <span>WORKSPACES</span>
-        <button
-          type="button"
-          className="sb-new-project"
-          onClick={() => setShowNewProject(true)}
-          title="New project (create dir or clone a repo)"
-          aria-label="New project"
-        >
-          +
-        </button>
+        <div className="sb-label-actions">
+          <button
+            type="button"
+            className="sb-new-session"
+            onClick={() => setPickerOpen(true)}
+            title="New session in a folder..."
+            aria-label="New session in a folder"
+          >
+            📁
+          </button>
+          <button
+            type="button"
+            className="sb-new-project"
+            onClick={() => setShowNewProject(true)}
+            title="New project (create dir or clone a repo)"
+            aria-label="New project"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       <div className="sb-ws-list">
@@ -445,6 +469,11 @@ export function Sidebar() {
 
       <div className="sb-spacer-grow" />
 
+      <Link className="sb-settings-link" to="/schedules">
+        <span>⏰</span>
+        <span>Schedules</span>
+      </Link>
+
       <Link className="sb-settings-link" to="/mcp">
         <span>🧩</span>
         <span>MCP servers</span>
@@ -486,7 +515,6 @@ export function Sidebar() {
           onClose={() => setCtxMenu(null)}
         />
       )}
-
       {showNewProject && (
         <NewProjectModal
           onClose={() => setShowNewProject(false)}
@@ -497,6 +525,7 @@ export function Sidebar() {
           }}
         />
       )}
+      {pickerOpen && <DirPicker onPick={onPickDir} onClose={() => setPickerOpen(false)} />}
     </aside>
   );
 }

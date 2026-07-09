@@ -28,6 +28,7 @@ import { registerShareRoutes } from './routes/share.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerTunnelRoutes } from './routes/tunnel.js';
 import { shutdownTunnel } from './lib/tunnel-manager.js';
+import { registerUsageRoutes } from './routes/usage.js';
 import { registerTerminalRoutes } from './routes/terminal.js';
 import { registerFileRoutes } from './routes/files.js';
 
@@ -85,6 +86,7 @@ await app.register(async (instance) => {
   await registerAuthRoutes(instance);
   await registerSettingsRoutes(instance);
   await registerPushRoutes(instance);
+  await registerUsageRoutes(instance);
   await registerMcpRoutes(instance);
   await registerConfigFileRoutes(instance);
   await registerRelayRoutes(instance);

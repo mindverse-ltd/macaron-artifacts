@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import '@fontsource/maple-mono/400.css';
+import '@fontsource/maple-mono/700.css';
 import '@xterm/xterm/css/xterm.css';
 import {
   terminalStreamUrl,
@@ -28,8 +30,18 @@ const THEME = {
 // xterm measures text with OffscreenCanvas in modern browsers; canvas font
 // parsing does not resolve CSS custom properties, so keep this as a concrete
 // monospace stack instead of var(--font-mono).
+const TERMINAL_FONT_SIZE = 12;
 const TERMINAL_FONT =
-  'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace';
+  '"Maple Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+
+async function loadTerminalFont(): Promise<void> {
+  const fonts = document.fonts;
+  if (!fonts?.load) return;
+  await Promise.all([
+    fonts.load(`${TERMINAL_FONT_SIZE}px "Maple Mono"`),
+    fonts.load(`700 ${TERMINAL_FONT_SIZE}px "Maple Mono"`),
+  ]);
+}
 
 export function Terminal({ project, sid, focused }: { project: string; sid: string; focused: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -40,55 +52,67 @@ export function Terminal({ project, sid, focused }: { project: string; sid: stri
     const host = hostRef.current;
     if (!host) return;
 
-    const term = new XTerm({
-      fontFamily: TERMINAL_FONT,
-      fontSize: 12.5,
-      theme: THEME,
-      cursorBlink: true,
-      scrollback: 5000,
-      convertEol: false,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host);
-    fit.fit();
-    termRef.current = term;
-    fitRef.current = fit;
-
-    const { cols, rows } = term;
-    term.onData((data) => sendTerminalInput(project, sid, data));
-
-    // history = full snapshot (reset+write, idempotent on reconnect);
-    // output = incremental chunk; exit = dim footer.
-    const es = new EventSource(terminalStreamUrl(project, sid, cols, rows));
-    es.onmessage = (e) => {
-      if (e.data === '[DONE]') { es.close(); return; }
-      let msg: { type?: string; data?: string; exitCode?: number; error?: string };
-      try { msg = JSON.parse(e.data); } catch { return; }
-      if (msg.type === 'history') { term.reset(); if (msg.data) term.write(msg.data); }
-      else if (msg.type === 'output') term.write(msg.data || '');
-      else if (msg.type === 'exit') { term.write(`\r\n\x1b[2m[process exited${msg.exitCode ? ` (${msg.exitCode})` : ''}]\x1b[0m\r\n`); es.close(); }
-      else if (msg.type === 'error') term.write(`\r\n\x1b[31m${msg.error || 'error'}\x1b[0m\r\n`);
-    };
-    // Reconnects are useful while the PTY is alive; exit/[DONE] are terminal
-    // states, so close the EventSource above to avoid respawning a shell.
-
+    let disposed = false;
     let raf = 0;
-    const doFit = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        try { fit.fit(); } catch { /* detached */ }
-        if (term.cols && term.rows) sendTerminalResize(project, sid, term.cols, term.rows);
+    let ro: ResizeObserver | null = null;
+    let es: EventSource | null = null;
+    let term: XTerm | null = null;
+
+    void (async () => {
+      try { await loadTerminalFont(); } catch { /* fall back to the font stack */ }
+      if (disposed) return;
+
+      term = new XTerm({
+        fontFamily: TERMINAL_FONT,
+        fontSize: TERMINAL_FONT_SIZE,
+        theme: THEME,
+        cursorBlink: true,
+        scrollback: 5000,
+        convertEol: false,
       });
-    };
-    const ro = new ResizeObserver(doFit);
-    ro.observe(host);
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      term.open(host);
+      fit.fit();
+      termRef.current = term;
+      fitRef.current = fit;
+      if (focused) term.focus();
+
+      const { cols, rows } = term;
+      term.onData((data) => sendTerminalInput(project, sid, data));
+
+      // history = full snapshot (reset+write, idempotent on reconnect);
+      // output = incremental chunk; exit = dim footer.
+      es = new EventSource(terminalStreamUrl(project, sid, cols, rows));
+      es.onmessage = (e) => {
+        if (e.data === '[DONE]') { es?.close(); return; }
+        let msg: { type?: string; data?: string; exitCode?: number; error?: string };
+        try { msg = JSON.parse(e.data); } catch { return; }
+        if (msg.type === 'history') { term?.reset(); if (msg.data) term?.write(msg.data); }
+        else if (msg.type === 'output') term?.write(msg.data || '');
+        else if (msg.type === 'exit') { term?.write(`\r\n\x1b[2m[process exited${msg.exitCode ? ` (${msg.exitCode})` : ''}]\x1b[0m\r\n`); es?.close(); }
+        else if (msg.type === 'error') term?.write(`\r\n\x1b[31m${msg.error || 'error'}\x1b[0m\r\n`);
+      };
+      // Reconnects are useful while the PTY is alive; exit/[DONE] are terminal
+      // states, so close the EventSource above to avoid respawning a shell.
+
+      const doFit = () => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          try { fit.fit(); } catch { /* detached */ }
+          if (term?.cols && term.rows) sendTerminalResize(project, sid, term.cols, term.rows);
+        });
+      };
+      ro = new ResizeObserver(doFit);
+      ro.observe(host);
+    })();
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
-      ro.disconnect();
-      es.close();
-      term.dispose();
+      ro?.disconnect();
+      es?.close();
+      term?.dispose();
       termRef.current = null;
       fitRef.current = null;
     };

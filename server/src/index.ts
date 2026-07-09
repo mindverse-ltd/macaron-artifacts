@@ -6,6 +6,7 @@ import { makeAuthHook, redactTokenInUrl, resolveToken } from './lib/auth.js';
 import { warmSettingsCache } from './lib/settings-store.js';
 import { warmPermissionRulesCache } from './lib/permission-rules.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
+import { warmLabelsCache } from './lib/label-store.js';
 import { warmCodexTitlesCache } from './lib/codex-titles.js';
 import { checkGenUI } from './lib/genui-check.js';
 import { startSessionWatcher } from './lib/session-watcher.js';
@@ -106,6 +107,7 @@ try {
   await warmSettingsCache();
   await warmPermissionRulesCache();
   await warmCodexConfigCache();
+  await warmLabelsCache();
   await warmCodexTitlesCache();
   await startSessionWatcher();
   await app.listen({ host: HOST, port: PORT });

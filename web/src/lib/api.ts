@@ -9,6 +9,10 @@ export type {
   WorkspaceDetailResponse,
   HealthResponse,
   SavedCommand,
+  ConfigFileId,
+  ConfigFileFormat,
+  ConfigFileMeta,
+  ConfigFile,
   FileEntry,
   FileListResponse,
   FileReadResponse,
@@ -21,6 +25,9 @@ import type {
   HealthResponse,
   SavedCommand,
   CommandsResponse,
+  ConfigFileId,
+  ConfigFileMeta,
+  ConfigFile,
   FileListResponse,
   FileReadResponse,
 } from '@macaron/shared';
@@ -127,6 +134,22 @@ export const api = {
     req<{ ok: true }>(`/api/commands/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+  configFiles: () => getJSON<{ files: ConfigFileMeta[] }>('/api/config-files'),
+  configFile: (id: ConfigFileId) => getJSON<ConfigFile>(`/api/config-files/${id}`),
+  saveConfigFile: async (id: ConfigFileId, content: string): Promise<ConfigFile> => {
+    const r = await fetch(`/api/config-files/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (!r.ok) {
+      // Surface the server's validation message (e.g. "Invalid JSON: …")
+      // verbatim so the editor can show it inline.
+      const body = (await r.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error || `http ${r.status}`);
+    }
+    return r.json() as Promise<ConfigFile>;
+  },
   workspaces: () => getJSON<WorkspacesResponse>('/api/workspaces'),
   workspace: (project: string) =>
     getJSON<WorkspaceDetailResponse>(`/api/workspaces/${encodeURIComponent(project)}`),

@@ -29,3 +29,12 @@ export type SessionStreamEvent =
 // terminal. Clients refetch their workspace list on receipt, so external
 // sessions surface live instead of on the next slow poll.
 export type SystemEvent = { type: 'sessions-changed'; engine: 'claude' | 'codex' };
+// PTY terminal protocol, streamed over /api/terminal/.../stream (SSE).
+// `history` is the FULL scrollback snapshot (client applies reset+write, so
+// replay on (re)connect is idempotent); `output` is an incremental chunk.
+// Client→server input/resize go over sibling POST routes, not this stream.
+export type TerminalStreamEvent =
+  | { type: 'history'; data: string }
+  | { type: 'output'; data: string }
+  | { type: 'exit'; exitCode: number }
+  | { type: 'error'; error: string };

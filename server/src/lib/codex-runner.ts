@@ -94,7 +94,7 @@ function detectCodexBinary(): string | undefined {
     return undefined;
   }
 }
-const CODEX_BINARY = detectCodexBinary();
+export const CODEX_BINARY = detectCodexBinary();
 
 export type CodexRunOptions = {
   prompt: string;

@@ -306,12 +306,135 @@ function getActiveProviderEnv() {
   };
 }
 
-// src/lib/codex-config.ts
+// src/lib/permission-rules.ts
 import { promises as fs2 } from "node:fs";
-import { randomUUID as randomUUID2 } from "node:crypto";
 import path3 from "node:path";
+var PERMS_PATH = path3.join(HOME, ".claude", "macaron-permissions.json");
+var cache2 = null;
+var sessionRules = new Map;
+var TWO_WORD = new Set(["sudo", "git", "npm", "pnpm", "yarn", "bun", "npx", "bunx", "pnpx", "docker", "cargo", "go", "kubectl"]);
+function splitCompound(cmd) {
+  const parts = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0;i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      cur += c;
+      if (c === quote)
+        quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (cmd.slice(i, i + 2) === "&&" || cmd.slice(i, i + 2) === "||") {
+      parts.push(cur);
+      cur = "";
+      i++;
+      continue;
+    }
+    if (c === ";" || c === "|" || c === "&" || c === `
+` || c === "\r") {
+      parts.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  parts.push(cur);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+function bashPrefix(segment) {
+  const words = segment.split(/\s+/).filter(Boolean);
+  let i = 0;
+  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))
+    i++;
+  const first = words[i];
+  if (!first)
+    return null;
+  const second = words[i + 1];
+  if (TWO_WORD.has(first) && second && !second.startsWith("-"))
+    return `${first} ${second}`;
+  return first;
+}
+function computeRuleKeys(toolName, input) {
+  if (toolName !== "Bash")
+    return { keys: [toolName], label: toolName };
+  const command = String(input?.command ?? "");
+  const prefixes = [];
+  for (const seg of splitCompound(command)) {
+    const p = bashPrefix(seg);
+    if (p && !prefixes.includes(p))
+      prefixes.push(p);
+  }
+  if (prefixes.length === 0)
+    return { keys: [], label: "" };
+  return { keys: prefixes.map((p) => `Bash(${p})`), label: prefixes.join(", ") };
+}
+async function load() {
+  try {
+    const parsed = JSON.parse(await fs2.readFile(PERMS_PATH, "utf8"));
+    if (parsed && typeof parsed === "object" && parsed.projects) {
+      return { version: parsed.version || 1, projects: parsed.projects };
+    }
+  } catch {}
+  return { version: 1, projects: {} };
+}
+async function persist2() {
+  if (!cache2)
+    return;
+  await fs2.mkdir(path3.dirname(PERMS_PATH), { recursive: true });
+  await fs2.writeFile(PERMS_PATH, JSON.stringify(cache2, null, 2), "utf8");
+}
+async function warmPermissionRulesCache() {
+  if (!cache2)
+    cache2 = await load();
+}
+function isAllowed(sid, cwd, keys) {
+  if (keys.length === 0)
+    return false;
+  const sess = sid ? sessionRules.get(sid) : undefined;
+  const proj = cache2?.projects[cwd];
+  const projSet = proj ? new Set(proj) : null;
+  return keys.every((k) => sess?.has(k) || projSet?.has(k) || false);
+}
+function rememberSession(sid, keys) {
+  if (!sid || keys.length === 0)
+    return;
+  let set = sessionRules.get(sid);
+  if (!set) {
+    set = new Set;
+    sessionRules.set(sid, set);
+  }
+  for (const k of keys)
+    set.add(k);
+}
+var writeChain = Promise.resolve();
+async function rememberProject(cwd, keys) {
+  if (!cwd || keys.length === 0)
+    return;
+  const run = writeChain.then(async () => {
+    if (!cache2)
+      cache2 = await load();
+    const cur = new Set(cache2.projects[cwd] || []);
+    for (const k of keys)
+      cur.add(k);
+    cache2.projects[cwd] = [...cur];
+    await persist2();
+  });
+  writeChain = run.catch(() => {});
+  return run;
+}
+
+// src/lib/codex-config.ts
+import { promises as fs3 } from "node:fs";
+import { randomUUID as randomUUID2 } from "node:crypto";
+import path4 from "node:path";
 var CODEX_SYSTEM_PROVIDER_ID = "system";
-var CONFIG_PATH2 = path3.join(HOME, ".claude", "macaron-codex-config.json");
+var CONFIG_PATH2 = path4.join(HOME, ".claude", "macaron-codex-config.json");
 function seededCustomProvider() {
   return {
     id: randomUUID2(),
@@ -387,84 +510,84 @@ function sanitize(p) {
     webSearchEnabled: Boolean(p.webSearchEnabled)
   };
 }
-var cache2 = null;
+var cache3 = null;
 async function loadFromDisk2() {
   try {
-    const raw = await fs2.readFile(CONFIG_PATH2, "utf8");
+    const raw = await fs3.readFile(CONFIG_PATH2, "utf8");
     return migrateIfLegacy2(JSON.parse(raw));
   } catch {
     return defaults();
   }
 }
-async function persist2() {
-  if (!cache2)
+async function persist3() {
+  if (!cache3)
     return;
-  await fs2.mkdir(path3.dirname(CONFIG_PATH2), { recursive: true });
-  await fs2.writeFile(CONFIG_PATH2, JSON.stringify(cache2, null, 2), "utf8");
+  await fs3.mkdir(path4.dirname(CONFIG_PATH2), { recursive: true });
+  await fs3.writeFile(CONFIG_PATH2, JSON.stringify(cache3, null, 2), "utf8");
 }
 async function warmCodexConfigCache() {
-  cache2 = await loadFromDisk2();
-  await persist2();
+  cache3 = await loadFromDisk2();
+  await persist3();
 }
 function getCodexConfig() {
-  return cache2 ?? defaults();
+  return cache3 ?? defaults();
 }
 function getActiveCodexProvider() {
-  const s = cache2 ?? defaults();
+  const s = cache3 ?? defaults();
   if (s.activeProviderId === CODEX_SYSTEM_PROVIDER_ID)
     return null;
   return s.customProviders.find((p) => p.id === s.activeProviderId) ?? null;
 }
 async function setActiveCodexProvider(id) {
-  if (!cache2)
-    cache2 = await loadFromDisk2();
+  if (!cache3)
+    cache3 = await loadFromDisk2();
   const isSystem = id === CODEX_SYSTEM_PROVIDER_ID;
-  const known = isSystem || cache2.customProviders.some((p) => p.id === id);
+  const known = isSystem || cache3.customProviders.some((p) => p.id === id);
   if (!known)
     throw new Error(`unknown providerId: ${id}`);
-  cache2.activeProviderId = id;
-  await persist2();
-  return cache2;
+  cache3.activeProviderId = id;
+  await persist3();
+  return cache3;
 }
 async function createCodexProvider(patch) {
-  if (!cache2)
-    cache2 = await loadFromDisk2();
+  if (!cache3)
+    cache3 = await loadFromDisk2();
   const seed = seededCustomProvider();
   const created = sanitize({ ...seed, ...patch, id: randomUUID2() });
-  cache2.customProviders.push(created);
-  await persist2();
+  cache3.customProviders.push(created);
+  await persist3();
   return created;
 }
 async function updateCodexProvider(id, patch) {
-  if (!cache2)
-    cache2 = await loadFromDisk2();
-  const idx = cache2.customProviders.findIndex((p) => p.id === id);
+  if (!cache3)
+    cache3 = await loadFromDisk2();
+  const idx = cache3.customProviders.findIndex((p) => p.id === id);
   if (idx < 0)
     throw new Error(`unknown providerId: ${id}`);
-  const next = sanitize({ ...cache2.customProviders[idx], ...patch, id });
-  cache2.customProviders[idx] = next;
-  await persist2();
+  const next = sanitize({ ...cache3.customProviders[idx], ...patch, id });
+  cache3.customProviders[idx] = next;
+  await persist3();
   return next;
 }
 async function deleteCodexProvider(id) {
-  if (!cache2)
-    cache2 = await loadFromDisk2();
-  cache2.customProviders = cache2.customProviders.filter((p) => p.id !== id);
-  if (cache2.activeProviderId === id)
-    cache2.activeProviderId = CODEX_SYSTEM_PROVIDER_ID;
-  await persist2();
-  return cache2;
+  if (!cache3)
+    cache3 = await loadFromDisk2();
+  cache3.customProviders = cache3.customProviders.filter((p) => p.id !== id);
+  if (cache3.activeProviderId === id)
+    cache3.activeProviderId = CODEX_SYSTEM_PROVIDER_ID;
+  await persist3();
+  return cache3;
 }
 async function updateCodexRuntime(patch) {
-  if (!cache2)
-    cache2 = await loadFromDisk2();
-  cache2.runtime = { ...cache2.runtime, ...patch };
-  await persist2();
-  return cache2.runtime;
+  if (!cache3)
+    cache3 = await loadFromDisk2();
+  cache3.runtime = { ...cache3.runtime, ...patch };
+  await persist3();
+  return cache3.runtime;
 }
 async function detectSystemCodex() {
   try {
-    const raw = await fs2.readFile(path3.join(HOME, ".codex", "config.toml"), "utf8");
+    const raw = await fs3.readFile(path4.join(HOME, ".codex", "config.toml"), "utf8");
     const model = /^\s*model\s*=\s*"([^"]+)"/m.exec(raw)?.[1] ?? null;
     const endpoint = /^\s*base_url\s*=\s*"([^"]+)"/m.exec(raw)?.[1] ?? null;
     return { endpoint, model };
@@ -473,7 +596,7 @@ async function detectSystemCodex() {
   }
 }
 async function readPublicCodexSettings() {
-  const s = cache2 ?? defaults();
+  const s = cache3 ?? defaults();
   const sniff = await detectSystemCodex();
   const usingUpstream = Boolean(sniff.endpoint);
   return {
@@ -496,49 +619,49 @@ async function readPublicCodexSettings() {
 }
 
 // src/lib/codex-titles.ts
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
-var TITLES_PATH = path4.join(HOME, ".claude", "macaron-codex-titles.json");
-var cache3 = null;
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
+var TITLES_PATH = path5.join(HOME, ".claude", "macaron-codex-titles.json");
+var cache4 = null;
 async function loadFromDisk3() {
   try {
-    const raw = await fs3.readFile(TITLES_PATH, "utf8");
+    const raw = await fs4.readFile(TITLES_PATH, "utf8");
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
-async function persist3() {
-  if (!cache3)
+async function persist4() {
+  if (!cache4)
     return;
-  await fs3.mkdir(path4.dirname(TITLES_PATH), { recursive: true });
-  await fs3.writeFile(TITLES_PATH, JSON.stringify(cache3, null, 2), "utf8");
+  await fs4.mkdir(path5.dirname(TITLES_PATH), { recursive: true });
+  await fs4.writeFile(TITLES_PATH, JSON.stringify(cache4, null, 2), "utf8");
 }
 async function warmCodexTitlesCache() {
-  cache3 = await loadFromDisk3();
+  cache4 = await loadFromDisk3();
 }
 function getCodexTitle(sid) {
-  return (cache3 ?? {})[sid];
+  return (cache4 ?? {})[sid];
 }
 async function setCodexTitle(sid, title) {
-  if (!cache3)
-    cache3 = await loadFromDisk3();
-  cache3[sid] = title;
-  await persist3();
+  if (!cache4)
+    cache4 = await loadFromDisk3();
+  cache4[sid] = title;
+  await persist4();
 }
 async function deleteCodexTitle(sid) {
-  if (!cache3)
-    cache3 = await loadFromDisk3();
-  if (!(sid in cache3))
+  if (!cache4)
+    cache4 = await loadFromDisk3();
+  if (!(sid in cache4))
     return;
-  delete cache3[sid];
-  await persist3();
+  delete cache4[sid];
+  await persist4();
 }
 
 // src/lib/genui-check.ts
 import { existsSync as existsSync2 } from "node:fs";
-import path5 from "node:path";
+import path6 from "node:path";
 import ts from "typescript";
 import { createCheckResult } from "@genui/diagnostics";
 import { createTypeCheckService, DEFAULT_APP_FILENAME, DEFAULT_MAX_REPORTED, diagnosticMessage } from "@genui/diagnostics/type-check";
@@ -582,7 +705,7 @@ var checkGenUI = (code) => {
     return { ok: true };
   try {
     if (!service) {
-      if (!existsSync2(path5.join(WEB_ROOT, "src", "macaron-vendor"))) {
+      if (!existsSync2(path6.join(WEB_ROOT, "src", "macaron-vendor"))) {
         serviceUnavailable = true;
         return { ok: true };
       }
@@ -625,13 +748,13 @@ async function registerAuthRoutes(app, token) {
 }
 
 // src/routes/workspaces.ts
-import { promises as fs5 } from "node:fs";
-import path7 from "node:path";
+import { promises as fs6 } from "node:fs";
+import path8 from "node:path";
 
 // src/lib/session-store.ts
-import { promises as fs4 } from "node:fs";
+import { promises as fs5 } from "node:fs";
 import { randomUUID as randomUUID3 } from "node:crypto";
-import path6 from "node:path";
+import path7 from "node:path";
 function basename(p) {
   if (!p)
     return "";
@@ -644,15 +767,15 @@ var summaryCache = new Map;
 var HEAD_BYTES = 96 * 1024;
 var CWD_TAIL_BYTES = 64 * 1024;
 async function deleteSession(project, sid) {
-  const filePath = path6.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
-  await fs4.unlink(filePath);
+  const filePath = path7.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
+  await fs5.unlink(filePath);
   summaryCache.delete(filePath);
 }
 async function duplicateSession(project, sid) {
-  const srcPath = path6.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
-  const raw = await fs4.readFile(srcPath, "utf8");
+  const srcPath = path7.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
+  const raw = await fs5.readFile(srcPath, "utf8");
   const newSid = randomUUID3();
-  const destPath = path6.join(CLAUDE_PROJECTS, project, `${newSid}.jsonl`);
+  const destPath = path7.join(CLAUDE_PROJECTS, project, `${newSid}.jsonl`);
   const outLines = [];
   for (const line of raw.split(`
 `)) {
@@ -675,12 +798,12 @@ async function duplicateSession(project, sid) {
 `))
     next += `
 `;
-  await fs4.writeFile(destPath, next, { encoding: "utf8", flag: "wx" });
+  await fs5.writeFile(destPath, next, { encoding: "utf8", flag: "wx" });
   return { newSid };
 }
 async function rewindSession(project, sid, uuid) {
-  const filePath = path6.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
-  const raw = await fs4.readFile(filePath, "utf8");
+  const filePath = path7.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
+  const raw = await fs5.readFile(filePath, "utf8");
   const lines = raw.split(`
 `);
   let cutIdx = -1;
@@ -705,19 +828,19 @@ async function rewindSession(project, sid, uuid) {
 `);
   const ts2 = Date.now();
   const backupPath = filePath.replace(/\.jsonl$/, `.rewind-${ts2}.jsonl.bak`);
-  await fs4.writeFile(backupPath, droppedRaw, "utf8");
+  await fs5.writeFile(backupPath, droppedRaw, "utf8");
   const keptFinal = keptRaw.endsWith(`
 `) ? keptRaw : keptRaw + `
 `;
-  await fs4.writeFile(filePath, keptFinal, "utf8");
+  await fs5.writeFile(filePath, keptFinal, "utf8");
   summaryCache.delete(filePath);
   const dropped = droppedRaw.split(`
 `).filter((l) => l.trim()).length;
   return { dropped, backupPath };
 }
 async function writeCompactedSession(project, sid, summary) {
-  const filePath = path6.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
-  const raw = await fs4.readFile(filePath, "utf8");
+  const filePath = path7.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
+  const raw = await fs5.readFile(filePath, "utf8");
   const lines = raw.split(`
 `);
   const preamble = [];
@@ -738,7 +861,7 @@ async function writeCompactedSession(project, sid, summary) {
   }
   const ts2 = Date.now();
   const backupPath = filePath.replace(/\.jsonl$/, `.pre-compact-${ts2}.jsonl.bak`);
-  await fs4.writeFile(backupPath, raw, "utf8");
+  await fs5.writeFile(backupPath, raw, "utf8");
   const summaryLine = JSON.stringify({
     type: "summary",
     summary,
@@ -749,7 +872,7 @@ async function writeCompactedSession(project, sid, summary) {
   const nextRaw = (preamble.length > 0 ? preamble.join(`
 `).replace(/\n+$/, "") + `
 ` : "") + summaryLine;
-  await fs4.writeFile(filePath, nextRaw, "utf8");
+  await fs5.writeFile(filePath, nextRaw, "utf8");
   summaryCache.delete(filePath);
   return { backupPath, kept: preamble.filter((l) => l.trim()).length };
 }
@@ -770,7 +893,7 @@ async function mapPool(items, concurrency, fn) {
 async function readSessionSummary(filePath) {
   let st;
   try {
-    st = await fs4.stat(filePath);
+    st = await fs5.stat(filePath);
   } catch {
     return null;
   }
@@ -788,7 +911,7 @@ async function readSessionSummary(filePath) {
     size: st.size
   };
   try {
-    const fh = await fs4.open(filePath, "r");
+    const fh = await fs5.open(filePath, "r");
     try {
       const len = Math.min(st.size, HEAD_BYTES);
       const buf = Buffer.alloc(len);
@@ -824,7 +947,7 @@ async function readSessionSummary(filePath) {
   } catch {}
   if (summary.truncated && !summary.cwd) {
     try {
-      const fh = await fs4.open(filePath, "r");
+      const fh = await fs5.open(filePath, "r");
       try {
         const len = Math.min(st.size, CWD_TAIL_BYTES);
         const buf = Buffer.alloc(len);
@@ -855,7 +978,7 @@ async function readSessionSummary(filePath) {
 async function resolveSessionCwd(project, sid) {
   let cwd = decodeClaudeProjectName(project) || HOME || "/tmp";
   try {
-    const head = await readSessionSummary(path6.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`));
+    const head = await readSessionSummary(path7.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`));
     if (head?.cwd)
       cwd = head.cwd;
   } catch {}
@@ -864,22 +987,22 @@ async function resolveSessionCwd(project, sid) {
 async function listAllSessions() {
   let projects;
   try {
-    projects = await fs4.readdir(CLAUDE_PROJECTS, { withFileTypes: true });
+    projects = await fs5.readdir(CLAUDE_PROJECTS, { withFileTypes: true });
   } catch {
     return [];
   }
   const targets = [];
   await mapPool(projects.filter((p) => p.isDirectory()), 16, async (p) => {
-    const projDir = path6.join(CLAUDE_PROJECTS, p.name);
+    const projDir = path7.join(CLAUDE_PROJECTS, p.name);
     let files;
     try {
-      files = await fs4.readdir(projDir);
+      files = await fs5.readdir(projDir);
     } catch {
       return;
     }
     for (const f of files) {
       if (f.endsWith(".jsonl")) {
-        targets.push({ project: p.name, file: path6.join(projDir, f), sid: f.slice(0, -6) });
+        targets.push({ project: p.name, file: path7.join(projDir, f), sid: f.slice(0, -6) });
       }
     }
   });
@@ -936,13 +1059,13 @@ function groupWorkspaces(sessions) {
 }
 var SESSION_TAIL_BYTES = 8 * 1024 * 1024;
 async function readSessionMessages(project, sid) {
-  const filePath = path6.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
-  const st = await fs4.stat(filePath);
+  const filePath = path7.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`);
+  const st = await fs5.stat(filePath);
   let raw;
   let truncated = false;
   if (st.size > SESSION_TAIL_BYTES) {
     truncated = true;
-    const fh = await fs4.open(filePath, "r");
+    const fh = await fs5.open(filePath, "r");
     try {
       const buf = Buffer.alloc(SESSION_TAIL_BYTES);
       await fh.read(buf, 0, SESSION_TAIL_BYTES, st.size - SESSION_TAIL_BYTES);
@@ -955,7 +1078,7 @@ async function readSessionMessages(project, sid) {
       await fh.close();
     }
   } else {
-    raw = await fs4.readFile(filePath, "utf8");
+    raw = await fs5.readFile(filePath, "utf8");
   }
   const messages = [];
   let cwd = "";
@@ -1061,14 +1184,14 @@ async function readSessionMessages(project, sid) {
 }
 async function countClaudeMd(cwd) {
   const candidates = [
-    cwd ? path6.join(cwd, "CLAUDE.md") : "",
-    cwd ? path6.join(cwd, ".claude", "CLAUDE.md") : "",
-    path6.join(HOME, ".claude", "CLAUDE.md")
+    cwd ? path7.join(cwd, "CLAUDE.md") : "",
+    cwd ? path7.join(cwd, ".claude", "CLAUDE.md") : "",
+    path7.join(HOME, ".claude", "CLAUDE.md")
   ].filter(Boolean);
   let n = 0;
   await Promise.all(candidates.map(async (p) => {
     try {
-      await fs4.access(p);
+      await fs5.access(p);
       n++;
     } catch {}
   }));
@@ -1076,12 +1199,12 @@ async function countClaudeMd(cwd) {
 }
 async function countMcpServers() {
   const paths = [
-    path6.join(HOME, ".claude", "settings.json"),
-    path6.join(HOME, ".claude.json")
+    path7.join(HOME, ".claude", "settings.json"),
+    path7.join(HOME, ".claude.json")
   ];
   for (const p of paths) {
     try {
-      const raw = await fs4.readFile(p, "utf8");
+      const raw = await fs5.readFile(p, "utf8");
       const j = JSON.parse(raw);
       if (j.mcpServers && typeof j.mcpServers === "object") {
         return Object.keys(j.mcpServers).length;
@@ -1296,6 +1419,7 @@ async function* runClaude(opts) {
   console.log(`[claude-runner] starting  model=${opts.model ?? "(sdk default)"}  base=${routedBase}  CLAUDE_CONFIG_DIR=${cfgDir}  resume=${opts.resume ? opts.resume.slice(0, 8) : "(new)"}`);
   (async () => {
     let sessionEmitted = false;
+    let currentSid = opts.resume ?? "";
     try {
       const effectivePermissionMode = getYoloMode() ? "bypassPermissions" : opts.permissionMode ?? "default";
       const stream = query({
@@ -1311,12 +1435,25 @@ async function* runClaude(opts) {
           mcpServers: { macaron: macaronMcpServer },
           allowedTools: ["mcp__macaron__render_ui"],
           canUseTool: async (toolName, input) => {
+            const { keys, label } = computeRuleKeys(toolName, input);
+            if (isAllowed(currentSid, opts.cwd, keys)) {
+              return { behavior: "allow", updatedInput: input };
+            }
             const id = randomUUID4();
             const decision = await new Promise((resolve) => {
               registerPending(id, resolve);
-              push({ kind: "permission_request", id, toolName, input });
+              push({ kind: "permission_request", id, toolName, input, ...label ? { suggestion: { label } } : {} });
             });
             if (decision.decision === "allow") {
+              if (decision.scope === "session")
+                rememberSession(currentSid, keys);
+              else if (decision.scope === "always") {
+                try {
+                  await rememberProject(opts.cwd, keys);
+                } catch (e2) {
+                  console.error("[permission-rules] persist failed:", e2);
+                }
+              }
               push({ kind: "permission_resolved", id, decision: "allow" });
               return { behavior: "allow", updatedInput: input };
             }
@@ -1329,6 +1466,7 @@ async function* runClaude(opts) {
       for await (const m of stream) {
         if (!sessionEmitted && "session_id" in m && m.session_id) {
           sessionEmitted = true;
+          currentSid = m.session_id;
           push({ kind: "session", sessionId: m.session_id });
         }
         if (m.type === "stream_event") {
@@ -1505,12 +1643,12 @@ async function registerWorkspaceRoutes(app) {
     const { model, env: providerEnv } = getActiveProviderEnv();
     let cwd = decodeClaudeProjectName(project);
     try {
-      const projDir = path7.join(CLAUDE_PROJECTS, project);
-      const files = await fs5.readdir(projDir);
+      const projDir = path8.join(CLAUDE_PROJECTS, project);
+      const files = await fs6.readdir(projDir);
       for (const f of files) {
         if (!f.endsWith(".jsonl"))
           continue;
-        const meta = await readSessionSummary(path7.join(projDir, f));
+        const meta = await readSessionSummary(path8.join(projDir, f));
         if (meta?.cwd) {
           cwd = meta.cwd;
           break;
@@ -1518,7 +1656,7 @@ async function registerWorkspaceRoutes(app) {
       }
     } catch {}
     try {
-      const st = await fs5.stat(cwd);
+      const st = await fs6.stat(cwd);
       if (!st.isDirectory())
         throw new Error("cwd not a directory");
     } catch (e) {
@@ -1575,7 +1713,7 @@ async function registerWorkspaceRoutes(app) {
           if (capturedSid)
             livePush(capturedSid, payload);
         } else if (ev.kind === "permission_request") {
-          const payload = { type: "permission_request", id: ev.id, toolName: ev.toolName, input: ev.input };
+          const payload = { type: "permission_request", id: ev.id, toolName: ev.toolName, input: ev.input, suggestion: ev.suggestion };
           safeSend(payload);
           if (capturedSid)
             livePush(capturedSid, payload);
@@ -1660,7 +1798,8 @@ async function registerSessionRoutes(app) {
     if (!id || dec !== "allow" && dec !== "deny") {
       return reply.status(400).send({ error: "id + decision required" });
     }
-    const ok = resolvePending(id, dec === "allow" ? { decision: "allow" } : { decision: "deny", reason: req.body?.reason });
+    const scope = req.body?.scope === "session" || req.body?.scope === "always" ? req.body.scope : "once";
+    const ok = resolvePending(id, dec === "allow" ? { decision: "allow", scope } : { decision: "deny", reason: req.body?.reason });
     return reply.send({ ok });
   });
   app.post("/api/sessions/claude/:project/:sid/stop", async ({ params }, reply) => {
@@ -1854,7 +1993,7 @@ async function registerSessionRoutes(app) {
         } else if (ev.kind === "tool_result")
           safeSend({ type: "tool_result", tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
         else if (ev.kind === "permission_request")
-          safeSend({ type: "permission_request", id: ev.id, toolName: ev.toolName, input: ev.input });
+          safeSend({ type: "permission_request", id: ev.id, toolName: ev.toolName, input: ev.input, suggestion: ev.suggestion });
         else if (ev.kind === "permission_resolved")
           safeSend({ type: "permission_resolved", id: ev.id, decision: ev.decision });
         else if (ev.kind === "usage")
@@ -2110,12 +2249,12 @@ async function registerRelayRoutes(app) {
 }
 
 // src/routes/codex.ts
-import { promises as fs8 } from "node:fs";
+import { promises as fs9 } from "node:fs";
 
 // src/lib/codex-store.ts
-import { promises as fs6 } from "node:fs";
-import path8 from "node:path";
-var CODEX_SESSIONS = path8.join(HOME, ".codex", "sessions");
+import { promises as fs7 } from "node:fs";
+import path9 from "node:path";
+var CODEX_SESSIONS = path9.join(HOME, ".codex", "sessions");
 var summaryCache2 = new Map;
 function isRolloutFile(name) {
   return name.startsWith("rollout-") && name.endsWith(".jsonl");
@@ -2124,7 +2263,7 @@ async function readSummary(filePath, mtimeMs, size) {
   const cached = summaryCache2.get(filePath);
   if (cached && cached.mtimeMs === mtimeMs && cached.size === size)
     return cached;
-  const fh = await fs6.open(filePath, "r").catch(() => null);
+  const fh = await fs7.open(filePath, "r").catch(() => null);
   if (!fh)
     return null;
   try {
@@ -2192,35 +2331,35 @@ async function listCodexSessions() {
   const out = [];
   const stack = [];
   try {
-    await fs6.access(CODEX_SESSIONS);
+    await fs7.access(CODEX_SESSIONS);
   } catch {
     return out;
   }
-  const years = await fs6.readdir(CODEX_SESSIONS, { withFileTypes: true }).catch(() => []);
+  const years = await fs7.readdir(CODEX_SESSIONS, { withFileTypes: true }).catch(() => []);
   for (const y of years) {
     if (!y.isDirectory())
       continue;
-    const yp = path8.join(CODEX_SESSIONS, y.name);
-    const months = await fs6.readdir(yp, { withFileTypes: true }).catch(() => []);
+    const yp = path9.join(CODEX_SESSIONS, y.name);
+    const months = await fs7.readdir(yp, { withFileTypes: true }).catch(() => []);
     for (const mo of months) {
       if (!mo.isDirectory())
         continue;
-      const mop = path8.join(yp, mo.name);
-      const days = await fs6.readdir(mop, { withFileTypes: true }).catch(() => []);
+      const mop = path9.join(yp, mo.name);
+      const days = await fs7.readdir(mop, { withFileTypes: true }).catch(() => []);
       for (const d of days) {
         if (!d.isDirectory())
           continue;
-        stack.push(path8.join(mop, d.name));
+        stack.push(path9.join(mop, d.name));
       }
     }
   }
   await Promise.all(stack.map(async (dir) => {
-    const files = await fs6.readdir(dir).catch(() => []);
+    const files = await fs7.readdir(dir).catch(() => []);
     for (const f of files) {
       if (!isRolloutFile(f))
         continue;
-      const filePath = path8.join(dir, f);
-      const st = await fs6.stat(filePath).catch(() => null);
+      const filePath = path9.join(dir, f);
+      const st = await fs7.stat(filePath).catch(() => null);
       if (!st)
         continue;
       const summary = await readSummary(filePath, st.mtimeMs, st.size);
@@ -2252,29 +2391,29 @@ async function listCodexSessions() {
 }
 async function findCodexRolloutFile(sid) {
   try {
-    await fs6.access(CODEX_SESSIONS);
+    await fs7.access(CODEX_SESSIONS);
   } catch {
     return null;
   }
-  const years = await fs6.readdir(CODEX_SESSIONS, { withFileTypes: true }).catch(() => []);
+  const years = await fs7.readdir(CODEX_SESSIONS, { withFileTypes: true }).catch(() => []);
   for (const y of years) {
     if (!y.isDirectory())
       continue;
-    const yp = path8.join(CODEX_SESSIONS, y.name);
-    const months = await fs6.readdir(yp, { withFileTypes: true }).catch(() => []);
+    const yp = path9.join(CODEX_SESSIONS, y.name);
+    const months = await fs7.readdir(yp, { withFileTypes: true }).catch(() => []);
     for (const mo of months) {
       if (!mo.isDirectory())
         continue;
-      const mop = path8.join(yp, mo.name);
-      const days = await fs6.readdir(mop, { withFileTypes: true }).catch(() => []);
+      const mop = path9.join(yp, mo.name);
+      const days = await fs7.readdir(mop, { withFileTypes: true }).catch(() => []);
       for (const d of days) {
         if (!d.isDirectory())
           continue;
-        const dp = path8.join(mop, d.name);
-        const files = await fs6.readdir(dp).catch(() => []);
+        const dp = path9.join(mop, d.name);
+        const files = await fs7.readdir(dp).catch(() => []);
         const match = files.find((f) => isRolloutFile(f) && f.endsWith(`${sid}.jsonl`));
         if (match)
-          return path8.join(dp, match);
+          return path9.join(dp, match);
       }
     }
   }
@@ -2284,8 +2423,8 @@ async function readCodexSessionMessages(sid) {
   const filePath = await findCodexRolloutFile(sid);
   if (!filePath)
     throw new Error(`codex session not found: ${sid}`);
-  const st = await fs6.stat(filePath);
-  const raw = await fs6.readFile(filePath, "utf8");
+  const st = await fs7.stat(filePath);
+  const raw = await fs7.readFile(filePath, "utf8");
   let cwd = "";
   let gitBranch = "";
   const messages = [];
@@ -2411,34 +2550,36 @@ async function deleteCodexSession(sid) {
   const filePath = await findCodexRolloutFile(sid);
   if (!filePath)
     throw new Error(`codex session not found: ${sid}`);
-  await fs6.unlink(filePath);
+  await fs7.unlink(filePath);
   summaryCache2.delete(filePath);
   await deleteCodexTitle(sid);
 }
 
 // src/lib/codex-runner.ts
 import { execSync } from "node:child_process";
-import { existsSync as existsSync3 } from "node:fs";
+import { existsSync as existsSync3, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import path9 from "node:path";
+import { randomUUID as randomUUID5 } from "node:crypto";
+import os3 from "node:os";
+import path10 from "node:path";
 var { command: MACARON_MCP_CMD, args: MACARON_MCP_ARGS } = (() => {
-  const here = path9.dirname(fileURLToPath(import.meta.url));
-  const jsPath = path9.join(here, "..", "macaron-mcp-stdio.js");
+  const here = path10.dirname(fileURLToPath(import.meta.url));
+  const jsPath = path10.join(here, "..", "macaron-mcp-stdio.js");
   if (existsSync3(jsPath)) {
     return { command: "node", args: [jsPath] };
   }
-  const tsPath = path9.join(here, "..", "macaron-mcp-stdio.ts");
+  const tsPath = path10.join(here, "..", "macaron-mcp-stdio.ts");
   let dir = here;
   for (let i = 0;i < 6; i++) {
     for (const rel of [
       ["node_modules", ".bin", "tsx"],
       ["node_modules", ".pnpm", "node_modules", ".bin", "tsx"]
     ]) {
-      const candidate = path9.join(dir, ...rel);
+      const candidate = path10.join(dir, ...rel);
       if (existsSync3(candidate))
         return { command: candidate, args: [tsPath] };
     }
-    dir = path9.dirname(dir);
+    dir = path10.dirname(dir);
   }
   return { command: "tsx", args: [tsPath] };
 })();
@@ -2509,8 +2650,31 @@ function buildOptions() {
     }
   };
 }
+var IMAGE_EXT = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp"
+};
 function buildInput(opts) {
-  return opts.prompt;
+  if (!opts.images?.length)
+    return { input: opts.prompt, tmpFiles: [] };
+  const tmpFiles = [];
+  const items = [];
+  for (const img of opts.images) {
+    const m = /^data:([^;]+);base64,(.*)$/.exec(img.dataUrl);
+    const mime = m?.[1] || img.mimeType || "image/png";
+    const data = m?.[2] || "";
+    if (!data)
+      continue;
+    const file = path10.join(os3.tmpdir(), `macaron-codex-${randomUUID5()}.${IMAGE_EXT[mime] || "png"}`);
+    writeFileSync(file, Buffer.from(data, "base64"));
+    tmpFiles.push(file);
+    items.push({ type: "local_image", path: file });
+  }
+  if (opts.prompt)
+    items.push({ type: "text", text: opts.prompt });
+  return { input: items, tmpFiles };
 }
 async function* runCodex(opts) {
   const queue = [];
@@ -2675,6 +2839,7 @@ async function* runCodex(opts) {
   };
   (async () => {
     let sessionEmitted = false;
+    let tmpFiles = [];
     try {
       const { Codex } = await import("@openai/codex-sdk");
       const codex = new Codex(codexOpts);
@@ -2683,7 +2848,9 @@ async function* runCodex(opts) {
         sessionEmitted = true;
         push({ kind: "session", sessionId: opts.resume });
       }
-      const streamed = await thread.runStreamed(buildInput(opts), {
+      const built = buildInput(opts);
+      tmpFiles = built.tmpFiles;
+      const streamed = await thread.runStreamed(built.input, {
         signal: opts.abortController?.signal
       });
       for await (const ev of streamed.events) {
@@ -2732,6 +2899,11 @@ async function* runCodex(opts) {
       push({ kind: "error", error: err.message });
       push({ kind: "done", exitCode: -1 });
     } finally {
+      for (const f of tmpFiles) {
+        try {
+          unlinkSync(f);
+        } catch {}
+      }
       finish();
     }
   })();
@@ -2744,8 +2916,8 @@ async function* runCodex(opts) {
 }
 
 // src/lib/codex-title.ts
-import { promises as fs7 } from "node:fs";
-import os3 from "node:os";
+import { promises as fs8 } from "node:fs";
+import os4 from "node:os";
 var MAX_TITLE_CHARS = 80;
 var MAX_SOURCE_CHARS = 6000;
 var TITLE_TIMEOUT_MS = 60000;
@@ -2809,7 +2981,7 @@ async function cleanupNamingRollout(namingSid) {
     return;
   const file = await findCodexRolloutFile(namingSid).catch(() => null);
   if (file)
-    await fs7.unlink(file).catch(() => {});
+    await fs8.unlink(file).catch(() => {});
 }
 async function maybeGenerateCodexTitle(sid) {
   if (getCodexTitle(sid))
@@ -2832,7 +3004,7 @@ ${clip(assistantText)}
 """`;
   const { Codex } = await import("@openai/codex-sdk");
   const { codex: codexOpts, thread: threadOpts } = buildTitleOptions();
-  const thread = new Codex(codexOpts).startThread({ ...threadOpts, workingDirectory: os3.tmpdir() });
+  const thread = new Codex(codexOpts).startThread({ ...threadOpts, workingDirectory: os4.tmpdir() });
   const abort = new AbortController;
   const timer = setTimeout(() => abort.abort(), TITLE_TIMEOUT_MS);
   try {
@@ -2943,7 +3115,7 @@ async function registerCodexRoutes(app) {
       return reply.status(400).send({ error: "text or images required" });
     }
     try {
-      const st = await fs8.stat(cwd);
+      const st = await fs9.stat(cwd);
       if (!st.isDirectory())
         throw new Error("cwd not a directory");
     } catch (e) {
@@ -3115,6 +3287,7 @@ if (existsSync4(WEB_DIST)) {
 }
 try {
   await warmSettingsCache();
+  await warmPermissionRulesCache();
   await warmCodexConfigCache();
   await warmCodexTitlesCache();
   await app.listen({ host: HOST, port: PORT });

@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static';
 import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
 import { makeAuthHook, redactTokenInUrl, resolveToken } from './lib/auth.js';
 import { warmSettingsCache } from './lib/settings-store.js';
+import { warmPermissionRulesCache } from './lib/permission-rules.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
 import { warmCodexTitlesCache } from './lib/codex-titles.js';
 import { checkGenUI } from './lib/genui-check.js';
@@ -92,6 +93,7 @@ if (existsSync(WEB_DIST)) {
 
 try {
   await warmSettingsCache();
+  await warmPermissionRulesCache();
   await warmCodexConfigCache();
   await warmCodexTitlesCache();
   await app.listen({ host: HOST, port: PORT });

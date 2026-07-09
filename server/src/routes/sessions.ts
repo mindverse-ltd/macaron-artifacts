@@ -4,6 +4,7 @@ import {
   duplicateSession,
   forkSession,
   readSessionMessages,
+  resolveProjectCwd,
   resolveSessionCwd,
   rewindSession,
   writeCompactedSession,
@@ -16,6 +17,7 @@ import { getActiveProviderEnv, getActiveProviderRaw, getFollowupSuggestionsEnabl
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
 import { resolvePending } from '../lib/permission-registry.js';
 import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
+import { listSlashCommands } from '../lib/slash-commands.js';
 
 type Params = { project: string; sid: string };
 type MessageBody = {
@@ -33,6 +35,21 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       return reply.status(404).send({ error: (e as Error).message });
     }
   });
+
+  // List slash commands available for this session's cwd: curated built-ins
+  // plus project (`<cwd>/.claude/commands`) and user (`~/.claude/commands`)
+  // custom commands. Read-only, best-effort — never 500 on a missing dir.
+  // The palette only *lists*; the SDK already expands `/name` prompts itself.
+  app.get<{ Params: { project: string } }>(
+    '/api/sessions/claude/:project/commands',
+    async ({ params }) => {
+      // Resolve the real cwd from a jsonl head — the decoded project name is
+      // lossy and would send walkCommands to a non-existent dir, dropping
+      // every project-scoped command (see resolveProjectCwd).
+      const cwd = await resolveProjectCwd(params.project);
+      return { commands: await listSlashCommands(cwd || '') };
+    },
+  );
 
   app.delete<{ Params: Params }>('/api/sessions/claude/:project/:sid', async ({ params }, reply) => {
     try {

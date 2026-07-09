@@ -118,6 +118,19 @@ export type UsageResponse = {
   sevenDay: RateLimitWindow | null;
 };
 
+// A slash command surfaced in the composer palette. `name` is the bare
+// command (no leading slash). `builtin` = a CLI command worth listing;
+// `project`/`user` come from `.claude/commands/**/*.md` (cwd / $HOME). A
+// subdirectory becomes `namespace` for display only — it does NOT change the
+// command name the SDK expands.
+export type SlashCommand = {
+  name: string;
+  description?: string;
+  argumentHint?: string;
+  source: 'builtin' | 'project' | 'user';
+  namespace?: string;
+};
+
 // ---- File explorer -------------------------------------------------------
 // A single entry in a directory listing. `path` is relative to the project
 // cwd (root = ''), so the web tree can request children without knowing the
@@ -167,3 +180,4 @@ export type ConfigFileMeta = {
 export type ConfigFile = ConfigFileMeta & { content: string };
 
 export type ConfigFilesResponse = { files: ConfigFileMeta[] };
+export type CommandsResponse = { commands: SlashCommand[] };

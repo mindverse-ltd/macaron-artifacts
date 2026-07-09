@@ -12,6 +12,7 @@ export type {
   SharedSessionResponse,
   UsageResponse,
   RateLimitWindow,
+  SlashCommand,
   ConfigFileId,
   ConfigFileFormat,
   ConfigFileMeta,
@@ -29,6 +30,7 @@ import type {
   CreateShareResponse,
   SharedSessionResponse,
   UsageResponse,
+  CommandsResponse,
   ConfigFileId,
   ConfigFileMeta,
   ConfigFile,
@@ -176,6 +178,10 @@ export const api = {
   session: (project: string, sid: string) =>
     getJSON<SessionDetail>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
+    ),
+  commands: (project: string) =>
+    getJSON<CommandsResponse>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/commands`,
     ),
   deleteSession: async (project: string, sid: string): Promise<void> => {
     const r = await authedFetch(

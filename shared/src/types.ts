@@ -85,6 +85,21 @@ export type SessionDetail = {
 
 export type DirEntry = { name: string; path: string };
 export type DirListing = { path: string; parent: string | null; home: string; entries: DirEntry[] };
+// Web Push. `subscription` is the browser PushSubscription.toJSON() shape sent
+// to /api/push/subscribe and stored server-side; `notify` is the JSON payload
+// the server ships to the SW's `push` handler (see web/public/sw.js).
+export type PushSubscriptionPayload = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+};
+export type PushNotifyPayload = {
+  title: string;
+  body?: string;
+  tag?: string;
+  requireInteraction?: boolean;
+  // Hash-route the SW opens/focuses on click, e.g. `#/w/:project/s/:sid`.
+  url?: string;
+};
 
 // ---- File explorer -------------------------------------------------------
 // A single entry in a directory listing. `path` is relative to the project

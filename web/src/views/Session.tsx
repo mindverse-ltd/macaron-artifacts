@@ -1472,20 +1472,21 @@ export function Session(props: SessionProps = {}) {
     [project, sid, input, sending, load, images, permissionMode, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
   );
 
-  // $macaron/chat bridge: a sandboxed render_ui widget calls sendUserMessage,
-  // and the shim (web/public/genui-shim/chat.mjs) dispatches the payload to
-  // this global slot, which relays it into send() as a programmatic user turn.
-  // Only the focused session registers — canvas multi-tile mounts share one
-  // slot, so the widget the user is actually looking at owns the bridge.
+  // Chat bridge: a sandboxed render_ui widget imports sendUserMessage from
+  // '$macaron/chat', and the shim (web/public/genui-shim/chat.mjs) dispatches
+  // the payload to this host global slot ('$app/chat'), which relays it into
+  // send() as a programmatic user turn. Only the focused session registers —
+  // canvas multi-tile mounts share one slot, so the widget the user is actually
+  // looking at owns the bridge.
   useEffect(() => {
     if (!focused) return;
-    const g = globalThis as unknown as { '$macaron/chat'?: (p: { text: string; data?: unknown }) => void };
+    const g = globalThis as unknown as { '$app/chat'?: (p: { text: string; data?: unknown }) => void };
     const bridge = (p: { text: string; data?: unknown }) => {
       const body = p.data !== undefined ? `${p.text}\n\n\`\`\`json\n${JSON.stringify(p.data, null, 2)}\n\`\`\`` : p.text;
       void send(body);
     };
-    g['$macaron/chat'] = bridge;
-    return () => { if (g['$macaron/chat'] === bridge) delete g['$macaron/chat']; };
+    g['$app/chat'] = bridge;
+    return () => { if (g['$app/chat'] === bridge) delete g['$app/chat']; };
   }, [focused, send]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {

@@ -21,6 +21,7 @@ import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
 import { registerTunnelRoutes } from './routes/tunnel.js';
 import { shutdownTunnel } from './lib/tunnel-manager.js';
+import { registerFileRoutes } from './routes/files.js';
 
 const app = Fastify({
   logger: {
@@ -80,6 +81,7 @@ await app.register(async (instance) => {
   await registerWorkspaceRoutes(instance);
   await registerSessionRoutes(instance);
   await registerCodexRoutes(instance);
+  await registerFileRoutes(instance);
 });
 
 // Static assets + SPA fallback. In dev (vite dev server on :5173 with proxy),

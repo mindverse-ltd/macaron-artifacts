@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { api, fmtAgo, type UsageResponse, type UsageBySession } from '../lib/api';
+import { api, fmtAgo, type AnalyticsResponse, type UsageBySession } from '../lib/api';
 
 const WINDOWS: Array<{ id: string; label: string }> = [
   { id: '7d', label: '7d' },
@@ -36,7 +36,7 @@ const SESSION_CAP = 100;
 
 export function Analytics() {
   const [window, setWindow] = useState('30d');
-  const [data, setData] = useState<UsageResponse | null>(null);
+  const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'costUsd', dir: 'desc' });
@@ -47,7 +47,7 @@ export function Analytics() {
     setError('');
     setData(null);
     api
-      .usage(window)
+      .analytics(window)
       .then((d) => { if (live) { setData(d); setLoading(false); } })
       .catch((e) => { if (live) { setError((e as Error).message); setLoading(false); } });
     return () => { live = false; };

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type {
-  UsageResponse,
+  AnalyticsResponse,
   UsageTotals,
   UsageDaily,
   UsageByModel,
@@ -123,7 +123,7 @@ const emptyTotals = (): UsageTotals => ({
   sessionCount: 0,
 });
 
-export async function collectUsage(sinceMs: number, untilMs: number): Promise<UsageResponse> {
+export async function collectUsage(sinceMs: number, untilMs: number): Promise<AnalyticsResponse> {
   let projects;
   try {
     projects = await fs.readdir(CLAUDE_PROJECTS, { withFileTypes: true });

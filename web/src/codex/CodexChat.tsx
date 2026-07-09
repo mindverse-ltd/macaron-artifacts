@@ -9,7 +9,7 @@ import type { SessionDetail, Message, Block } from '@macaron/shared';
 import { codexApi } from './api';
 import type { CodexRuntimeOverride } from './api';
 import { sendCodexMessage, startCodexThread } from './stream';
-import { CodexComposer } from './CodexComposer';
+import { CodexComposer, type ComposerImage } from './CodexComposer';
 import { notify } from '../lib/notify';
 
 // GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
@@ -24,7 +24,7 @@ const isRenderUiTool = (name: string): boolean =>
   name === RENDER_UI_TOOL_NAME || name === 'mcp__macaron__render_ui';
 
 type Item =
-  | { id: string; kind: 'user'; text: string }
+  | { id: string; kind: 'user'; text: string; images?: ComposerImage[] }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'reasoning'; text: string }
   | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; isError?: boolean }
@@ -180,6 +180,11 @@ function MessageRow({ it }: { it: Item }) {
       <div className="cx-msg-avatar">{isUser ? 'You' : 'cx'}</div>
       <div className="cx-msg-body">
         <div className="cx-msg-role">{isUser ? 'You' : 'Codex'}</div>
+        {isUser && it.images && it.images.length > 0 && (
+          <div className="cx-msg-imgs">
+            {it.images.map((img) => <img key={img.id} src={img.dataUrl} alt={img.name} />)}
+          </div>
+        )}
         <div className="cx-msg-text">{it.text}</div>
       </div>
     </div>
@@ -211,6 +216,7 @@ export function CodexChat(props: CodexChatProps = {}) {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [live, setLive] = useState<Item[]>([]);
   const [pending, setPending] = useState('');
+  const [images, setImages] = useState<ComposerImage[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -263,8 +269,8 @@ export function CodexChat(props: CodexChatProps = {}) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, live[live.length - 1]]);
 
-  const appendUser = (text: string) =>
-    setLive((cur) => [...cur, { id: `u-${Date.now()}`, kind: 'user', text }]);
+  const appendUser = (text: string, imgs?: ComposerImage[]) =>
+    setLive((cur) => [...cur, { id: `u-${Date.now()}`, kind: 'user', text, images: imgs?.length ? imgs : undefined }]);
   const appendAssistantDelta = (text: string) => {
     setLive((cur) => {
       const last = cur[cur.length - 1];
@@ -312,15 +318,18 @@ export function CodexChat(props: CodexChatProps = {}) {
 
   const submit = useCallback(async () => {
     const text = pending.trim();
-    if (!text || sending) return;
+    if ((!text && images.length === 0) || sending) return;
+    const sentImages = images;
+    const wire = sentImages.map((i) => ({ mimeType: i.mimeType, dataUrl: i.dataUrl }));
     setPending('');
+    setImages([]);
     setSending(true);
     setError('');
-    appendUser(text);
+    appendUser(text, sentImages);
     try {
       if (isNew) {
         let newSid = '';
-        await startCodexThread({ text, runtime: runtimeRef.current }, {
+        await startCodexThread({ text, images: wire, runtime: runtimeRef.current }, {
           onMeta: (s) => { newSid = s; },
           onDelta: appendAssistantDelta,
           onToolUse: (ev) => appendTool(ev.id, ev.name, ev.input),
@@ -332,7 +341,7 @@ export function CodexChat(props: CodexChatProps = {}) {
           },
         });
       } else {
-        await sendCodexMessage(sid, { text, runtime: runtimeRef.current }, {
+        await sendCodexMessage(sid, { text, images: wire, runtime: runtimeRef.current }, {
           onDelta: appendAssistantDelta,
           onToolUse: (ev) => appendTool(ev.id, ev.name, ev.input),
           onToolResult: (ev) => applyToolResult(ev.tool_use_id, ev.text, ev.isError),
@@ -347,7 +356,7 @@ export function CodexChat(props: CodexChatProps = {}) {
       setError((e as Error).message);
       setSending(false);
     }
-  }, [pending, sending, isNew, sid, navigate]);
+  }, [pending, images, sending, isNew, sid, navigate]);
 
   const title = isNew
     ? 'New thread'
@@ -403,6 +412,8 @@ export function CodexChat(props: CodexChatProps = {}) {
           <CodexComposer
             value={pending}
             onChange={setPending}
+            images={images}
+            onImagesChange={setImages}
             onSubmit={submit}
             onStop={stop}
             disabled={sending}

@@ -13,9 +13,28 @@ import { promises as fs } from 'node:fs';
 import { deleteCodexSession, listCodexSessions, readCodexSessionMessages, } from '../lib/codex-store.js';
 import { groupWorkspaces } from '../lib/session-store.js';
 import { runCodex } from '../lib/codex-runner.js';
+import { maybeGenerateCodexTitle } from '../lib/codex-title.js';
 import { CODEX_SYSTEM_PROVIDER_ID, createCodexProvider, deleteCodexProvider, readPublicCodexSettings, setActiveCodexProvider, updateCodexProvider, updateCodexRuntime, } from '../lib/codex-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
+// Pull the per-turn runtime override off a request body, keeping only the
+// fields the client actually sent. Mirrors the light typeof checks used by
+// the /config/runtime handler — codex rejects any bad enum value downstream.
+function pickRuntimeOverride(b) {
+    const r = b?.runtime;
+    if (!r || typeof r !== 'object')
+        return undefined;
+    const o = {};
+    if (typeof r.reasoningEffort === 'string')
+        o.reasoningEffort = r.reasoningEffort;
+    if (typeof r.sandboxMode === 'string')
+        o.sandboxMode = r.sandboxMode;
+    if (typeof r.approvalPolicy === 'string')
+        o.approvalPolicy = r.approvalPolicy;
+    if (typeof r.webSearchEnabled === 'boolean')
+        o.webSearchEnabled = r.webSearchEnabled;
+    return Object.keys(o).length ? o : undefined;
+}
 export async function registerCodexRoutes(app) {
     // --- Threads -----------------------------------------------------------
     app.get('/api/codex/threads', async () => {
@@ -96,6 +115,11 @@ export async function registerCodexRoutes(app) {
                     safeSend({ type: 'done', exitCode: ev.exitCode });
                     if (capturedSid)
                         endRun(capturedSid);
+                    // Name the thread from its opening exchange once the turn's rollout
+                    // has landed. Fire-and-forget: no-op if already titled, never blocks
+                    // the response, failures swallowed.
+                    if (capturedSid && ev.exitCode === 0)
+                        void maybeGenerateCodexTitle(capturedSid).catch(() => { });
                     if (!clientGone)
                         sseDone(reply);
                 }
@@ -126,7 +150,7 @@ export async function registerCodexRoutes(app) {
         startSSE(reply);
         sseSend(reply, { type: 'starting', cwd });
         const abortController = new AbortController();
-        const stream = runCodex({ prompt: text, cwd, images, abortController });
+        const stream = runCodex({ prompt: text, cwd, images, abortController, runtime: pickRuntimeOverride(req.body) });
         // Register the abort under the sid once we learn it.
         (async () => {
             // Peek at first session event so we can wire the abort — but pipeCodexToSSE
@@ -163,7 +187,7 @@ export async function registerCodexRoutes(app) {
         sseSend(reply, { type: 'meta', sessionId: sid, cwd });
         const abortController = new AbortController();
         registerRun(sid, abortController);
-        pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController }), sid);
+        pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController, runtime: pickRuntimeOverride(req.body) }), sid);
     });
     app.post('/api/codex/threads/:sid/stop', async ({ params }, reply) => {
         const ok = abortRun(params.sid);

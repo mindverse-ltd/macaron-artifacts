@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { api, type PublicSettings, type PublicCustomProvider, type ProviderInput, type TunnelProvider, type TunnelState, type ConfigFileMeta } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
+import { useTheme, setTheme, type Theme } from '../lib/theme';
 import { getPushState, subscribeToPush, unsubscribeFromPush, type PushState } from '../lib/pwa';
 import {
   SOUND_EVENTS,
@@ -13,6 +14,12 @@ import {
 } from '../lib/sound';
 
 const BLANK_INPUT: ProviderInput = { name: '', endpoint: '', model: '', apiKey: '' };
+
+const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 export function Settings() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
@@ -27,6 +34,7 @@ export function Settings() {
   const [pushState, setPushState] = useState<PushState>('unsupported');
   const toast = useToast();
   const confirm = useConfirm();
+  const { theme, resolved } = useTheme();
 
   useEffect(() => {
     api.settings().then(setSettings).catch((e) => setError((e as Error).message));
@@ -201,6 +209,31 @@ export function Settings() {
         <h1>Settings</h1>
         <p>Manage the Anthropic-compatible LLM providers Claude Code sessions can route through. One is active at a time.</p>
       </header>
+
+      <div className="settings-section">
+        <div className="settings-row-head">
+          <h2 className="sec-title">Appearance</h2>
+        </div>
+        <div className="theme-row">
+          <div className="theme-seg" role="radiogroup" aria-label="Theme">
+            {THEME_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={theme === o.value}
+                className={`theme-seg-btn${theme === o.value ? ' active' : ''}`}
+                onClick={() => setTheme(o.value)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <p className="settings-hint">
+            {theme === 'system' ? `Following your system preference (currently ${resolved}).` : `Always ${theme}.`}
+          </p>
+        </div>
+      </div>
 
       <div className="settings-section">
         <div className="settings-row-head">

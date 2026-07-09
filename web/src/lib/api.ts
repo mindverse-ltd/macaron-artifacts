@@ -10,6 +10,8 @@ export type {
   HealthResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  UsageResponse,
+  RateLimitWindow,
   ConfigFileId,
   ConfigFileFormat,
   ConfigFileMeta,
@@ -28,6 +30,7 @@ import type {
   SharedSessionResponse,
   VoiceHealthResponse,
   TranscribeResponse,
+  UsageResponse,
   ConfigFileId,
   ConfigFileMeta,
   ConfigFile,
@@ -100,6 +103,7 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
   settings: () => getJSON<PublicSettings>('/api/settings'),
+  usage: () => getJSON<UsageResponse>('/api/usage'),
 
   // Voice input. voiceHealth().configured gates the mic button; transcribe
   // posts base64 audio and gets back the recognised text.

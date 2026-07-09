@@ -12,6 +12,7 @@ export type {
   HealthResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
   SlashCommand,
@@ -35,6 +36,7 @@ import type {
   HealthResponse,
   CreateShareResponse,
   SharedSessionResponse,
+  WorktreeInfo,
   UsageResponse,
   CommandsResponse,
   GitStatus,
@@ -271,7 +273,6 @@ export const api = {
     }),
   sharedSession: (token: string) =>
     getJSON<SharedSessionResponse>(`/api/public/share/${encodeURIComponent(token)}`),
-
   gitStatus: (project: string) =>
     getJSON<GitStatus>(`/api/git/${encodeURIComponent(project)}/status`),
   gitDiff: (project: string, file: string, opts: { staged?: boolean; untracked?: boolean } = {}) => {
@@ -306,6 +307,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch, create }),
     }),
+  worktrees: () => getJSON<{ worktrees: WorktreeInfo[] }>('/api/worktrees'),
+  mergeWorktree: (sid: string) =>
+    req<{ ok: true; merged: true }>(`/api/worktrees/${encodeURIComponent(sid)}/merge`, { method: 'POST' }),
+  discardWorktree: (sid: string, force = false) =>
+    req<{ ok: true }>(`/api/worktrees/${encodeURIComponent(sid)}/discard${force ? '?force=1' : ''}`, { method: 'POST' }),
   listFiles: (project: string, path = '') =>
     getJSON<FileListResponse>(
       `/api/files/${encodeURIComponent(project)}/list?path=${encodeURIComponent(path)}`,

@@ -100,6 +100,21 @@ export type PrContext = {
 export type CreatePrRequest = { title: string; body: string; draft: boolean };
 // `created` is false when we short-circuited to an already-open PR.
 export type CreatePrResult = { url: string; created: boolean };
+// Web Push. `subscription` is the browser PushSubscription.toJSON() shape sent
+// to /api/push/subscribe and stored server-side; `notify` is the JSON payload
+// the server ships to the SW's `push` handler (see web/public/sw.js).
+export type PushSubscriptionPayload = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+};
+export type PushNotifyPayload = {
+  title: string;
+  body?: string;
+  tag?: string;
+  requireInteraction?: boolean;
+  // Hash-route the SW opens/focuses on click, e.g. `#/w/:project/s/:sid`.
+  url?: string;
+};
 
 // ---- File explorer -------------------------------------------------------
 // A single entry in a directory listing. `path` is relative to the project

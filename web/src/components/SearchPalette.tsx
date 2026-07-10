@@ -51,19 +51,9 @@ export function SearchPalette() {
     setActive(0);
   }, []);
 
-  // Cmd/Ctrl+K toggles the palette from anywhere in the app.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Also open on a custom event so the sidebar button can trigger it.
+  // Open on the sidebar search-button event. Cmd-K stays with CommandPalette
+  // (commands + navigation) so the two palettes don't fight over the same key —
+  // the button is the full-text search entry point.
   useEffect(() => {
     const onOpen = () => setOpen(true);
     window.addEventListener('macaron:open-search', onOpen);

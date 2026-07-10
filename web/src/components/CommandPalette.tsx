@@ -66,7 +66,9 @@ export function CommandPalette() {
   }, [location.pathname]);
 
   // Global Cmd/Ctrl-K toggles the palette. IME-guarded; only bare Cmd/Ctrl+K
-  // (no shift/alt) so we don't shadow other shortcuts.
+  // (no shift/alt) so we don't shadow other shortcuts. The sidebar search button
+  // opens SearchPalette instead (macaron:open-search) — this palette keeps
+  // Cmd-K for commands + session/workspace navigation.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
@@ -78,14 +80,6 @@ export function CommandPalette() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-
-  useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener('macaron:open-search', onOpen);
-    return () => window.removeEventListener('macaron:open-search', onOpen);
-  }, []);
-
-  // On open: reset, focus the input, and load the session/workspace list from
   // the same endpoints the sidebar already polls (server mtime-cache keeps it
   // cheap). Also snapshot current YOLO state for the toggle command's label.
   useEffect(() => {

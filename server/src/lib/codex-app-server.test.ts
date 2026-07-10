@@ -1,12 +1,43 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normalizeDecisions } from './codex-app-server.js';
+import { normalizeDecisions, buildApprovalResponseFrame } from './codex-app-server.js';
 import {
   registerApprovalHandler,
   clearApprovalHandler,
   respondCodexApproval,
 } from './active-approvals.js';
 import type { CodexDecision } from '@macaron/shared';
+
+// --- approval response wire shape (transport-level) -------------------------
+
+// app-server does not use JSON-RPC response envelopes. The reply must echo the
+// request method + id with a `response: { decision }` payload; a `{jsonrpc,id,
+// result}` frame is silently dropped and leaves the turn parked. Assert the
+// exact bytes written to stdout for both approval kinds.
+test('buildApprovalResponseFrame emits the app-server response shape, not JSON-RPC', () => {
+  const line = buildApprovalResponseFrame(10, 'item/commandExecution/requestApproval', 'accept');
+  assert.equal(line.endsWith('\n'), true);
+  const parsed = JSON.parse(line);
+  assert.deepEqual(parsed, {
+    method: 'item/commandExecution/requestApproval',
+    id: 10,
+    response: { decision: 'accept' },
+  });
+  // Must NOT be a JSON-RPC response envelope.
+  assert.equal('jsonrpc' in parsed, false);
+  assert.equal('result' in parsed, false);
+});
+
+test('buildApprovalResponseFrame echoes the file-approval method and each decision', () => {
+  for (const d of ['accept', 'acceptForSession', 'decline', 'cancel'] as CodexDecision[]) {
+    const parsed = JSON.parse(buildApprovalResponseFrame('t1:5', 'item/fileChange/requestApproval', d));
+    assert.deepEqual(parsed, {
+      method: 'item/fileChange/requestApproval',
+      id: 't1:5',
+      response: { decision: d },
+    });
+  }
+});
 
 // --- normalizeDecisions: availableDecisions → plain CodexDecision[] ---------
 

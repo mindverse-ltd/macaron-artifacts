@@ -97,8 +97,16 @@ export function normalizeDecisions(available: unknown): CodexDecision[] {
   return out.length ? out : ['accept', 'decline', 'cancel'];
 }
 
-type Pending = { requestId: string | number };
+type Pending = { requestId: string | number; method: string };
 type CodexProc = ChildProcessByStdio<Writable, Readable, null>;
+
+// The exact stdout line the runner writes to answer a server approval request.
+// app-server does NOT use JSON-RPC response envelopes ({jsonrpc,id,result}); a
+// reply echoes the request `method` and `id` with a `response: { decision }`
+// payload. Exported so a transport-level test can assert the wire shape.
+export function buildApprovalResponseFrame(id: string | number, method: string, decision: CodexDecision): string {
+  return `${JSON.stringify({ method, id, response: { decision } })}\n`;
+}
 
 export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerEvent> {
   const queue: RunnerEvent[] = [];
@@ -125,6 +133,7 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
   void (async () => {
     let tmpFiles: string[] = [];
     let sid: string | null = opts.resume ?? null;
+    let turnId: string | null = null;
     let proc: CodexProc | null = null;
     // Our approval-request id → the JSON-RPC request id we must reply on. Keyed
     // by a stable string (`<sid>:<requestId>`) so a reconnecting client and the
@@ -151,16 +160,34 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
       const sendNotify = (method: string, params: unknown) => {
         proc!.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
       };
-      const respondTo = (id: string | number, result: unknown) => {
-        proc!.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
+      // Reply to a server-initiated approval request. app-server does NOT use
+      // standard JSON-RPC response envelopes: a reply echoes the request method
+      // and id alongside a `response` payload, not `{ result }`. Getting this
+      // wrong leaves the turn parked while our card optimistically disables.
+      const respondApproval = (id: string | number, method: string, decision: CodexDecision) => {
+        proc!.stdin.write(buildApprovalResponseFrame(id, method, decision));
       };
 
-      // Abort → interrupt the active turn, then let the stream close.
+      // Abort → interrupt the active turn natively (turn/interrupt needs both
+      // threadId and turnId), then let the turn/failed|completed notification
+      // drive the stream close. A bounded timer force-kills the process if the
+      // server never acknowledges the interrupt, so a wedged app-server can't
+      // hang the request forever.
       opts.abortController?.signal.addEventListener('abort', () => {
-        try { if (sid) sendNotify('turn/interrupt', { threadId: sid }); } catch { /* closing */ }
-        push({ kind: 'done', exitCode: 130 });
-        cleanup();
-        finish();
+        if (ended) return;
+        if (sid && turnId) {
+          try { sendRequest('turn/interrupt', { threadId: sid, turnId }); } catch { /* closing */ }
+          setTimeout(() => {
+            if (ended) return;
+            push({ kind: 'done', exitCode: 130 });
+            cleanup();
+            finish();
+          }, 2000);
+        } else {
+          push({ kind: 'done', exitCode: 130 });
+          cleanup();
+          finish();
+        }
       });
 
       // Register the approval channel once we know the sid. Answers the parked
@@ -171,7 +198,7 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
         registerApprovalHandler(sid, (approvalId: string, decision: CodexDecision) => {
           const p = pending.get(approvalId);
           if (!p) return false;
-          respondTo(p.requestId, { decision });
+          respondApproval(p.requestId, p.method, decision);
           pending.delete(approvalId);
           push({ kind: 'codex_approval_resolved', id: approvalId, decision });
           return true;
@@ -180,6 +207,10 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
 
       // --- item translation (item/started + item/completed) ----------------
       const emittedToolUse = new Set<string>();
+      // Proposed file changes keyed by item id, captured from the fileChange
+      // item so the fileChange approval request (which carries only an itemId)
+      // can render the actual diff instead of an empty card.
+      const fileChangesByItem = new Map<string, Array<{ path: string; kind: string; diff?: string }>>();
       const handleItem = (phase: 'started' | 'completed', item: Record<string, unknown>) => {
         const type = item.type as string;
         const id = String(item.id ?? '');
@@ -198,7 +229,8 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
             push({ kind: 'tool_result', tool_use_id: id, text: String(item.aggregatedOutput ?? `(exit ${item.exitCode ?? '?'})`), isError: item.status === 'failed' || (Number(item.exitCode ?? 0) !== 0) });
           }
         } else if (type === 'fileChange') {
-          const changes = (item.changes as Array<{ path: string; kind: string }>) ?? [];
+          const changes = (item.changes as Array<{ path: string; kind: string; diff?: string }>) ?? [];
+          fileChangesByItem.set(id, changes);
           if (!emittedToolUse.has(id)) { emittedToolUse.add(id); push({ kind: 'tool_use', id, name: 'Edit', input: { changes } }); }
           if (phase === 'completed') {
             const summary = changes.map((c) => `${c.kind === 'add' ? '＋' : c.kind === 'delete' ? '－' : '△'} ${c.path}`).join('\n');
@@ -225,10 +257,11 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
           const method = msg.method as string;
           const params = (msg.params ?? {}) as Record<string, unknown>;
           const approvalId = `${sid ?? params.threadId}:${msg.id}`;
-          pending.set(approvalId, { requestId: msg.id as string | number });
+          pending.set(approvalId, { requestId: msg.id as string | number, method });
           registerApprovals();
           if (method === 'item/fileChange/requestApproval') {
-            push({ kind: 'codex_approval_request', id: approvalId, approval: 'file', reason: (params.reason as string) ?? null, grantRoot: (params.grantRoot as string) ?? null, fileChanges: undefined, available: normalizeDecisions(params.availableDecisions) });
+            const changes = fileChangesByItem.get(String(params.itemId ?? ''));
+            push({ kind: 'codex_approval_request', id: approvalId, approval: 'file', reason: (params.reason as string) ?? null, grantRoot: (params.grantRoot as string) ?? null, fileChanges: changes, available: normalizeDecisions(params.availableDecisions) });
           } else {
             const net = params.networkApprovalContext as { host: string; protocol: string } | null | undefined;
             push({
@@ -254,6 +287,7 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
             break;
           }
           case 'turn/started':
+            turnId = (params.turn as { id?: string } | undefined)?.id ?? null;
             push({ kind: 'message', subtype: 'codex_turn_started' });
             break;
           case 'item/started':

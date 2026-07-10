@@ -9,6 +9,12 @@ export function registerRun(sid: string, ac: AbortController): void {
   runs.set(sid, ac);
 }
 
+export function claimRun(sid: string, ac: AbortController): boolean {
+  if (runs.has(sid)) return false;
+  runs.set(sid, ac);
+  return true;
+}
+
 export function abortRun(sid: string): boolean {
   const ac = runs.get(sid);
   if (!ac) return false;

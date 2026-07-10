@@ -33,7 +33,7 @@ import {
 } from '../lib/codex-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
-import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
+import { registerRun, claimRun, abortRun, endRun } from '../lib/active-runs.js';
 import {
   getLoopSnapshot,
   setLoopConfig,
@@ -207,11 +207,14 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'text or images required' });
       }
       const abortController = new AbortController();
-      // Register before the await: otherwise a loop tick firing during
+      // Claim before the await: otherwise a loop tick firing during
       // readCodexSessionMessages would see isRunActive === false, start its own
       // iteration, and both turns would runStreamed on one thread (only one
-      // abortable via /stop). Claiming the sid up front makes the loop bail.
-      registerRun(sid, abortController);
+      // abortable via /stop). Rejecting an occupied sid also closes the inverse
+      // race where this request arrives after the loop has started.
+      if (!claimRun(sid, abortController)) {
+        return reply.status(409).send({ error: 'thread already has an active run' });
+      }
       let cwd = process.env.HOME || '/tmp';
       try {
         const detail = await readCodexSessionMessages(sid);

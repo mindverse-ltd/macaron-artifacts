@@ -1743,10 +1743,11 @@ textarea:focus, select:focus, input:focus {
   flex-direction: column;
 }
 /* The clip above drives the focus collapse/expand animation, but it also
-   traps the slash palette (which floats above the composer). Only while the
-   palette is present, let the container overflow so the menu is visible; the
-   tile ancestors stay overflow:hidden, so nothing escapes the tile itself. */
-.session-input-inner:has(.slash-palette) {
+   traps menus that float above the composer. While one is present, let the
+   container overflow so every row stays clickable; tile ancestors still keep
+   the content inside the tile. */
+.session-input-inner:has(.slash-palette),
+.session-input-inner:has(.actions-menu) {
   overflow: visible;
 }
 .session-input-area.collapsed {

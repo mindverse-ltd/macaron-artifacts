@@ -461,6 +461,11 @@ export function Sidebar() {
         <span>Hooks</span>
       </Link>
 
+      <Link className="sb-settings-link" to="/prompts">
+        <span>⌘</span>
+        <span>Prompts</span>
+      </Link>
+
       <Link className="sb-settings-link" to="/schedules">
         <span>⏰</span>
         <span>Schedules</span>

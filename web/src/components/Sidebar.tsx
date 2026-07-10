@@ -338,6 +338,10 @@ export function Sidebar() {
         <span className="sb-search-label">Search sessions</span>
         <kbd className="sb-search-kbd">⌘K</kbd>
       </button>
+      <Link className={'sb-nav-link' + (location.pathname === '/board' ? ' active' : '')} to="/board">
+        <span className="sb-nav-icon">▦</span>
+        <span>Dispatch board</span>
+      </Link>
 
       <div className="sb-label">
         <span>WORKSPACES</span>
@@ -479,6 +483,11 @@ export function Sidebar() {
       </div>
 
       <div className="sb-spacer-grow" />
+
+      <Link className="sb-settings-link" to="/agents">
+        <span>🤖</span>
+        <span>Subagents</span>
+      </Link>
 
       <Link className="sb-settings-link" to="/hooks">
         <span>⚡</span>

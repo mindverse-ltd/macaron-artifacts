@@ -37,6 +37,7 @@ import { registerGitRoutes } from './routes/git.js';
 import { registerShareRoutes } from './routes/share.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { isSearchEnabled, syncAll } from './lib/search-index.js';
+import { registerAgentRoutes } from './routes/agents.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
@@ -100,6 +101,7 @@ await app.register(async (instance) => {
   await registerGitRoutes(instance);
   await registerShareRoutes(instance);
   await registerSearchRoutes(instance);
+  await registerAgentRoutes(instance);
   await registerScheduleRoutes(instance);
   await registerTerminalRoutes(instance);
   await registerFileRoutes(instance);

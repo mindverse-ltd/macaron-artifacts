@@ -4,6 +4,7 @@ import type {
   SessionListItem,
   SessionDetail,
   Workspace,
+  CodexDecision,
 } from '@macaron/shared';
 import { authedFetch } from '../lib/auth';
 
@@ -42,6 +43,15 @@ export type CodexRuntimeOptions = {
   approvalPolicy: CodexApprovalPolicy;
 };
 
+// Per-turn override sent alongside a new/resumed thread. Every field is
+// optional — omitted ones fall back to the global config on the server.
+export type CodexRuntimeOverride = {
+  reasoningEffort?: CodexReasoningEffort;
+  sandboxMode?: CodexSandboxMode;
+  approvalPolicy?: CodexApprovalPolicy;
+  webSearchEnabled?: boolean;
+};
+
 export type PublicCodexSettings = {
   activeProviderId: string;
   builtins: PublicCodexBuiltin[];
@@ -78,6 +88,12 @@ export const codexApi = {
       `/api/codex/threads/${encodeURIComponent(sid)}/stop`,
       { method: 'POST' },
     ),
+  approve: (sid: string, id: string, decision: CodexDecision) =>
+    reqJSON<{ ok: boolean }>(`/api/codex/threads/${encodeURIComponent(sid)}/approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, decision }),
+    }),
   config: () => getJSON<PublicCodexSettings>('/api/codex/config'),
   setActive: (providerId: string) =>
     reqJSON<PublicCodexSettings>('/api/codex/config/active', {

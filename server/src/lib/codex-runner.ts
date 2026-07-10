@@ -22,6 +22,7 @@
 
 import { execSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -34,7 +35,7 @@ import type {
   ThreadOptions,
   UserInput,
 } from '@openai/codex-sdk';
-import { getActiveCodexProvider, getCodexConfig } from './codex-config.js';
+import { getActiveCodexProvider, getCodexConfig, type CodexRuntimeOverride } from './codex-config.js';
 import type { RunnerEvent, AttachedImage } from './claude-runner.js';
 
 // Absolute path + command for the standalone stdio MCP server that exposes
@@ -73,13 +74,54 @@ const { command: MACARON_MCP_CMD, args: MACARON_MCP_ARGS } = (() => {
   return { command: 'tsx', args: [tsPath] };
 })();
 
-// @openai/codex-sdk ships the `codex` binary via optional deps; if it's not
-// present the SDK throws at construction time. Fall back to the user's
-// system `codex` (installed via Homebrew or a global npm install) so the
-// runner works with the CLI they already use in the terminal.
+// Re-exported for the app-server runner (codex-app-server.ts), which injects
+// the same Macaron stdio MCP into its thread/start config.
+export { MACARON_MCP_CMD, MACARON_MCP_ARGS };
+
+// @openai/codex-sdk ships the `codex` binary via platform-specific optional
+// deps. The SDK resolves it from `@openai/codex`'s vendor/ dir; we mirror that
+// lookup so the app-server transport (which spawns the binary directly, not via
+// the SDK) gets the same bundled fallback the SDK path enjoys.
+const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
+  'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
+  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64',
+  'x86_64-apple-darwin': '@openai/codex-darwin-x64',
+  'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
+  'x86_64-pc-windows-msvc': '@openai/codex-win32-x64',
+  'aarch64-pc-windows-msvc': '@openai/codex-win32-arm64',
+};
+function targetTriple(): string | null {
+  const { platform, arch } = process;
+  if ((platform === 'linux' || platform === 'android') && arch === 'x64') return 'x86_64-unknown-linux-musl';
+  if ((platform === 'linux' || platform === 'android') && arch === 'arm64') return 'aarch64-unknown-linux-musl';
+  if (platform === 'darwin' && arch === 'x64') return 'x86_64-apple-darwin';
+  if (platform === 'darwin' && arch === 'arm64') return 'aarch64-apple-darwin';
+  if (platform === 'win32' && arch === 'x64') return 'x86_64-pc-windows-msvc';
+  if (platform === 'win32' && arch === 'arm64') return 'aarch64-pc-windows-msvc';
+  return null;
+}
+function resolveBundledCodex(): string | undefined {
+  const triple = targetTriple();
+  const pkg = triple ? PLATFORM_PACKAGE_BY_TARGET[triple] : undefined;
+  if (!triple || !pkg) return undefined;
+  try {
+    const req = createRequire(import.meta.url);
+    const codexReq = createRequire(req.resolve('@openai/codex/package.json'));
+    const vendorRoot = path.join(path.dirname(codexReq.resolve(`${pkg}/package.json`)), 'vendor');
+    const bin = process.platform === 'win32' ? 'codex.exe' : 'codex';
+    const root = path.join(vendorRoot, triple);
+    for (const cand of [path.join(root, 'bin', bin), path.join(root, 'codex', bin)]) {
+      if (existsSync(cand)) return cand;
+    }
+  } catch { /* SDK / platform pkg not installed */ }
+  return undefined;
+}
+
+// Resolution order: explicit env override, common global install paths,
+// `which codex`, then the SDK's bundled platform binary. The bundled fallback
+// is last so a user's own codex (matching their terminal CLI) still wins, but a
+// plain package install with no global codex no longer regresses to "not found".
 function detectCodexBinary(): string | undefined {
-  // Prefer explicit env override, then a couple of common install paths,
-  // then `which codex`.
   if (process.env.MACARON_CODEX_PATH && existsSync(process.env.MACARON_CODEX_PATH)) {
     return process.env.MACARON_CODEX_PATH;
   }
@@ -87,12 +129,10 @@ function detectCodexBinary(): string | undefined {
     if (existsSync(p)) return p;
   }
   try {
-    return execSync('which codex', { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString()
-      .trim() || undefined;
-  } catch {
-    return undefined;
-  }
+    const which = execSync('which codex', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    if (which) return which;
+  } catch { /* not on PATH */ }
+  return resolveBundledCodex();
 }
 export const CODEX_BINARY = detectCodexBinary();
 
@@ -103,11 +143,16 @@ export type CodexRunOptions = {
   resume?: string;
   abortController?: AbortController;
   images?: AttachedImage[];
+  /** Per-turn runtime knobs; each field falls back to the global default. */
+  runtime?: CodexRuntimeOverride;
 };
 
-// Build the CodexOptions + ThreadOptions from our persisted settings. Kept
-// here (not exported) so the runner is the single caller — settings changes
-// take effect on the next `runCodex()` without hot-reload plumbing.
+// Build the CodexOptions + ThreadOptions from our persisted settings plus an
+// optional per-turn override. Kept here (not exported) so the runner is the
+// single caller — settings changes take effect on the next `runCodex()`
+// without hot-reload plumbing. Override fields (effort / sandbox / approval /
+// web-search) win over the global defaults when present; omitted fields fall
+// back to the global runtime and active provider.
 //
 // When the active selection is the built-in `system` provider we return the
 // minimum surface possible: no baseUrl / apiKey override, no
@@ -115,9 +160,11 @@ export type CodexRunOptions = {
 // ~/.codex/config.toml as-is. Sandbox / approval come from runtime knobs
 // (independent of provider choice) and skipGitRepoCheck stays on so the
 // server can spawn threads from arbitrary cwds.
-function buildOptions(): { codex: CodexOptions; thread: ThreadOptions } {
+function buildOptions(override?: CodexRuntimeOverride): { codex: CodexOptions; thread: ThreadOptions } {
   const s = getCodexConfig();
   const p = getActiveCodexProvider();
+  const sandboxMode = override?.sandboxMode ?? s.runtime.sandboxMode;
+  const approvalPolicy = override?.approvalPolicy ?? s.runtime.approvalPolicy;
 
   // Inject the Macaron stdio MCP server into every codex spawn so `render_ui`
   // is always available regardless of which provider is active. We do NOT
@@ -145,14 +192,20 @@ function buildOptions(): { codex: CodexOptions; thread: ThreadOptions } {
 
   if (!p) {
     // System pass-through — inherit everything from ~/.codex/config.toml.
+    // The override fields are the exception: system mode has no provider to
+    // read them from, so we thread them through only when the caller set one
+    // (a bare `override?.x`, no global fallback — an explicit `false` for
+    // webSearchEnabled must be preserved, not collapsed against a default).
     return {
       codex: {
         codexPathOverride: CODEX_BINARY,
         config: mcpConfig,
       },
       thread: {
-        sandboxMode: s.runtime.sandboxMode,
-        approvalPolicy: s.runtime.approvalPolicy,
+        sandboxMode,
+        approvalPolicy,
+        modelReasoningEffort: override?.reasoningEffort,
+        webSearchEnabled: override?.webSearchEnabled,
         skipGitRepoCheck: true,
       },
     };
@@ -170,7 +223,7 @@ function buildOptions(): { codex: CodexOptions; thread: ThreadOptions } {
         model_provider: p.modelProvider,
         model: p.model,
         review_model: p.model,
-        model_reasoning_effort: p.reasoningEffort,
+        model_reasoning_effort: override?.reasoningEffort ?? p.reasoningEffort,
         model_context_window: p.contextWindow,
         model_auto_compact_token_limit: p.autoCompactTokenLimit,
         disable_response_storage: p.disableResponseStorage,
@@ -183,10 +236,10 @@ function buildOptions(): { codex: CodexOptions; thread: ThreadOptions } {
     },
     thread: {
       model: p.model,
-      sandboxMode: s.runtime.sandboxMode,
-      approvalPolicy: s.runtime.approvalPolicy,
-      modelReasoningEffort: p.reasoningEffort,
-      webSearchEnabled: p.webSearchEnabled,
+      sandboxMode,
+      approvalPolicy,
+      modelReasoningEffort: override?.reasoningEffort ?? p.reasoningEffort,
+      webSearchEnabled: override?.webSearchEnabled ?? p.webSearchEnabled,
       skipGitRepoCheck: true,
     },
   };
@@ -239,9 +292,9 @@ export async function* runCodex(opts: CodexRunOptions): AsyncGenerator<RunnerEve
     return new Promise((res) => waiters.push(res));
   };
 
-  const { codex: codexOpts, thread: threadOpts } = buildOptions();
+  const { codex: codexOpts, thread: threadOpts } = buildOptions(opts.runtime);
   console.log(
-    `[codex-runner] starting  model=${threadOpts.model}  base=${codexOpts.baseUrl || '(sdk default)'}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}  cwd=${opts.cwd}`,
+    `[codex-runner] starting  model=${threadOpts.model}  effort=${threadOpts.modelReasoningEffort ?? '(default)'}  sandbox=${threadOpts.sandboxMode}  base=${codexOpts.baseUrl || '(sdk default)'}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}  cwd=${opts.cwd}`,
   );
 
   // De-dupe tool cards: item.started and item.updated may fire multiple

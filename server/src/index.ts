@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
-import { makeAuthHook, redactTokenInUrl, resolveToken } from './lib/auth.js';
+import { makeAuthHook, redactTokenInUrl, resolveToken, setArmedToken } from './lib/auth.js';
 import { warmSettingsCache } from './lib/settings-store.js';
 import { warmWorktreeCache } from './lib/worktree-store.js';
 import { warmPermissionRulesCache } from './lib/permission-rules.js';
@@ -35,8 +35,12 @@ import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
 import { registerGitRoutes } from './routes/git.js';
 import { registerShareRoutes } from './routes/share.js';
+import { registerSearchRoutes } from './routes/search.js';
+import { isSearchEnabled, syncAll } from './lib/search-index.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerPushRoutes } from './routes/push.js';
+import { registerTunnelRoutes } from './routes/tunnel.js';
+import { shutdownTunnel } from './lib/tunnel-manager.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerScheduleRoutes } from './routes/schedules.js';
@@ -71,15 +75,35 @@ const app = Fastify({
   maxParamLength: 4000,
 });
 
+let closing = false;
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (closing) return;
+  closing = true;
+  app.log.info({ signal }, 'shutting down macaron server');
+  shutdownTunnel();
+  try {
+    await app.close();
+    process.exit(0);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
 // Gate the API/relay behind a shared token when the server is reachable from
 // the network. resolveToken auto-generates one when bound to a non-loopback
-// host with no token set, so an exposed server is never wide open.
+// host with no token set; seed it into the module-level armed slot so the hook
+// and a later tunnel-start share one live secret.
 const { token: authToken, generated: authGenerated } = resolveToken(HOST, AUTH_TOKEN);
-app.addHook('onRequest', makeAuthHook(authToken));
+setArmedToken(authToken);
+app.addHook('onRequest', makeAuthHook());
 
 await app.register(async (instance) => {
   await registerHealthRoutes(instance);
-  await registerAuthRoutes(instance, authToken);
+  await registerAuthRoutes(instance);
   await registerSettingsRoutes(instance);
   await registerCommandRoutes(instance);
   await registerPushRoutes(instance);
@@ -90,6 +114,7 @@ await app.register(async (instance) => {
   await registerMcpRoutes(instance);
   await registerConfigFileRoutes(instance);
   await registerRelayRoutes(instance);
+  await registerTunnelRoutes(instance);
   await registerWorkspaceRoutes(instance);
   await registerProjectRoutes(instance);
   await registerFsRoutes(instance);
@@ -98,6 +123,7 @@ await app.register(async (instance) => {
   await registerCodexRoutes(instance);
   await registerGitRoutes(instance);
   await registerShareRoutes(instance);
+  await registerSearchRoutes(instance);
   await registerAgentRoutes(instance);
   await registerScheduleRoutes(instance);
   await registerTerminalRoutes(instance);
@@ -164,6 +190,16 @@ try {
   // snapshot cache; without an import TS lazily skips them and the first real render_ui still pays
   // ~300ms. checkGenUI never throws (it degrades to an ack on failure), so this can't crash boot.
   setImmediate(() => checkGenUI('import "$macaron/ui";\nexport default function App() { return null }'));
+  // Build the search index in the background so first-boot never blocks on a
+  // full ~/.claude/projects walk. Best-effort: a failed sync just leaves the
+  // index empty until the next self-refreshing search retries it.
+  if (isSearchEnabled()) {
+    setImmediate(() => {
+      syncAll()
+        .then((r) => app.log.info(`search index synced: ${r.changed}/${r.scanned} files`))
+        .catch((e) => app.log.warn(`search index sync failed: ${(e as Error).message}`));
+    });
+  }
 } catch (err) {
   app.log.error(err);
   process.exit(1);

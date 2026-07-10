@@ -33,6 +33,7 @@ import { registerCodexRoutes } from './routes/codex.js';
 import { registerShareRoutes } from './routes/share.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerUsageRoutes } from './routes/usage.js';
+import { registerGitRoutes } from './routes/git.js';
 import { registerScheduleRoutes } from './routes/schedules.js';
 import { registerTerminalRoutes } from './routes/terminal.js';
 import { registerFileRoutes } from './routes/files.js';
@@ -87,6 +88,7 @@ await app.register(async (instance) => {
   await registerWorktreeRoutes(instance);
   await registerCodexRoutes(instance);
   await registerShareRoutes(instance);
+  await registerGitRoutes(instance);
   await registerScheduleRoutes(instance);
   await registerTerminalRoutes(instance);
   await registerFileRoutes(instance);

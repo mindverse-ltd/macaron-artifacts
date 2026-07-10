@@ -1,13 +1,11 @@
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { CLAUDE_PROJECTS } from '../config.js';
 import {
   basename,
   decodeClaudeProjectName,
   groupWorkspaces,
   listAllSessions,
-  readSessionSummary,
+  resolveProjectCwd,
 } from '../lib/session-store.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
@@ -77,22 +75,13 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
       // The directory picker supplies an explicit cwd. Otherwise prefer an
       // existing session, then the New-Project registry, then the encoded key.
       const explicitCwd = String(req.body?.cwd || '').trim();
-      let cwd = explicitCwd || (await lookupProjectCwd(project)) || decodeClaudeProjectName(project);
-      if (!explicitCwd) {
-        try {
-          const projDir = path.join(CLAUDE_PROJECTS, project);
-          const files = await fs.readdir(projDir);
-          for (const f of files) {
-            if (!f.endsWith('.jsonl')) continue;
-            const meta = await readSessionSummary(path.join(projDir, f));
-            if (meta?.cwd) {
-              cwd = meta.cwd;
-              break;
-            }
-          }
-        } catch {
-          /* no sessions yet — fall back to decoded name */
-        }
+      let cwd = explicitCwd;
+      if (!cwd) {
+        const registeredCwd = await lookupProjectCwd(project);
+        cwd =
+          (await resolveProjectCwd(project, registeredCwd)) ||
+          registeredCwd ||
+          decodeClaudeProjectName(project);
       }
 
       try {

@@ -32,11 +32,16 @@ import { unoTheme, unoShortcuts, unoRules } from './macaron-vendor/lib/standalon
 
 import { App } from './App';
 import { Dashboard } from './views/Dashboard';
+import { Board } from './views/Board';
 import { Workspace } from './views/Workspace';
 import { FileExplorer } from './views/FileExplorer';
 import { Settings } from './views/Settings';
+import { Analytics } from './views/Analytics';
 import { Prompts } from './views/Prompts';
 import { ShareView } from './views/ShareView';
+import { Agents } from './views/Agents';
+import { Hooks } from './views/Hooks';
+import { Skills } from './views/Skills';
 import { Schedules } from './views/Schedules';
 import { Mcp } from './views/Mcp';
 import { ToastProvider } from './components/Toast';
@@ -49,6 +54,22 @@ import './styles.css';
 
 // Pick up a ?token=... bootstrap from a shared link before anything fetches.
 consumeTokenFromUrl();
+
+// The server serves the SPA for direct deep links, while createHashRouter reads
+// only the hash. Promote a pathname route before the router initializes so
+// opening /board (or a copied workspace/session URL) lands on that view rather
+// than silently rendering the dashboard.
+if (
+  !window.location.hash &&
+  window.location.pathname !== '/' &&
+  window.location.pathname !== '/index.html'
+) {
+  window.history.replaceState(
+    null,
+    '',
+    `/#${window.location.pathname}${window.location.search}`,
+  );
+}
 
 // Boot UnoCSS runtime: scans the DOM for utility classes and injects CSS as
 // elements appear. Required because the GenUI preview renders model-generated
@@ -87,8 +108,13 @@ const router = createHashRouter([
     element: <App />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: 'board', element: <Board /> },
+      { path: 'usage', element: <Analytics /> },
       { path: 'prompts', element: <Prompts /> },
       { path: 'settings', element: <Settings /> },
+      { path: 'agents', element: <Agents /> },
+      { path: 'hooks', element: <Hooks /> },
+      { path: 'skills', element: <Skills /> },
       { path: 'schedules', element: <Schedules /> },
       { path: 'mcp', element: <Mcp /> },
       { path: 'w/:project', element: <Workspace /> },

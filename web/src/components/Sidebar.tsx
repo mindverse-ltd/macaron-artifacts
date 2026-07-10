@@ -7,6 +7,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DirPicker } from './DirPicker';
 import { encodeClaudeProjectName, setPendingCwd } from '../lib/newSession';
 import { RateLimitMeters } from './RateLimitMeters';
+import { NewProjectModal } from './NewProjectModal';
 import {
   getCanvasSids,
   toggleCanvasSid,
@@ -27,6 +28,7 @@ export function Sidebar() {
   const [status, setStatus] = useState<'connecting' | 'ok' | 'bad'>('connecting');
   const [model, setModel] = useState('');
   const [ctxMenu, setCtxMenu] = useState<{ items: MenuItem[]; x: number; y: number } | null>(null);
+  const [showNewProject, setShowNewProject] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   // Per-workspace set of canvas-pinned sids, so the session rows can show
   // + / ✓ toggles. Re-reads from localStorage whenever a canvas changes.
@@ -147,7 +149,7 @@ export function Sidebar() {
       y: e.clientY,
       items: [
         {
-          icon: '＋',
+          icon: '+',
           label: 'New Session',
           onClick: () => navigate(`/w/${encodeURIComponent(w.project)}`),
         },
@@ -326,17 +328,43 @@ export function Sidebar() {
         </div>
       </Link>
 
+      <button
+        type="button"
+        className="sb-search"
+        onClick={() => window.dispatchEvent(new CustomEvent('macaron:open-search'))}
+        title="Search Claude sessions (⌘K)"
+      >
+        <span className="sb-search-icon">⌕</span>
+        <span className="sb-search-label">Search sessions</span>
+        <kbd className="sb-search-kbd">⌘K</kbd>
+      </button>
+      <Link className={'sb-nav-link' + (location.pathname === '/board' ? ' active' : '')} to="/board">
+        <span className="sb-nav-icon">▦</span>
+        <span>Dispatch board</span>
+      </Link>
+
       <div className="sb-label">
         <span>WORKSPACES</span>
-        <button
-          type="button"
-          className="sb-new-session"
-          onClick={() => setPickerOpen(true)}
-          title="New session in a folder…"
-          aria-label="New session in a folder"
-        >
-          ＋
-        </button>
+        <div className="sb-label-actions">
+          <button
+            type="button"
+            className="sb-new-session"
+            onClick={() => setPickerOpen(true)}
+            title="New session in a folder..."
+            aria-label="New session in a folder"
+          >
+            📁
+          </button>
+          <button
+            type="button"
+            className="sb-new-project"
+            onClick={() => setShowNewProject(true)}
+            title="New project (create dir or clone a repo)"
+            aria-label="New project"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       <div className="sb-ws-list">
@@ -456,6 +484,26 @@ export function Sidebar() {
 
       <div className="sb-spacer-grow" />
 
+      <Link className="sb-settings-link" to="/agents">
+        <span>🤖</span>
+        <span>Subagents</span>
+      </Link>
+
+      <Link className="sb-settings-link" to="/hooks">
+        <span>⚡</span>
+        <span>Hooks</span>
+      </Link>
+
+      <Link className="sb-settings-link" to="/usage">
+        <span>📊</span>
+        <span>Usage</span>
+      </Link>
+
+      <Link className="sb-settings-link" to="/skills">
+        <span>▤</span>
+        <span>Skills</span>
+      </Link>
+
       <Link className="sb-settings-link" to="/prompts">
         <span>⌘</span>
         <span>Prompts</span>
@@ -505,6 +553,16 @@ export function Sidebar() {
           x={ctxMenu.x}
           y={ctxMenu.y}
           onClose={() => setCtxMenu(null)}
+        />
+      )}
+      {showNewProject && (
+        <NewProjectModal
+          onClose={() => setShowNewProject(false)}
+          onCreated={(project) => {
+            setShowNewProject(false);
+            loadData();
+            navigate(`/w/${encodeURIComponent(project)}`);
+          }}
         />
       )}
       {pickerOpen && <DirPicker onPick={onPickDir} onClose={() => setPickerOpen(false)} />}

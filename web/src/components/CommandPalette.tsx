@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { SEARCH_HL_CLOSE, SEARCH_HL_OPEN } from '@macaron/shared';
 import { api, basename, fmtAgo, type MessageSearchHit, type SessionListItem, type Workspace } from '../lib/api';
 import { addDraftSid } from '../lib/canvas';
 
@@ -32,6 +33,10 @@ type Item =
 
 type WsWithSessions = Workspace & { sessions: SessionListItem[] };
 
+function stripSearchHighlights(text: string): string {
+  return text.split(SEARCH_HL_OPEN).join('').split(SEARCH_HL_CLOSE).join('');
+}
+
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -61,7 +66,9 @@ export function CommandPalette() {
   }, [location.pathname]);
 
   // Global Cmd/Ctrl-K toggles the palette. IME-guarded; only bare Cmd/Ctrl+K
-  // (no shift/alt) so we don't shadow other shortcuts.
+  // (no shift/alt) so we don't shadow other shortcuts. The sidebar search button
+  // opens SearchPalette instead (macaron:open-search) — this palette keeps
+  // Cmd-K for commands + session/workspace navigation.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
@@ -73,8 +80,6 @@ export function CommandPalette() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-
-  // On open: reset, focus the input, and load the session/workspace list from
   // the same endpoints the sidebar already polls (server mtime-cache keeps it
   // cheap). Also snapshot current YOLO state for the toggle command's label.
   useEffect(() => {
@@ -112,8 +117,8 @@ export function CommandPalette() {
     };
   }, [open]);
 
-  // Debounced server-side message search (min 2 chars). Recency-biased grep
-  // over the jsonl transcripts — see server searchMessages.
+  // Debounced server-side message search (min 2 chars). Prefer the SQLite FTS
+  // index and fall back to the runtime-safe transcript search when unavailable.
   useEffect(() => {
     if (!open) return;
     const q = query.trim();
@@ -123,10 +128,33 @@ export function CommandPalette() {
     }
     let stale = false;
     const t = setTimeout(() => {
+      const fallback = () =>
+        api
+          .searchMessages(q, 20)
+          .then((r) => { if (!stale) setMsgHits(r.hits); })
+          .catch(() => { if (!stale) setMsgHits([]); });
+
       api
-        .searchMessages(q, 20)
-        .then((r) => { if (!stale) setMsgHits(r.hits); })
-        .catch(() => { if (!stale) setMsgHits([]); });
+        .search(q, 20)
+        .then((r) => {
+          if (stale) return;
+          if (!r.enabled) {
+            void fallback();
+            return;
+          }
+          setMsgHits(
+            r.hits.map((hit) => ({
+              project: hit.project,
+              sessionId: hit.sessionId,
+              uuid: hit.uuid,
+              role: hit.role === 'user' ? 'user' : 'assistant',
+              snippet: stripSearchHighlights(hit.snippet),
+              preview: `${basename(hit.cwd) || hit.sessionId.slice(0, 8)} · ${hit.role}`,
+              mtime: Date.parse(hit.ts) || 0,
+            })),
+          );
+        })
+        .catch(() => { void fallback(); });
     }, 250);
     // Guard against out-of-order resolves: without this, typing `de` then
     // `deploy` can let the slower `de` request resolve last and overwrite the

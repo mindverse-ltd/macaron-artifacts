@@ -9,6 +9,7 @@ import {
   downloadTextFile,
   type Message,
   type SessionDetail,
+  type PrContext,
   type SlashCommand,
 } from '../lib/api';
 import { streamSession } from '../lib/sse';
@@ -27,12 +28,14 @@ import {
 } from '../lib/thinkingVerbs';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
+import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
+import { CreatePrDialog } from '../components/CreatePrDialog';
 
 const RENDER_UI_TOOL = 'mcp__macaron__render_ui';
 const isRenderUITool = (name: string) => name === RENDER_UI_TOOL || name.endsWith('__render_ui');
@@ -72,6 +75,9 @@ type Item =
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'thinking'; text: string }
   | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }
+  // A spawned custom subagent (the `Agent` tool). Drills into the child
+  // transcript stored under <sid>/subagents/, linked back by toolUseId.
+  | { id: string; kind: 'subagent'; agentType: string; description: string; toolUseId: string; result?: string }
   | { id: string; kind: 'todo'; todos: TodoEntry[] }
   | { id: string; kind: 'system_event'; eventType: string; text: string }
   | { id: string; kind: 'genui'; toolUseId: string; prompt: string; code?: string; status: 'pending' | 'ready' | 'error'; error?: string }
@@ -186,6 +192,22 @@ export function flatten(messages: Message[]): Item[] {
           };
           out.push(it);
           const pending = { item: it as PairedTool, ts: m.timestamp };
+          pendingTools.set(toolUseId, pending);
+          fallbackTool = pending;
+        } else if (b.name === 'Agent') {
+          // A spawned subagent. Its child transcript lives under
+          // <sid>/subagents/ keyed by the tool_use id — SubagentItem drills in.
+          const input = (b.input || {}) as { subagent_type?: string; description?: string };
+          const toolUseId = (b as unknown as { id?: string }).id || `synthetic-${i}`;
+          const it: Extract<Item, { kind: 'subagent' }> = {
+            id: `sub${i++}`,
+            kind: 'subagent',
+            agentType: String(input.subagent_type || ''),
+            description: String(input.description || ''),
+            toolUseId,
+          };
+          out.push(it);
+          const pending = { item: it as unknown as PairedTool, ts: m.timestamp };
           pendingTools.set(toolUseId, pending);
           fallbackTool = pending;
         } else {
@@ -462,6 +484,71 @@ function AssistantImageItem({ mimeType, data }: { mimeType: string; data: string
   );
 }
 
+// A spawned subagent card. Collapsed it looks like a tool row; expanded it
+// lazy-loads the child transcript (<sid>/subagents/agent-<id>.jsonl) and
+// renders it inline with the same ItemView the parent thread uses.
+function SubagentItem({
+  it,
+  project,
+  sid,
+}: {
+  it: Extract<Item, { kind: 'subagent' }>;
+  project?: string;
+  sid?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [child, setChild] = useState<Item[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const label = it.agentType || 'Agent';
+
+  const toggle = useCallback(async () => {
+    const next = !open;
+    setOpen(next);
+    if (!next || child || loading || !project || !sid) return;
+    setLoading(true);
+    setErr('');
+    try {
+      // The parent tool_use id links to exactly one child jsonl via its
+      // meta sidecar; resolve that agentId, then read the child transcript.
+      const { subagents } = await api.subagents(project, sid);
+      const match = subagents.find((s) => s.toolUseId === it.toolUseId);
+      if (!match) throw new Error('child transcript not found');
+      const detail = await api.subagent(project, sid, match.agentId);
+      setChild(flatten(detail.messages));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [open, child, loading, project, sid, it.toolUseId]);
+
+  return (
+    <div className="ti-tool ti-subagent">
+      <button type="button" className="ti-tool-head ti-subagent-head" onClick={toggle}>
+        <span className="ti-dot">🤖</span>
+        <span className="ti-tool-name">{label}</span>
+        {it.description && (
+          <span className="ti-tool-args" title={it.description}>
+            ({it.description})
+          </span>
+        )}
+        <span className="ti-subagent-toggle">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="ti-subagent-body">
+          {loading && <div className="ti-subagent-note muted">Loading transcript…</div>}
+          {err && <div className="ti-subagent-note ti-error">{err}</div>}
+          {child && child.length === 0 && <div className="ti-subagent-note muted">Empty transcript.</div>}
+          {child?.map((c) => (
+            <ItemView key={c.id} it={c} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PREVIEW_LINES = 2;
 
 function ToolItem({ id, name, input, result, durationMs, isError }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }) {
@@ -717,6 +804,8 @@ export function ItemView({
   onRewind,
   onFork,
   onPermissionDecide,
+  project,
+  sid,
 }: {
   it: Item;
   onRewind?: (uuid: string) => void;
@@ -725,6 +814,8 @@ export function ItemView({
   // ('acceptEdits'/'default') from PlanApprovalItem — disjoint value sets, so a single
   // handler serves both. This wider param is assignable to both child onDecide props.
   onPermissionDecide?: (permissionId: string, decision: 'allow' | 'deny', arg?: PermissionMode | 'once' | 'session' | 'always') => void;
+  project?: string;
+  sid?: string;
 }) {
   switch (it.kind) {
     case 'user':
@@ -753,6 +844,8 @@ export function ItemView({
         ? <DiffCard name={it.name} diff={diff} result={it.result} isError={it.isError} />
         : <ToolItem id={it.id} name={it.name} input={it.input} result={it.result} durationMs={it.durationMs} isError={it.isError} />;
     }
+    case 'subagent':
+      return <SubagentItem it={it} project={project} sid={sid} />;
     case 'todo':
       return <TodoItem id={it.id} todos={it.todos} />;
     case 'system_event':
@@ -778,12 +871,16 @@ export function ItemView({
 function SessionActionsMenu({
   disabled,
   busyCompact,
+  busyPr,
   onCompact,
+  onCreatePr,
   onExport,
 }: {
   disabled: boolean;
   busyCompact: boolean;
+  busyPr: boolean;
   onCompact: () => void;
+  onCreatePr: () => void;
   onExport: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -822,6 +919,22 @@ function SessionActionsMenu({
       </button>
       {open && (
         <div className="actions-menu">
+          <button
+            type="button"
+            className="actions-menu-item"
+            disabled={disabled || busyPr}
+            onClick={() => {
+              setOpen(false);
+              onCreatePr();
+            }}
+          >
+            <span className="actions-menu-body">
+              <span className="actions-menu-label">
+                {busyPr ? 'Opening PR…' : 'Create PR'}
+              </span>
+              <span className="actions-menu-sub">Push branch → open a pull request</span>
+            </span>
+          </button>
           <button
             type="button"
             className="actions-menu-item"
@@ -1137,6 +1250,7 @@ export function Session(props: SessionProps = {}) {
   const [dragOver, setDragOver] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const compositionEndedAtRef = useRef(0);
   const toast = useToast();
@@ -1144,6 +1258,13 @@ export function Session(props: SessionProps = {}) {
   const [busyCompact, setBusyCompact] = useState(false);
   const [busyRewind, setBusyRewind] = useState(false);
   const [busyFork, setBusyFork] = useState(false);
+  const [busyPr, setBusyPr] = useState(false);
+  // Non-null while the Create-PR dialog is open; holds the git snapshot used
+  // to prefill and gate it.
+  const [prCtx, setPrCtx] = useState<PrContext | null>(null);
+  // @-mention file autocomplete over the project tree. Inserts `@relpath`
+  // tokens the CLI resolves natively; no server-side prompt rewriting.
+  const mention = useFileMention({ project, value: input, setValue: setInput, textareaRef, composingRef });
   // Messages the user lined up while the current turn was still streaming.
   // Auto-sent one at a time as each turn completes (see the dequeue effect).
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
@@ -1257,6 +1378,58 @@ export function Session(props: SessionProps = {}) {
       setBusyCompact(false);
     }
   }, [busyCompact, confirm, project, sid, toast]);
+
+  // Create PR: fetch the git snapshot for this session's cwd, then open the
+  // dialog prefilled from the first user prompt. Gating (default branch, no
+  // commits ahead, existing PR) is surfaced inside the dialog.
+  const handleOpenPr = useCallback(async () => {
+    if (busyPr) return;
+    setBusyPr(true);
+    try {
+      const ctx = await api.prContext(project, sid);
+      setPrCtx(ctx);
+    } catch (e) {
+      toast(`couldn't read git state: ${(e as Error).message}`);
+    } finally {
+      setBusyPr(false);
+    }
+  }, [busyPr, project, sid, toast]);
+
+  const handleCreatePr = useCallback(
+    async (input: { title: string; body: string; draft: boolean }) => {
+      setBusyPr(true);
+      try {
+        const { url, created } = await api.createPr(project, sid, input);
+        setPrCtx(null);
+        toast(created ? 'Pull request opened' : 'PR already exists — opening it');
+        window.open(url, '_blank', 'noopener');
+      } catch (e) {
+        toast(`create PR failed: ${(e as Error).message}`);
+      } finally {
+        setBusyPr(false);
+      }
+    },
+    [project, sid, toast],
+  );
+
+  // Prefill for the PR dialog, derived from the first real user prompt. Title
+  // = its first line (capped); body = a short recap pointing back at Macaron.
+  const firstPrompt = useMemo(() => {
+    for (const m of data?.messages ?? []) {
+      if (m.role !== 'user') continue;
+      const text = m.blocks.filter((b) => b.kind === 'text').map((b) => (b as { text: string }).text).join('\n').trim();
+      if (text && !isNoisyUserText(text)) return text;
+    }
+    return '';
+  }, [data]);
+  const prTitle = useMemo(() => {
+    const line = (firstPrompt.split('\n')[0] || prCtx?.branch || 'Update').trim();
+    return line.length > 72 ? `${line.slice(0, 69)}…` : line;
+  }, [firstPrompt, prCtx]);
+  const prBody = useMemo(() => {
+    const recap = firstPrompt ? `${firstPrompt}\n\n` : '';
+    return `${recap}---\n_Opened from a Macaron session._`;
+  }, [firstPrompt]);
 
   // Export: serialize the loaded transcript to Markdown and download it —
   // client-side, no server round-trip (we already hold the parsed messages).
@@ -1568,6 +1741,7 @@ export function Session(props: SessionProps = {}) {
       const sentImages = opts ? (opts.images ?? []) : images;
       if ((!text && sentImages.length === 0) || sending) return;
       if (!opts) {
+        mention.close();
         setInput('');
         setImages([]);
         setHistoryIdx(null);
@@ -1792,7 +1966,7 @@ export function Session(props: SessionProps = {}) {
         },
       );
     },
-    [project, sid, input, sending, load, images, permissionMode, isolate, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
+    [project, sid, input, sending, load, images, permissionMode, isolate, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history, mention.close],
   );
 
   // Enqueue a message typed while a turn is running. macaron's runner is
@@ -1813,13 +1987,14 @@ export function Session(props: SessionProps = {}) {
     if (sending) {
       if (!text) return; // nothing queueable (images can't be queued yet)
       enqueue(text);
+      mention.close();
       setInput('');
       setHistoryIdx(null);
       draftInputRef.current = '';
       return;
     }
     void send();
-  }, [input, images, sending, enqueue, send]);
+  }, [input, images, sending, enqueue, send, mention.close]);
 
   // Send now: interrupt the running turn and send this message next. macaron's
   // only interrupt primitive is /stop (abort the subprocess), so we push the
@@ -1830,11 +2005,12 @@ export function Session(props: SessionProps = {}) {
     const text = input.trim();
     if (!text) return;
     setQueue((q) => [{ id: queueId('q-now'), text }, ...q]);
+    mention.close();
     setInput('');
     setHistoryIdx(null);
     draftInputRef.current = '';
     void handleStop();
-  }, [input, handleStop]);
+  }, [input, handleStop, mention.close]);
 
   const removeQueued = useCallback((id: string) => {
     setQueue((q) => q.filter((m) => m.id !== id));
@@ -1855,6 +2031,7 @@ export function Session(props: SessionProps = {}) {
   // the queue). If the composer already holds a draft, keep that safe by
   // prepending it back onto the queue front.
   const editQueued = useCallback((id: string) => {
+    mention.close();
     setQueue((q) => {
       const target = q.find((m) => m.id === id);
       if (!target) return q;
@@ -1864,7 +2041,7 @@ export function Session(props: SessionProps = {}) {
       if (draft) return [{ id: queueId('q-draft'), text: draft }, ...rest];
       return rest;
     });
-  }, [input]);
+  }, [input, mention.close]);
 
   // Idle-edge dequeue: when a turn finishes (running true→false), auto-send the
   // next queued message. Edge-guarded so exactly one message goes per turn —
@@ -1972,6 +2149,10 @@ export function Session(props: SessionProps = {}) {
         e.preventDefault();
         return;
       }
+    }
+    // Mention popup handles ↑/↓/Enter/Tab/Esc after the IME Enter guard above.
+    if (mention.onKeyDown(e)) return;
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submitComposer();
       return;
@@ -2106,10 +2287,10 @@ export function Session(props: SessionProps = {}) {
           />
         )}
         {[...completedTurns].reverse().map((it) => (
-          <ItemView key={it.id} it={it} />
+          <ItemView key={it.id} it={it} project={project} sid={sid} />
         ))}
         {[...tail].reverse().map((it) => (
-          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} />
+          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} />
         ))}
         {hidden > 0 && (
           <button className="ghost load-earlier" onClick={() => setShown((s) => s + PAGE_SIZE)}>
@@ -2196,7 +2377,10 @@ export function Session(props: SessionProps = {}) {
             onHover={setSlashIdx}
           />
         )}
+        <div className="mention-anchor">
+        {mention.popup}
         <textarea
+          ref={textareaRef}
           rows={2}
           placeholder={sending ? 'Queue a message…' : 'Reply to Claude…'}
           value={input}
@@ -2206,7 +2390,9 @@ export function Session(props: SessionProps = {}) {
             // Any manual edit exits history-navigation mode — pressing
             // Send now sends the (possibly edited) text as a fresh entry.
             if (historyIdx !== null) setHistoryIdx(null);
+            mention.refresh();
           }}
+          onSelect={() => mention.refresh()}
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={() => {
             composingRef.current = false;
@@ -2224,6 +2410,7 @@ export function Session(props: SessionProps = {}) {
           }}
           onKeyDown={onKey}
         />
+        </div>
         {/*
           Claude-web-style toolbar. Attach on the far left. Model (provider)
           and permission chips grouped on the right next to Send. Each chip
@@ -2256,7 +2443,9 @@ export function Session(props: SessionProps = {}) {
           <SessionActionsMenu
             disabled={isNew || sending}
             busyCompact={busyCompact}
+            busyPr={busyPr}
             onCompact={() => void handleCompact()}
+            onCreatePr={() => void handleOpenPr()}
             onExport={handleExport}
           />
           {isNew && (
@@ -2346,6 +2535,16 @@ export function Session(props: SessionProps = {}) {
       />
       </div>
       </div>
+      {prCtx && (
+        <CreatePrDialog
+          ctx={prCtx}
+          initialTitle={prTitle}
+          initialBody={prBody}
+          busy={busyPr}
+          onSubmit={(input) => void handleCreatePr(input)}
+          onCancel={() => setPrCtx(null)}
+        />
+      )}
     </section>
   );
 }

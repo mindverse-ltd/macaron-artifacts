@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import ignore from 'ignore';
 import type {
   Block,
   ContextBreakdown,
@@ -8,6 +9,7 @@ import type {
   MessageSearchHit,
   SessionDetail,
   SessionListItem,
+  SubagentInfo,
   UsageSnapshot,
   Workspace,
 } from '@macaron/shared';
@@ -339,6 +341,66 @@ export async function readSessionSummary(filePath: string): Promise<SessionSumma
   return summary;
 }
 
+// Directories never worth walking for an @-mention: build output, vendored
+// deps, caches. Mirrors fafawlf/claude-code-web's skip-list. Applied on top
+// of the repo's own `.gitignore` (loaded per root below).
+const FILE_SEARCH_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.venv', 'venv',
+  '__pycache__', '.pytest_cache', 'target', '.cache', '.turbo', '.parcel-cache',
+  'coverage', '.idea', '.vscode',
+]);
+const FILE_SEARCH_MAX_DEPTH = 8;
+const FILE_SEARCH_MAX_ENTRIES_PER_DIR = 2000;
+
+// Best-effort `.gitignore` matcher for the repo root. Returns null when the
+// file is absent/unreadable so the walk falls back to the skip-list alone.
+// Only the root `.gitignore` is honoured (nested ones are ignored) — enough to
+// keep top-level secrets like `.env` / `*.local` out of the picker per issue #20.
+async function loadGitignore(root: string): Promise<ReturnType<typeof ignore> | null> {
+  try {
+    const raw = await fs.readFile(path.join(root, '.gitignore'), 'utf8');
+    return ignore().add(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function walkFiles(root: string, dir: string, needle: string, out: string[], limit: number, depth: number, ig: ReturnType<typeof ignore> | null): Promise<void> {
+  if (out.length >= limit || depth > FILE_SEARCH_MAX_DEPTH) return;
+  let entries;
+  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+  if (entries.length > FILE_SEARCH_MAX_ENTRIES_PER_DIR) entries = entries.slice(0, FILE_SEARCH_MAX_ENTRIES_PER_DIR);
+  for (const e of entries) {
+    if (out.length >= limit) return;
+    if (e.name.startsWith('.')) continue;
+    if (FILE_SEARCH_SKIP_DIRS.has(e.name)) continue;
+    const full = path.join(dir, e.name);
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    if (e.isDirectory()) {
+      // `ignore` does no fs.stat — a trailing slash tells it `rel` is a dir, so
+      // a `foo/` rule matches. Skipping here also prunes the whole subtree.
+      if (ig?.ignores(rel + '/')) continue;
+      await walkFiles(root, full, needle, out, limit, depth + 1, ig);
+    } else if (e.isFile()) {
+      if (ig?.ignores(rel)) continue;
+      if (!needle || rel.toLowerCase().includes(needle)) out.push(rel);
+    }
+  }
+}
+
+// Recursively list files under a project's cwd, substring-matched on the
+// repo-relative path. Skips build/vendor/cache dirs, dotfiles, and anything the
+// repo's root `.gitignore` excludes; bounded by depth, per-dir entry count, and
+// a hard result cap. Powers the composer's @-mention autocomplete.
+export async function searchProjectFiles(project: string, needle: string, limit: number): Promise<{ cwd: string; results: string[] }> {
+  const cwd = await resolveProjectCwd(project);
+  if (!cwd) throw new Error('project not found');
+  const results: string[] = [];
+  const ig = await loadGitignore(cwd);
+  await walkFiles(cwd, cwd, needle.toLowerCase(), results, Math.min(Math.max(limit, 1), 200), 0, ig);
+  return { cwd, results };
+}
+
 // Resolve a session's working directory. The project name IS the cwd (encoded
 // by claude-cli), so it's the safe default — the jsonl's head read is capped at
 // HEAD_BYTES and a big first-line paste can push cwd out of range, so prefer
@@ -359,9 +421,15 @@ export async function resolveSessionCwd(project: string, sid: string): Promise<s
 // CLAUDE_PROJECTS: that decode (`-` -> `/`) is attacker-controllable, and
 // callers that hand the result to the filesystem as a *root* (routes/files.ts)
 // would otherwise turn the `:project` route param into an arbitrary-root
-// traversal (e.g. `-etc` -> `/etc`). Returns null for an unregistered project;
-// callers must treat null as "unknown project" (404), never as a servable root.
-export async function resolveProjectCwd(project: string): Promise<string | null> {
+// traversal (e.g. `-etc` -> `/etc`). A trusted fallback lets callers preserve
+// an exact cwd from the persisted New-Project registry instead of using the
+// lossy decoded name when the project has no live session. Returns null for an
+// unregistered project; callers must treat null as "unknown project" (404),
+// never as a servable root.
+export async function resolveProjectCwd(
+  project: string,
+  trustedFallback?: string,
+): Promise<string | null> {
   let files: string[];
   const projDir = path.join(CLAUDE_PROJECTS, project);
   try {
@@ -385,7 +453,7 @@ export async function resolveProjectCwd(project: string): Promise<string | null>
   // Registered project whose cwd we couldn't recover from any jsonl: fall back
   // to the decoded name (the original big-paste behavior), now gated on the dir
   // existing above so an unregistered `-etc` can never reach this.
-  return decodeClaudeProjectName(project);
+  return trustedFallback ?? decodeClaudeProjectName(project);
 }
 
 export async function listAllSessions(): Promise<SessionListItem[]> {
@@ -478,13 +546,21 @@ export function groupWorkspaces(sessions: SessionListItem[]): Workspace[] {
 
 const SESSION_TAIL_BYTES = 8 * 1024 * 1024;
 
-export async function readSessionMessages(project: string, sid: string): Promise<SessionDetail> {
-  const base = path.resolve(CLAUDE_PROJECTS);
-  const filePath = path.resolve(base, project, `${sid}.jsonl`);
-  // project/sid reach this sink from a JSON body via the share route, where a
-  // `..` segment passes freely; assert the resolved path stays inside the
-  // projects dir so a traversal can't read an arbitrary *.jsonl off disk.
-  if (!(filePath + path.sep).startsWith(base + path.sep)) throw new Error('invalid session path');
+// Read a transcript file (tail-truncated if huge) and parse each jsonl line
+// into the shared Message[] shape. Shared by the parent session reader and the
+// subagent (child-session) reader — both persist the same block structure.
+async function parseTranscriptFile(filePath: string): Promise<{
+  messages: Message[];
+  cwd: string;
+  gitBranch: string;
+  truncated: boolean;
+  totalBytes: number;
+  latestUsage: UsageSnapshot | undefined;
+  msgChars: number;
+  thinkChars: number;
+  toolCallChars: number;
+  toolResultChars: number;
+}> {
   const st = await fs.stat(filePath);
   let raw: string;
   let truncated = false;
@@ -625,6 +701,40 @@ export async function readSessionMessages(project: string, sid: string): Promise
       /* skip malformed */
     }
   }
+  return {
+    messages,
+    cwd,
+    gitBranch,
+    truncated,
+    totalBytes: st.size,
+    latestUsage,
+    msgChars,
+    thinkChars,
+    toolCallChars,
+    toolResultChars,
+  };
+}
+
+export async function readSessionMessages(project: string, sid: string): Promise<SessionDetail> {
+  const base = path.resolve(CLAUDE_PROJECTS);
+  const filePath = path.resolve(base, project, `${sid}.jsonl`);
+  // project/sid reach this sink from a JSON body via the share route, where a
+  // `..` segment passes freely; assert the resolved path stays inside the
+  // projects dir so a traversal can't read an arbitrary *.jsonl off disk.
+  if (!(filePath + path.sep).startsWith(base + path.sep)) throw new Error('invalid session path');
+  const {
+    messages,
+    cwd,
+    gitBranch,
+    truncated,
+    totalBytes,
+    latestUsage,
+    msgChars,
+    thinkChars,
+    toolCallChars,
+    toolResultChars,
+  } =
+    await parseTranscriptFile(filePath);
 
   const [claudeMdCount, mcpCount] = await Promise.all([
     countClaudeMd(cwd),
@@ -649,7 +759,7 @@ export async function readSessionMessages(project: string, sid: string): Promise
     gitBranch,
     messages,
     truncated,
-    totalBytes: st.size,
+    totalBytes,
     latestUsage,
     contextBreakdown,
     claudeMdCount,
@@ -762,6 +872,57 @@ export async function searchMessages(query: string, limit = 30): Promise<Message
     }
   }
   return hits;
+}
+
+// Subagent (child session) transcripts live next to the parent as
+// `<sid>/subagents/agent-<agentId>.jsonl`, each with an `agent-*.meta.json`
+// sidecar linking it back to the parent's `Agent` tool_use via `toolUseId`.
+export async function listSubagents(project: string, sid: string): Promise<SubagentInfo[]> {
+  const dir = path.join(CLAUDE_PROJECTS, project, sid, 'subagents');
+  let files;
+  try {
+    files = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const out: SubagentInfo[] = [];
+  for (const f of files) {
+    if (!f.endsWith('.meta.json')) continue;
+    try {
+      const meta = JSON.parse(await fs.readFile(path.join(dir, f), 'utf8')) as Partial<SubagentInfo>;
+      out.push({
+        agentId: f.replace(/^agent-/, '').replace(/\.meta\.json$/, ''),
+        agentType: meta.agentType || '',
+        description: meta.description || '',
+        toolUseId: meta.toolUseId || '',
+      });
+    } catch {
+      /* skip malformed sidecar */
+    }
+  }
+  return out;
+}
+
+export async function readSubagentMessages(
+  project: string,
+  sid: string,
+  agentId: string,
+): Promise<SessionDetail> {
+  if (!/^[A-Za-z0-9_-]+$/.test(agentId)) throw new Error('invalid subagent id');
+  const filePath = path.join(CLAUDE_PROJECTS, project, sid, 'subagents', `agent-${agentId}.jsonl`);
+  const { messages, cwd, gitBranch, truncated, totalBytes, latestUsage } =
+    await parseTranscriptFile(filePath);
+  return {
+    kind: 'claude',
+    sessionId: agentId,
+    project,
+    cwd,
+    gitBranch,
+    messages,
+    truncated,
+    totalBytes,
+    latestUsage,
+  };
 }
 
 // Estimate the used-context split from transcript char tallies. `total` is the

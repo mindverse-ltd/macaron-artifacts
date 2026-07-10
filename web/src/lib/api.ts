@@ -22,6 +22,8 @@ export type {
   DirListing,
   CreateShareResponse,
   SharedSessionResponse,
+  TunnelProvider,
+  TunnelState,
   WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
@@ -66,6 +68,8 @@ import type {
   DirListing,
   CreateShareResponse,
   SharedSessionResponse,
+  TunnelProvider,
+  TunnelState,
   WorktreeInfo,
   UsageResponse,
   SearchResponse,
@@ -410,6 +414,14 @@ export const api = {
     }),
   sharedSession: (token: string) =>
     getJSON<SharedSessionResponse>(`/api/public/share/${encodeURIComponent(token)}`),
+  tunnelStatus: () => getJSON<TunnelState>('/api/tunnel/status'),
+  startTunnel: (provider: TunnelProvider) =>
+    req<TunnelState>('/api/tunnel/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider }),
+    }),
+  stopTunnel: () => req<TunnelState>('/api/tunnel/stop', { method: 'POST' }),
   search: (q: string, limit = 40) =>
     getJSON<SearchResponse>(
       `/api/search?q=${encodeURIComponent(q)}&limit=${encodeURIComponent(String(limit))}`,

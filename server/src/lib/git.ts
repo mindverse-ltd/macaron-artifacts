@@ -13,31 +13,8 @@ import type {
   GitStatus,
   PrContext,
 } from '@macaron/shared';
-import { CLAUDE_PROJECTS } from '../config.js';
-import { decodeClaudeProjectName, readSessionSummary } from './session-store.js';
 
 const pExecFile = promisify(execFile);
-
-// Same cwd derivation the /api/workspaces POST uses: decode the project name
-// and prefer the real cwd embedded in a session's jsonl head.
-export async function resolveProjectCwd(project: string): Promise<string> {
-  let cwd = decodeClaudeProjectName(project);
-  try {
-    const projDir = path.join(CLAUDE_PROJECTS, project);
-    const files = await fs.readdir(projDir);
-    for (const f of files) {
-      if (!f.endsWith('.jsonl')) continue;
-      const meta = await readSessionSummary(path.join(projDir, f));
-      if (meta?.cwd) {
-        cwd = meta.cwd;
-        break;
-      }
-    }
-  } catch {
-    /* no sessions yet - fall back to decoded name */
-  }
-  return cwd;
-}
 
 export class GitError extends Error {
   constructor(message: string, readonly code: number | null) {

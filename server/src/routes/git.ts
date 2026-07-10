@@ -2,7 +2,11 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { CreatePrRequest } from '@macaron/shared';
 import { CLAUDE_PROJECTS } from '../config.js';
-import { decodeClaudeProjectName, readSessionSummary } from '../lib/session-store.js';
+import {
+  decodeClaudeProjectName,
+  readSessionSummary,
+  resolveProjectCwd,
+} from '../lib/session-store.js';
 import * as g from '../lib/git.js';
 
 type ProjectParams = { project: string };
@@ -20,7 +24,11 @@ async function resolveSessionCwd(project: string, sid: string): Promise<string> 
 }
 
 export async function registerGitRoutes(app: FastifyInstance): Promise<void> {
-  const cwdOf = (project: string) => g.resolveProjectCwd(project);
+  // null = unregistered project (no session dir under CLAUDE_PROJECTS): fall
+  // back to the decoded name so git runs (and reports isRepo:false) rather than
+  // throwing on a null cwd.
+  const cwdOf = async (project: string) =>
+    (await resolveProjectCwd(project)) ?? decodeClaudeProjectName(project);
 
   const fail = (reply: import('fastify').FastifyReply, e: unknown) => {
     const code = e instanceof g.GitError ? 400 : 500;

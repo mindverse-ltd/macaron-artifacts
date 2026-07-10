@@ -10,6 +10,12 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  AnalyticsResponse,
+  UsageBySession,
+  PrContext,
+  CreatePrRequest,
+  CreatePrResult,
+  FileSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirEntry,
@@ -19,6 +25,8 @@ export type {
   WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
+  SkillInfo,
+  SkillDetail,
   Schedule,
   ScheduleInput,
   SessionKind,
@@ -41,6 +49,11 @@ import type {
   SessionDetail,
   MessageSearchResponse,
   HealthResponse,
+  AnalyticsResponse,
+  PrContext,
+  CreatePrRequest,
+  CreatePrResult,
+  FileSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirListing,
@@ -48,6 +61,8 @@ import type {
   SharedSessionResponse,
   WorktreeInfo,
   UsageResponse,
+  SkillInfo,
+  SkillDetail,
   Schedule,
   ScheduleInput,
   SchedulesResponse,
@@ -67,7 +82,14 @@ import { authedFetch } from './auth';
 // the message string.
 export class HttpError extends Error {
   constructor(readonly status: number, body: string) {
-    super(`http ${status}: ${body.slice(0, 200)}`);
+    let message = '';
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed.error === 'string') message = parsed.error;
+    } catch {
+      /* non-JSON error body */
+    }
+    super(message || (body ? `http ${status}: ${body.slice(0, 200)}` : `http ${status}`));
     this.name = 'HttpError';
   }
 }
@@ -140,6 +162,8 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
+  analytics: (window: string) =>
+    getJSON<AnalyticsResponse>(`/api/analytics?window=${encodeURIComponent(window)}`),
   settings: () => getJSON<PublicSettings>('/api/settings'),
   usage: () => getJSON<UsageResponse>('/api/usage'),
 
@@ -176,6 +200,20 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
+    }),
+  skills: () => getJSON<{ skills: SkillInfo[] }>('/api/skills'),
+  skill: (dir: string) => getJSON<SkillDetail>(`/api/skills/${encodeURIComponent(dir)}`),
+  setSkillEnabled: (dir: string, enabled: boolean) =>
+    req<{ skills: SkillInfo[] }>(`/api/skills/${encodeURIComponent(dir)}/enabled`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+  createSkill: (input: { name: string; description: string; body?: string }) =>
+    req<{ dir: string; skills: SkillInfo[] }>('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
     }),
   savedCommands: () => getJSON<SavedCommandsResponse>('/api/commands'),
   createCommand: (name: string, input: CommandInput) =>
@@ -228,6 +266,12 @@ export const api = {
     return r.json() as Promise<ConfigFile>;
   },
   workspaces: () => getJSON<WorkspacesResponse>('/api/workspaces'),
+  createProject: (input: { name?: string; gitUrl?: string }) =>
+    req<{ project: string; cwd: string; name: string }>('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
   searchMessages: (q: string, limit = 30) =>
     getJSON<MessageSearchResponse>(
       `/api/search/messages?q=${encodeURIComponent(q)}&limit=${limit}`,
@@ -236,6 +280,10 @@ export const api = {
     getJSON<DirListing>(`/api/fs/dirs?path=${encodeURIComponent(path ?? '')}`),
   workspace: (project: string) =>
     getJSON<WorkspaceDetailResponse>(`/api/workspaces/${encodeURIComponent(project)}`),
+  searchFiles: (project: string, q: string, limit = 50) =>
+    getJSON<FileSearchResponse>(
+      `/api/workspaces/${encodeURIComponent(project)}/files?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
   session: (project: string, sid: string) =>
     getJSON<SessionDetail>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,
@@ -304,6 +352,23 @@ export const api = {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+      },
+    ),
+  prContext: (project: string, sid: string) =>
+    // Use `req` (not `getJSON`) so the server's descriptive error body
+    // ("not a git repository", etc.) reaches the toast instead of a bare
+    // `http 400`, matching the createPr path.
+    req<PrContext>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/pr-context`,
+      { method: 'GET' },
+    ),
+  createPr: (project: string, sid: string, input: CreatePrRequest) =>
+    req<CreatePrResult>(
+      `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/pr`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
       },
     ),
   createShare: (project: string, sid: string) =>

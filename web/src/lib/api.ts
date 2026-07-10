@@ -25,6 +25,9 @@ export type {
   WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
+  HooksResponse,
+  HookHandlerView,
+  HookScope,
   SkillInfo,
   SkillDetail,
   Schedule,
@@ -61,6 +64,7 @@ import type {
   SharedSessionResponse,
   WorktreeInfo,
   UsageResponse,
+  HooksResponse,
   SkillInfo,
   SkillDetail,
   Schedule,
@@ -280,6 +284,12 @@ export const api = {
     getJSON<DirListing>(`/api/fs/dirs?path=${encodeURIComponent(path ?? '')}`),
   workspace: (project: string) =>
     getJSON<WorkspaceDetailResponse>(`/api/workspaces/${encodeURIComponent(project)}`),
+  // Read-only hooks view. Pass an encoded project to include that workspace's
+  // project + local settings.json; omit it for user-scope hooks only.
+  hooks: (project?: string) =>
+    getJSON<HooksResponse>(
+      project ? `/api/hooks?project=${encodeURIComponent(project)}` : '/api/hooks',
+    ),
   searchFiles: (project: string, q: string, limit = 50) =>
     getJSON<FileSearchResponse>(
       `/api/workspaces/${encodeURIComponent(project)}/files?q=${encodeURIComponent(q)}&limit=${limit}`,

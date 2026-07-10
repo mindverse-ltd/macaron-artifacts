@@ -27,6 +27,7 @@ import {
 } from '../lib/thinkingVerbs';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
+import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
 import { loadHistory, pushHistory } from '../lib/history';
@@ -1137,6 +1138,7 @@ export function Session(props: SessionProps = {}) {
   const [dragOver, setDragOver] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const compositionEndedAtRef = useRef(0);
   const toast = useToast();
@@ -1144,6 +1146,9 @@ export function Session(props: SessionProps = {}) {
   const [busyCompact, setBusyCompact] = useState(false);
   const [busyRewind, setBusyRewind] = useState(false);
   const [busyFork, setBusyFork] = useState(false);
+  // @-mention file autocomplete over the project tree. Inserts `@relpath`
+  // tokens the CLI resolves natively; no server-side prompt rewriting.
+  const mention = useFileMention({ project, value: input, setValue: setInput, textareaRef, composingRef });
   // Messages the user lined up while the current turn was still streaming.
   // Auto-sent one at a time as each turn completes (see the dequeue effect).
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
@@ -1568,6 +1573,7 @@ export function Session(props: SessionProps = {}) {
       const sentImages = opts ? (opts.images ?? []) : images;
       if ((!text && sentImages.length === 0) || sending) return;
       if (!opts) {
+        mention.close();
         setInput('');
         setImages([]);
         setHistoryIdx(null);
@@ -1792,7 +1798,7 @@ export function Session(props: SessionProps = {}) {
         },
       );
     },
-    [project, sid, input, sending, load, images, permissionMode, isolate, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
+    [project, sid, input, sending, load, images, permissionMode, isolate, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history, mention.close],
   );
 
   // Enqueue a message typed while a turn is running. macaron's runner is
@@ -1813,13 +1819,14 @@ export function Session(props: SessionProps = {}) {
     if (sending) {
       if (!text) return; // nothing queueable (images can't be queued yet)
       enqueue(text);
+      mention.close();
       setInput('');
       setHistoryIdx(null);
       draftInputRef.current = '';
       return;
     }
     void send();
-  }, [input, images, sending, enqueue, send]);
+  }, [input, images, sending, enqueue, send, mention.close]);
 
   // Send now: interrupt the running turn and send this message next. macaron's
   // only interrupt primitive is /stop (abort the subprocess), so we push the
@@ -1830,11 +1837,12 @@ export function Session(props: SessionProps = {}) {
     const text = input.trim();
     if (!text) return;
     setQueue((q) => [{ id: queueId('q-now'), text }, ...q]);
+    mention.close();
     setInput('');
     setHistoryIdx(null);
     draftInputRef.current = '';
     void handleStop();
-  }, [input, handleStop]);
+  }, [input, handleStop, mention.close]);
 
   const removeQueued = useCallback((id: string) => {
     setQueue((q) => q.filter((m) => m.id !== id));
@@ -1855,6 +1863,7 @@ export function Session(props: SessionProps = {}) {
   // the queue). If the composer already holds a draft, keep that safe by
   // prepending it back onto the queue front.
   const editQueued = useCallback((id: string) => {
+    mention.close();
     setQueue((q) => {
       const target = q.find((m) => m.id === id);
       if (!target) return q;
@@ -1864,7 +1873,7 @@ export function Session(props: SessionProps = {}) {
       if (draft) return [{ id: queueId('q-draft'), text: draft }, ...rest];
       return rest;
     });
-  }, [input]);
+  }, [input, mention.close]);
 
   // Idle-edge dequeue: when a turn finishes (running true→false), auto-send the
   // next queued message. Edge-guarded so exactly one message goes per turn —
@@ -1972,6 +1981,10 @@ export function Session(props: SessionProps = {}) {
         e.preventDefault();
         return;
       }
+    }
+    // Mention popup handles ↑/↓/Enter/Tab/Esc after the IME Enter guard above.
+    if (mention.onKeyDown(e)) return;
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submitComposer();
       return;
@@ -2196,7 +2209,10 @@ export function Session(props: SessionProps = {}) {
             onHover={setSlashIdx}
           />
         )}
+        <div className="mention-anchor">
+        {mention.popup}
         <textarea
+          ref={textareaRef}
           rows={2}
           placeholder={sending ? 'Queue a message…' : 'Reply to Claude…'}
           value={input}
@@ -2206,7 +2222,9 @@ export function Session(props: SessionProps = {}) {
             // Any manual edit exits history-navigation mode — pressing
             // Send now sends the (possibly edited) text as a fresh entry.
             if (historyIdx !== null) setHistoryIdx(null);
+            mention.refresh();
           }}
+          onSelect={() => mention.refresh()}
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={() => {
             composingRef.current = false;
@@ -2224,6 +2242,7 @@ export function Session(props: SessionProps = {}) {
           }}
           onKeyDown={onKey}
         />
+        </div>
         {/*
           Claude-web-style toolbar. Attach on the far left. Model (provider)
           and permission chips grouped on the right next to Send. Each chip

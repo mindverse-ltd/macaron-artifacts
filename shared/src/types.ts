@@ -269,6 +269,9 @@ export type WorkspacesResponse = { workspaces: Workspace[] };
 export type SavedCommandsResponse = { commands: SavedCommand[] };
 export type MessageSearchResponse = { hits: MessageSearchHit[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
+// Result of the composer's @-mention file search: repo-relative POSIX paths
+// under the workspace cwd, matched by substring on the needle.
+export type FileSearchResponse = { cwd: string; results: string[] };
 export type SchedulesResponse = { schedules: Schedule[] };
 export type HealthResponse = { ok: boolean; model: string };
 export type AuthStatusResponse = { required: boolean };

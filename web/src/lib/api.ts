@@ -10,6 +10,7 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  FileSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirEntry,
@@ -41,6 +42,7 @@ import type {
   SessionDetail,
   MessageSearchResponse,
   HealthResponse,
+  FileSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirListing,
@@ -236,6 +238,10 @@ export const api = {
     getJSON<DirListing>(`/api/fs/dirs?path=${encodeURIComponent(path ?? '')}`),
   workspace: (project: string) =>
     getJSON<WorkspaceDetailResponse>(`/api/workspaces/${encodeURIComponent(project)}`),
+  searchFiles: (project: string, q: string, limit = 50) =>
+    getJSON<FileSearchResponse>(
+      `/api/workspaces/${encodeURIComponent(project)}/files?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
   session: (project: string, sid: string) =>
     getJSON<SessionDetail>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}`,

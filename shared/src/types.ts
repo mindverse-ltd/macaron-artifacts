@@ -101,6 +101,46 @@ export type SessionDetail = {
   mcpCount?: number;
 };
 
+// Cost & usage analytics. Rolled up from the same `message.usage` fields
+// session-store already reads, priced by the server's model rate table.
+// Token counts are summed across every assistant message in the window;
+// costUsd is the sum of per-message cost (input/output/cache-write/cache-read
+// each at their own rate). `known` on a per-model row is false when the model
+// string didn't match the rate table and a default estimate was used.
+export type UsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  messageCount: number;
+  sessionCount: number;
+};
+export type UsageDaily = { date: string } & Omit<UsageTotals, 'sessionCount'>;
+export type UsageByModel = { model: string; known: boolean } & Omit<UsageTotals, 'sessionCount'>;
+export type UsageBySession = {
+  project: string;
+  sessionId: string;
+  preview: string;
+  model: string;
+  lastActivity: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  messageCount: number;
+};
+export type AnalyticsResponse = {
+  window: string;
+  since: number;
+  until: number;
+  totals: UsageTotals;
+  daily: UsageDaily[];
+  byModel: UsageByModel[];
+  bySession: UsageBySession[];
+};
+
 // A saved prompt / custom slash command — one `.md` file under
 // ~/.claude/commands/. `name` is the filename stem (invoked as `/name`);
 // `description` and `argumentHint` come from the YAML frontmatter; `body` is
@@ -350,6 +390,41 @@ export type SubagentInfo = {
 };
 
 export type SubagentsResponse = { subagents: SubagentInfo[] };
+
+// ---- Hooks viewer ------------------------------------------------------
+// Read-only projection of the `hooks` block in a settings.json, flattened
+// from Claude Code's three-level nesting (event → matcher group → handlers)
+// into one row per handler so the WebUI can render a plain table. See
+// https://code.claude.com/docs/en/hooks for the source schema.
+
+// Which settings.json a hook came from. Scope decides precedence and lets
+// the UI tag each row with where to edit it.
+export type HookScope = 'user' | 'project' | 'local';
+
+export type HookHandlerView = {
+  // Event that triggers the hook, e.g. 'PreToolUse', 'PostToolUse', 'Stop'.
+  event: string;
+  // Matcher that narrows when it fires (tool name / glob). '' or '*' means
+  // "every occurrence of the event".
+  matcher: string;
+  scope: HookScope;
+  // Absolute path of the settings.json this handler was read from.
+  source: string;
+  // Handler kind: 'command' | 'http' | 'prompt' | 'agent' | future kinds.
+  type: string;
+  // The command line (command hooks), URL (http hooks), or a short label for
+  // other kinds — whatever best identifies what runs.
+  run: string;
+  // Optional `if` sub-command filter that gates a single handler.
+  condition?: string;
+};
+
+export type HooksResponse = {
+  handlers: HookHandlerView[];
+  // Which scopes were actually found on disk, so the UI can explain an empty
+  // result ("no project settings.json") instead of just showing nothing.
+  sources: Array<{ scope: HookScope; path: string; present: boolean; error?: string }>;
+};
 
 // Browser-editable Claude Code config files (user scope, under ~/.claude).
 // `settings` is JSON (schema-guarded on write); `memory` is the free-form

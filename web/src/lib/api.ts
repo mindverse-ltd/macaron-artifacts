@@ -10,6 +10,8 @@ export type {
   WorkspacesResponse,
   WorkspaceDetailResponse,
   HealthResponse,
+  AnalyticsResponse,
+  UsageBySession,
   PrContext,
   CreatePrRequest,
   CreatePrResult,
@@ -23,6 +25,9 @@ export type {
   WorktreeInfo,
   UsageResponse,
   RateLimitWindow,
+  HooksResponse,
+  HookHandlerView,
+  HookScope,
   SkillInfo,
   SkillDetail,
   Schedule,
@@ -49,6 +54,7 @@ import type {
   SessionDetail,
   MessageSearchResponse,
   HealthResponse,
+  AnalyticsResponse,
   PrContext,
   CreatePrRequest,
   CreatePrResult,
@@ -60,6 +66,7 @@ import type {
   SharedSessionResponse,
   WorktreeInfo,
   UsageResponse,
+  HooksResponse,
   SkillInfo,
   SkillDetail,
   Schedule,
@@ -171,6 +178,8 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
+  analytics: (window: string) =>
+    getJSON<AnalyticsResponse>(`/api/analytics?window=${encodeURIComponent(window)}`),
   settings: () => getJSON<PublicSettings>('/api/settings'),
   usage: () => getJSON<UsageResponse>('/api/usage'),
 
@@ -287,6 +296,12 @@ export const api = {
     getJSON<DirListing>(`/api/fs/dirs?path=${encodeURIComponent(path ?? '')}`),
   workspace: (project: string) =>
     getJSON<WorkspaceDetailResponse>(`/api/workspaces/${encodeURIComponent(project)}`),
+  // Read-only hooks view. Pass an encoded project to include that workspace's
+  // project + local settings.json; omit it for user-scope hooks only.
+  hooks: (project?: string) =>
+    getJSON<HooksResponse>(
+      project ? `/api/hooks?project=${encodeURIComponent(project)}` : '/api/hooks',
+    ),
   searchFiles: (project: string, q: string, limit = 50) =>
     getJSON<FileSearchResponse>(
       `/api/workspaces/${encodeURIComponent(project)}/files?q=${encodeURIComponent(q)}&limit=${limit}`,

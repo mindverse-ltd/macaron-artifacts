@@ -70,6 +70,20 @@ export type UsageSnapshot = {
   model?: string;
 };
 
+// Estimated split of the used context window by source. macaron only sees
+// the aggregate `usage` number from the jsonl (not Anthropic's SDK-internal
+// per-category counts), so we measure the visible transcript and treat the
+// fixed prompt overhead as the residual: system = total − everything measured.
+// `total` stays the exact usage sum, so only the internal split is an estimate.
+export type ContextBreakdown = {
+  system: number; // system prompt + tool defs + MCP + CLAUDE.md (residual, not itemizable)
+  messages: number; // user + assistant text
+  toolCalls: number; // tool_use inputs
+  toolResults: number; // tool_result content (file reads, command output)
+  thinking: number; // extended-thinking blocks
+  total: number; // matches the Context bar's usage sum
+};
+
 export type SessionDetail = {
   kind: SessionKind;
   sessionId: string;
@@ -80,10 +94,24 @@ export type SessionDetail = {
   truncated?: boolean;
   totalBytes?: number;
   latestUsage?: UsageSnapshot;
+  contextBreakdown?: ContextBreakdown;
   // Environment counters for the status bar. Both are best-effort: MCPs
   // read from ~/.claude/settings.json; CLAUDE.md walks known locations.
   claudeMdCount?: number;
   mcpCount?: number;
+};
+
+// A saved prompt / custom slash command — one `.md` file under
+// ~/.claude/commands/. `name` is the filename stem (invoked as `/name`);
+// `description` and `argumentHint` come from the YAML frontmatter; `body` is
+// the prompt template (may reference $ARGUMENTS / $1 / $2 …). Project-scoped
+// commands (.claude/commands/) are deferred to a follow-up.
+export type SavedCommand = {
+  name: string;
+  description: string;
+  argumentHint: string;
+  body: string;
+  mtime: number;
 };
 
 // A transcript-search match — one message whose text contains the query.
@@ -98,7 +126,8 @@ export type MessageSearchHit = {
   preview: string;
   mtime: number;
 };
-
+export type DirEntry = { name: string; path: string };
+export type DirListing = { path: string; parent: string | null; home: string; entries: DirEntry[] };
 // Web Push. `subscription` is the browser PushSubscription.toJSON() shape sent
 // to /api/push/subscribe and stored server-side; `notify` is the JSON payload
 // the server ships to the SW's `push` handler (see web/public/sw.js).
@@ -147,6 +176,39 @@ export type UsageResponse = {
   sevenDay: RateLimitWindow | null;
 };
 
+// A saved cron/one-time prompt. The scheduler fires it by spawning a fresh
+// session (runClaude/runCodex, no resume) at `nextRunAt`, exactly as the
+// "+ New Session" POST does — just with no client attached.
+export type Schedule = {
+  id: string;
+  name: string;
+  prompt: string;
+  engine: SessionKind;
+  cwd: string;
+  // 5-field cron string (recurring) OR an ISO-8601 local datetime (one-time).
+  // croner parses both; `oneShot` only records which input mode the user chose
+  // (for the UI badge + create-time validation) — after a one-shot fires,
+  // its nextRun() is naturally null, so the same fire path ends it.
+  pattern: string;
+  oneShot: boolean;
+  status: 'active' | 'paused' | 'done';
+  nextRunAt: number | null; // unix ms; null when paused/done or unschedulable
+  lastRunAt: number | null;
+  lastStatus: 'ok' | 'error' | null;
+  lastSessionId: string | null; // sid of the most recent fired session
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ScheduleInput = {
+  name: string;
+  prompt: string;
+  engine: SessionKind;
+  cwd: string;
+  pattern: string;
+  oneShot: boolean;
+};
+
 // A slash command surfaced in the composer palette. `name` is the bare
 // command (no leading slash). `builtin` = a CLI command worth listing;
 // `project`/`user` come from `.claude/commands/**/*.md` (cwd / $HOME). A
@@ -159,6 +221,34 @@ export type SlashCommand = {
   source: 'builtin' | 'project' | 'user';
   namespace?: string;
 };
+
+// ---- Git panel ------------------------------------------------------------
+// Per-file entry from `git status --porcelain=v1`. `x`/`y` are the raw
+// index/worktree status codes (M, A, D, R, ?, …). A file can be both staged
+// and unstaged at once (edited after `git add`), so the two flags are
+// independent, not mutually exclusive.
+export type GitFileStatus = {
+  path: string;
+  x: string;
+  y: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  renamedFrom?: string;
+};
+
+export type GitStatus = {
+  isRepo: boolean;
+  branch: string;
+  detached: boolean;
+  hasCommits: boolean;
+  ahead: number;
+  behind: number;
+  upstream?: string;
+  files: GitFileStatus[];
+};
+
+export type GitBranches = { current: string; branches: string[] };
 
 // ---- File explorer -------------------------------------------------------
 // A single entry in a directory listing. `path` is relative to the project
@@ -176,8 +266,10 @@ export type FileListResponse = { root: string; path: string; entries: FileEntry[
 export type FileReadResponse = { path: string; content: string; size: number };
 
 export type WorkspacesResponse = { workspaces: Workspace[] };
+export type SavedCommandsResponse = { commands: SavedCommand[] };
 export type MessageSearchResponse = { hits: MessageSearchHit[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
+export type SchedulesResponse = { schedules: Schedule[] };
 export type HealthResponse = { ok: boolean; model: string };
 export type AuthStatusResponse = { required: boolean };
 

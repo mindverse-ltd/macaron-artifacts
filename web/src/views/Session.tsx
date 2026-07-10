@@ -13,6 +13,7 @@ import {
 } from '../lib/api';
 import { streamSession } from '../lib/sse';
 import { getLive, subscribeLive, clearLive, subscribeFollowup, startNewSession } from '../lib/liveStore';
+import { peekPendingCwd, takePendingCwd } from '../lib/newSession';
 import { hasActiveModal } from '../lib/modal';
 import { extractPartialCode, parseFollowups } from '../lib/partialJson';
 import { SlashPalette } from '../components/SlashPalette';
@@ -26,7 +27,6 @@ import {
 } from '../lib/thinkingVerbs';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
-import { ActivityTimeline, toolIcon, toolLabel, type TimelineEntry } from '../components/ActivityTimeline';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
 import { loadHistory, pushHistory } from '../lib/history';
@@ -983,6 +983,10 @@ export function Session(props: SessionProps = {}) {
   // Marked true once a stream has started so the done-notification only
   // fires for turns the user actually initiated (not initial jsonl load).
   const streamedRef = useRef(false);
+  // Latest user prompt for the in-flight turn. Captured at send() so the
+  // completion notification can display "what was this turn about" instead
+  // of a bare session hash.
+  const lastPromptRef = useRef<string>('');
   // Set when the current turn hit onError, so the completion effect below can
   // skip the 'complete' cue — onDone still runs after a stream error, and a
   // failed turn shouldn't sound like a success.
@@ -1018,9 +1022,14 @@ export function Session(props: SessionProps = {}) {
     const errored = turnErroredRef.current;
     turnErroredRef.current = false;
     if (!errored) playSound('complete');
+    const prompt = lastPromptRef.current.trim();
+    // Truncate to a card-friendly length. Newlines collapse to spaces so a
+    // multi-line prompt still reads as one glance-able summary.
+    const oneline = prompt.replace(/\s+/g, ' ');
+    const preview = oneline.length > 140 ? oneline.slice(0, 140) + '…' : oneline;
     notify({
-      title: 'Macaron · session ready',
-      body: `${sid.slice(0, 8)} finished a turn`,
+      title: preview || 'Macaron · session ready',
+      body: preview ? '✓ turn finished' : `${sid.slice(0, 8)} finished a turn`,
       tag: `macaron-done-${sid}`,
       project,
       sid,
@@ -1504,66 +1513,6 @@ export function Session(props: SessionProps = {}) {
   // automatically — new content pushes existing content up without us
   // touching scrollTop. The user can freely scroll up to read history.
 
-  // ---- Activity timeline: one rail node per tool call in the session -----
-  // Built from the persisted `items`, so live-turn tools join once the jsonl
-  // reloads. Todo / genui calls are surfaced too (they're tool calls the CLI
-  // renders specially). `id` matches each row's `data-item-id` for click-jump.
-  const timelineEntries = useMemo<TimelineEntry[]>(() => {
-    const out: TimelineEntry[] = [];
-    for (const it of items) {
-      if (it.kind === 'tool') {
-        out.push({
-          id: it.id,
-          icon: toolIcon(it.name),
-          label: toolLabel(it.name),
-          summary: toolHeader(it.name, it.input),
-          durationMs: it.durationMs,
-          status: it.isError ? 'error' : it.result !== undefined ? 'ok' : 'pending',
-        });
-      } else if (it.kind === 'todo') {
-        const done = it.todos.filter((t) => t.status === 'completed').length;
-        out.push({ id: it.id, icon: toolIcon('TodoWrite'), label: 'Todo', summary: `${done}/${it.todos.length} done`, status: 'ok' });
-      } else if (it.kind === 'genui') {
-        out.push({ id: it.id, icon: '🎨', label: 'render_ui', summary: it.prompt, status: it.status === 'error' ? 'error' : it.status === 'ready' ? 'ok' : 'pending' });
-      }
-    }
-    return out;
-  }, [items]);
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  const [pendingJumpId, setPendingJumpId] = useState<string | null>(null);
-
-  // Request a jump to a rail node's target row. If the row is older than the
-  // paginated window, widen `shown` first. The scroll runs in the effect below,
-  // once React has committed the wider window — doing it inline (even in a rAF)
-  // races the commit and silently misses rows that aren't mounted yet.
-  const jumpToItem = useCallback(
-    (id: string) => {
-      const idx = items.findIndex((it) => it.id === id);
-      if (idx >= 0) {
-        const fromTail = items.length - idx;
-        if (fromTail > shown) setShown((s) => Math.max(s, fromTail));
-      }
-      setActiveItemId(id);
-      setPendingJumpId(id);
-    },
-    [items, shown],
-  );
-
-  // Resolve a pending jump after the target row is committed. Re-runs when
-  // `shown` widens (which mounts older rows), so jumps into hidden history land
-  // reliably instead of no-oping when the row wasn't mounted in time.
-  useEffect(() => {
-    if (!pendingJumpId) return;
-    const el = threadRef.current?.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(pendingJumpId)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.classList.remove('ti-jump-flash');
-    // Force reflow so re-adding the class restarts the flash animation.
-    void el.offsetWidth;
-    el.classList.add('ti-jump-flash');
-    setPendingJumpId(null);
-  }, [pendingJumpId, shown]);
-
   const cwd = data?.cwd || '';
   const name = cwd ? basename(cwd) : 'Session';
   // Session start time from the earliest message timestamp — mirrors the CLI's
@@ -1630,6 +1579,7 @@ export function Session(props: SessionProps = {}) {
       // Persist to prompt history (manual and queued sends alike).
       const nextHistory = pushHistory(project, text);
       setHistory(nextHistory);
+      lastPromptRef.current = text;
       // Roll the *previous* turn's live buffers into history before we
       // clobber them with this turn's user text — otherwise typing a second
       // message erases the first reply until the next page refresh.
@@ -1652,13 +1602,20 @@ export function Session(props: SessionProps = {}) {
       if (isNew) {
         // First message of a brand-new session. liveStore opens the SSE,
         // buffers deltas, and resolves with the real sid as soon as meta lands.
+        // Peek the directory-picker cwd without consuming it so a failed first
+        // send can be retried against the same chosen folder.
+        const pendingCwd = peekPendingCwd(project);
         try {
           const newSid = await startNewSession(project, {
             text,
             permissionMode,
             images: sentImages.map((i) => ({ mimeType: i.mimeType, dataUrl: i.dataUrl })),
             isolate,
+            // Directory-picker path: start this brand-new session in the chosen
+            // folder. Undefined for sessions opened inside an existing workspace.
+            cwd: pendingCwd,
           });
+          takePendingCwd(project);
           if (onCreated) {
             // Canvas draft-tile path: hand the real sid to the parent so it
             // can swap the draft sentinel in place. Session then remounts
@@ -1838,6 +1795,77 @@ export function Session(props: SessionProps = {}) {
     [project, sid, input, sending, load, images, permissionMode, isolate, isNew, navigate, toast, onCreated, rollLiveIntoHistory, history],
   );
 
+  // Enqueue a message typed while a turn is running. macaron's runner is
+  // single-shot (no stdin into the live turn), so we hold it client-side and
+  // auto-send it once the turn finishes.
+  const enqueue = useCallback((text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    setQueue((q) => [...q, { id: queueId(), text: t }]);
+  }, []);
+
+  // The composer's submit path: while a turn runs, Enter/Send queues the text
+  // instead of being blocked; when idle it sends immediately. Images ride the
+  // immediate path only (first increment), so they stay attached while busy.
+  const submitComposer = useCallback(() => {
+    const text = input.trim();
+    if (!text && images.length === 0) return;
+    if (sending) {
+      if (!text) return; // nothing queueable (images can't be queued yet)
+      enqueue(text);
+      setInput('');
+      setHistoryIdx(null);
+      draftInputRef.current = '';
+      return;
+    }
+    void send();
+  }, [input, images, sending, enqueue, send]);
+
+  // Send now: interrupt the running turn and send this message next. macaron's
+  // only interrupt primitive is /stop (abort the subprocess), so we push the
+  // text to the FRONT of the queue and stop — the idle-edge dequeue effect
+  // below then sends it first. Graceful mid-tool steer would need the SDK's
+  // streaming-input mode, which the single-shot runner doesn't use (follow-up).
+  const handleSendNow = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    setQueue((q) => [{ id: queueId('q-now'), text }, ...q]);
+    setInput('');
+    setHistoryIdx(null);
+    draftInputRef.current = '';
+    void handleStop();
+  }, [input, handleStop]);
+
+  const removeQueued = useCallback((id: string) => {
+    setQueue((q) => q.filter((m) => m.id !== id));
+  }, []);
+
+  const moveQueued = useCallback((id: string, dir: -1 | 1) => {
+    setQueue((q) => {
+      const i = q.findIndex((m) => m.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= q.length) return q;
+      const next = [...q];
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+  }, []);
+
+  // Edit a queued message: pull it back into the composer (removing it from
+  // the queue). If the composer already holds a draft, keep that safe by
+  // prepending it back onto the queue front.
+  const editQueued = useCallback((id: string) => {
+    setQueue((q) => {
+      const target = q.find((m) => m.id === id);
+      if (!target) return q;
+      const rest = q.filter((m) => m.id !== id);
+      const draft = input.trim();
+      setInput(target.text);
+      if (draft) return [{ id: queueId('q-draft'), text: draft }, ...rest];
+      return rest;
+    });
+  }, [input]);
+
   // Idle-edge dequeue: when a turn finishes (running true→false), auto-send the
   // next queued message. Edge-guarded so exactly one message goes per turn —
   // send() flips `sending` back to true synchronously, re-arming the guard.
@@ -1861,10 +1889,21 @@ export function Session(props: SessionProps = {}) {
   // looking at owns the bridge.
   useEffect(() => {
     if (!focused) return;
-    const g = globalThis as unknown as { '$app/chat'?: (prompt: string) => void };
+    const g = globalThis as unknown as {
+      '$app/chat'?: (prompt: string) => void;
+      sendUserMessage?: (prompt: string) => void;
+    };
     const bridge = (prompt: string) => { void send({ text: prompt }); };
     g['$app/chat'] = bridge;
-    return () => { if (g['$app/chat'] === bridge) delete g['$app/chat']; };
+    // Also expose sendUserMessage as a bare global for widgets that forget
+    // to `import { sendUserMessage } from '$macaron/chat'` — models drop the
+    // import surprisingly often, and the resulting ReferenceError is fatal
+    // to the whole onClick with no path to recover at runtime.
+    g.sendUserMessage = bridge;
+    return () => {
+      if (g['$app/chat'] === bridge) delete g['$app/chat'];
+      if (g.sendUserMessage === bridge) delete g.sendUserMessage;
+    };
   }, [focused, send]);
 
   // ---- Slash palette derivation + keyboard reconciliation ----------------
@@ -2012,8 +2051,6 @@ export function Session(props: SessionProps = {}) {
         </div>
       )}
 
-      <ActivityTimeline entries={timelineEntries} activeId={activeItemId} onJump={jumpToItem} />
-
       {/*
         flex-direction: column-reverse on .thread. DOM order must be newest →
         oldest. Everything that should appear at the visual TOP (load-earlier
@@ -2083,9 +2120,15 @@ export function Session(props: SessionProps = {}) {
           <div className="thread-banner">Showing tail only — full session is {(data.totalBytes! / 1024 / 1024).toFixed(1)} MB.</div>
         )}
         {data && total === 0 && !polling && !liveUser && <div className="placeholder">No messages yet.</div>}
-        {isNew && !liveUser && !sending && (
-          <div className="placeholder">Start a new session — set permissions below and send your first message.</div>
-        )}
+        {isNew && !liveUser && !sending && (() => {
+          const pendingCwd = peekPendingCwd(project);
+          return (
+            <div className="placeholder">
+              Start a new session — set permissions below and send your first message.
+              {pendingCwd && <div className="new-session-cwd">in <code>{pendingCwd}</code></div>}
+            </div>
+          );
+        })()}
         {/* Only show "Loading…" if we truly have nothing to render — hide it
             when live buffers or completed turns already show content, since
             the canonical jsonl may just be a beat behind the CLI. */}
@@ -2297,6 +2340,7 @@ export function Session(props: SessionProps = {}) {
         sending={sending}
         currentTodo={currentTodo}
         latestUsage={data?.latestUsage}
+        contextBreakdown={data?.contextBreakdown}
         claudeMdCount={data?.claudeMdCount}
         mcpCount={data?.mcpCount}
       />

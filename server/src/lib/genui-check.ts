@@ -69,8 +69,8 @@ export const checkGenUI = (code: string): GenUICheckResult => {
   if (serviceUnavailable) return { ok: true };
   try {
     if (!service) {
-      // Published `mcc` ships only web/dist (no web/src), so the facades can't resolve — bail to
-      // an ack. The dev/source checkout always has web/src/macaron-vendor.
+      // Installed plugin snapshots may have only web/dist (no web/src), so the facades can't
+      // resolve; bail to an ack. The dev/source checkout always has web/src/macaron-vendor.
       if (!existsSync(path.join(WEB_ROOT, "src", "macaron-vendor"))) { serviceUnavailable = true; return { ok: true }; }
       service = createTypeCheckService(ts, { root: WEB_ROOT, filename: DEFAULT_APP_FILENAME, compilerOptions, ambient: AMBIENT_DECLARATIONS });
     }

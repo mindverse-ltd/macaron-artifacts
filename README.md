@@ -10,48 +10,63 @@ The plugin bundles the official **`genui-builder` skill** so any Claude Code ins
 
 ---
 
-## Run via npx
-
-No clone, no build — just Node 22+. Pre-release builds publish to [pkg.pr.new](https://pkg.pr.new) on every push to `main`, so `@main` always points at the latest build (a PR number or commit sha works too, e.g. `mcc@8`):
-
-```bash
-npx https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main            # → http://localhost:7878
-npx https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main --port 8080
-MACARON_API_KEY=sk-… npx https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main
-```
-
-The tarball ships the prebuilt web UI + a bundled server; only the npm-installable runtime deps (`fastify`, `@fastify/static`, `zod`, `typescript`, `@anthropic-ai/claude-agent-sdk`) are fetched on first run.
-
-`bunx` can't run a bare tarball URL, but the `name@url` form works: `bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main`.
-
----
-
 ## Install
 
-The repo doubles as its own plugin marketplace (`.claude-plugin/marketplace.json`). Use the full https URL — the `owner/repo` shorthand clones over SSH, which fails without a GitHub SSH key. In a Claude Code session, run each command separately (pasting both lines at once merges them into one command):
+The public repository doubles as a plugin marketplace for both Claude Code and Codex.
+
+### Claude Code
+
+In a Claude Code session, run each command separately:
 
 ```
-/plugin marketplace add https://github.com/mindverse-ltd/macaron-claude-code
+/plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
 ```
 
 ```
 /plugin install macaron@macaron
 ```
 
-or from the shell:
+After installing, open it from any Claude Code session:
 
-```bash
-claude plugin marketplace add https://github.com/mindverse-ltd/macaron-claude-code
-claude plugin install macaron@macaron
+```
+/macaron
 ```
 
-For local development, install your checkout directly: `claude plugin install /path/to/macaron-claude-code`.
-
-Verify:
+### Codex
 
 ```bash
-claude plugin list
-# → macaron@macaron  (commands: /macaron, skills: genui-builder)
+codex plugin marketplace add MindLab-Research/macaron-artifacts
+codex plugin add macaron@macaron
+```
+
+After installing, start a new Codex session and say:
+
+```
+打开 macaron web ui
+```
+
+For local development, install your checkout directly:
+
+```bash
+claude plugin install /path/to/checkout
+```
+
+## Update
+
+### Claude Code
+
+```
+/plugin marketplace update macaron
+/reload-plugins
+/macaron:macaron
+```
+
+### Codex
+
+```bash
+codex plugin marketplace upgrade macaron   # pull the latest marketplace snapshot
+codex plugin remove macaron@macaron
+codex plugin add macaron@macaron           # reinstall the plugin
 ```
 
 ## Use
@@ -75,13 +90,11 @@ The slash command starts the local server (`node server/dist/index.js`, port `78
 
 ## Configure
 
-Zero config by default — sessions run against your ambient Claude Code login. Add Macaron or any Anthropic-compatible provider from the **Settings** page (persisted to `~/.claude/macaron-config.json`), or override via env — copy `.env.example` to `.env` (git-ignored) before launching:
+Zero config by default — sessions run against your ambient Claude Code login. Add Macaron or any Anthropic-compatible provider from the **Settings** page (persisted to `~/.claude/macaron-config.json`). You can still copy `.env.example` to `.env` (git-ignored) for server-only options such as port or log level:
 
 ```bash
-MACARON_API_BASE=https://your-endpoint/v1
-MACARON_API_KEY=sk-…
-MACARON_MODEL=macaron-0.6     # optional
 MACARON_PORT=7878             # optional
+MACARON_LOG_LEVEL=debug       # optional
 ```
 
 ## Layout
@@ -90,12 +103,10 @@ MACARON_PORT=7878             # optional
 .claude-plugin/                   plugin manifest + marketplace (install from GitHub)
 commands/macaron.md               /macaron slash command
 skills/genui-builder/             bundled skill (used by Claude Code directly)
-bin/mcc.mjs                       `mcc` npx entry — boots the prebuilt server
 start.sh                          one-time npm install + build, boots server in background
 shared/                           domain types + SSE protocol (server ↔ web)
 server/                           Fastify API, Claude Agent SDK runner, provider relay
 web/                              Vite + React UI
-.github/workflows/pkg-pr-new.yml  publishes the npx tarball to pkg.pr.new on every push
 ```
 
 ## Notes

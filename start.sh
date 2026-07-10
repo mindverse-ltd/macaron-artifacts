@@ -3,8 +3,8 @@ set -euo pipefail
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Load local .env if present (never committed — see .env.example for the
-# required MACARON_API_BASE / MACARON_API_KEY variables).
+# Load local .env if present (never committed — see .env.example for optional
+# server-only settings such as port/host/log level).
 if [ -f "$DIR/.env" ]; then
   set -a
   # shellcheck disable=SC1091

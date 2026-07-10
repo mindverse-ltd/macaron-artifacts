@@ -12,7 +12,7 @@ import { promises as fs, mkdirSync, existsSync, symlinkSync, lstatSync } from 'n
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { HOME, HOST, PORT, MACARON_API_BASE, MACARON_API_KEY } from '../config.js';
+import { HOME, HOST, PORT } from '../config.js';
 
 // The built-in pass-through provider. Never touches the SDK subprocess env —
 // it inherits process.env unchanged. Whatever ANTHROPIC_BASE_URL /
@@ -22,11 +22,6 @@ export const SYSTEM_PROVIDER_ID = 'system';
 // Legacy id kept for one-shot migration only.
 const LEGACY_ANTHROPIC_ID = 'anthropic';
 
-// b200 endpoint used to seed the built-in Macaron provider template on a
-// first-run install. Users can edit/delete it like any other custom entry.
-const DEFAULT_MACARON_BASE =
-  'https://b200-glm51-global-0615-exhrgwayh0b2hkac.z03.azurefd.net/v1';
-const DEFAULT_MACARON_MODEL = 'macaron-0.6';
 const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-4-7';
 
 export type CustomProvider = {
@@ -79,24 +74,10 @@ const CONFIG_PATH = path.join(HOME, '.claude', 'macaron-config.json');
 
 let cache: Settings | null = null;
 
-function seedMacaronProvider(): CustomProvider {
-  return {
-    id: randomUUID(),
-    name: 'Macaron',
-    endpoint: MACARON_API_BASE || DEFAULT_MACARON_BASE,
-    model: DEFAULT_MACARON_MODEL,
-    // Seed from env var so old .env-based setups keep working without a
-    // WebUI save. Blank if no env var.
-    apiKey: MACARON_API_KEY || '',
-  };
-}
-
 function makeDefaults(): Settings {
   return {
     activeProviderId: SYSTEM_PROVIDER_ID,
-    // Ship one seeded Macaron entry — users see it in the list, can add key,
-    // switch to it, or delete it. Same UX as any other custom provider.
-    customProviders: [seedMacaronProvider()],
+    customProviders: [],
     yoloMode: false,
   };
 }
@@ -119,24 +100,25 @@ function migrateIfLegacy(raw: unknown): Settings {
   };
   if (legacy && Array.isArray(legacy.customProviders)) {
     // Already current shape — just normalize the legacy 'anthropic' id.
+    const customProviders = legacy.customProviders
+      .map(sanitizeProvider)
+      .filter((p) => p.endpoint && p.model && p.apiKey);
+    const activeProviderId = normalizeActiveId(legacy.activeProviderId || SYSTEM_PROVIDER_ID);
     return {
-      activeProviderId: normalizeActiveId(legacy.activeProviderId || SYSTEM_PROVIDER_ID),
-      customProviders: legacy.customProviders.map(sanitizeProvider),
+      activeProviderId:
+        activeProviderId !== SYSTEM_PROVIDER_ID &&
+        customProviders.some((p) => p.id === activeProviderId)
+          ? activeProviderId
+          : SYSTEM_PROVIDER_ID,
+      customProviders,
       yoloMode: Boolean(legacy.yoloMode),
     };
   }
-  // Legacy: rebuild
-  const macaron: CustomProvider = {
-    id: randomUUID(),
-    name: 'Macaron',
-    endpoint: MACARON_API_BASE || DEFAULT_MACARON_BASE,
-    model: DEFAULT_MACARON_MODEL,
-    apiKey: legacy?.providers?.macaron?.apiKey || MACARON_API_KEY || '',
-  };
-  const wasMacaronActive = legacy?.provider === 'macaron';
+  // Legacy provider configs used to seed a Macaron entry implicitly. Do not
+  // recreate that provider; users should add custom providers explicitly.
   return {
-    activeProviderId: wasMacaronActive ? macaron.id : SYSTEM_PROVIDER_ID,
-    customProviders: [macaron],
+    activeProviderId: SYSTEM_PROVIDER_ID,
+    customProviders: [],
     yoloMode: Boolean(legacy?.yoloMode),
   };
 }

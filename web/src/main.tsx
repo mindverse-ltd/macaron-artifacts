@@ -35,8 +35,10 @@ import { Dashboard } from './views/Dashboard';
 import { Workspace } from './views/Workspace';
 import { FileExplorer } from './views/FileExplorer';
 import { Settings } from './views/Settings';
+import { Analytics } from './views/Analytics';
 import { Prompts } from './views/Prompts';
 import { ShareView } from './views/ShareView';
+import { Skills } from './views/Skills';
 import { Schedules } from './views/Schedules';
 import { Mcp } from './views/Mcp';
 import { ToastProvider } from './components/Toast';
@@ -87,8 +89,10 @@ const router = createHashRouter([
     element: <App />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: 'usage', element: <Analytics /> },
       { path: 'prompts', element: <Prompts /> },
       { path: 'settings', element: <Settings /> },
+      { path: 'skills', element: <Skills /> },
       { path: 'schedules', element: <Schedules /> },
       { path: 'mcp', element: <Mcp /> },
       { path: 'w/:project', element: <Workspace /> },

@@ -101,6 +101,46 @@ export type SessionDetail = {
   mcpCount?: number;
 };
 
+// Cost & usage analytics. Rolled up from the same `message.usage` fields
+// session-store already reads, priced by the server's model rate table.
+// Token counts are summed across every assistant message in the window;
+// costUsd is the sum of per-message cost (input/output/cache-write/cache-read
+// each at their own rate). `known` on a per-model row is false when the model
+// string didn't match the rate table and a default estimate was used.
+export type UsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  messageCount: number;
+  sessionCount: number;
+};
+export type UsageDaily = { date: string } & Omit<UsageTotals, 'sessionCount'>;
+export type UsageByModel = { model: string; known: boolean } & Omit<UsageTotals, 'sessionCount'>;
+export type UsageBySession = {
+  project: string;
+  sessionId: string;
+  preview: string;
+  model: string;
+  lastActivity: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  messageCount: number;
+};
+export type AnalyticsResponse = {
+  window: string;
+  since: number;
+  until: number;
+  totals: UsageTotals;
+  daily: UsageDaily[];
+  byModel: UsageByModel[];
+  bySession: UsageBySession[];
+};
+
 // A saved prompt / custom slash command — one `.md` file under
 // ~/.claude/commands/. `name` is the filename stem (invoked as `/name`);
 // `description` and `argumentHint` come from the YAML frontmatter; `body` is
@@ -126,6 +166,23 @@ export type MessageSearchHit = {
   preview: string;
   mtime: number;
 };
+// Git/PR state for the current session's cwd, used to prefill and gate the
+// "Create PR" action. `ahead` = commits on `branch` not on `defaultBranch`;
+// `null` means the base ref couldn't be resolved (e.g. a single-branch or
+// shallow clone where neither `origin/<default>` nor local `<default>` is
+// present) - distinct from a genuine `0`. `existingPrUrl` is set when a PR
+// already exists for this branch.
+export type PrContext = {
+  branch: string;
+  defaultBranch: string;
+  ahead: number | null;
+  dirty: boolean;
+  hasRemote: boolean;
+  existingPrUrl?: string;
+};
+export type CreatePrRequest = { title: string; body: string; draft: boolean };
+// `created` is false when we short-circuited to an already-open PR.
+export type CreatePrResult = { url: string; created: boolean };
 export type DirEntry = { name: string; path: string };
 export type DirListing = { path: string; parent: string | null; home: string; entries: DirEntry[] };
 // Web Push. `subscription` is the browser PushSubscription.toJSON() shape sent
@@ -175,6 +232,25 @@ export type UsageResponse = {
   fiveHour: RateLimitWindow | null;
   sevenDay: RateLimitWindow | null;
 };
+
+// A Claude Code skill discovered under ~/.claude/skills/<name>/SKILL.md.
+// `name`/`description` come from the SKILL.md YAML frontmatter; `enabled`
+// reflects the skillOverrides entry in ~/.claude/settings.json (a skill with
+// no override is enabled by default). `source` marks whether the dir is a
+// symlink (managed elsewhere) so the UI can warn before editing/deleting.
+export type SkillInfo = {
+  // Directory name — the identifier used for skillOverrides + the /skill-name command.
+  dir: string;
+  name: string;
+  description: string;
+  allowedTools?: string;
+  enabled: boolean;
+  source: 'dir' | 'symlink';
+};
+
+export type SkillsResponse = { skills: SkillInfo[] };
+// Full SKILL.md body for the detail/editor pane.
+export type SkillDetail = SkillInfo & { body: string; path: string };
 
 // A saved cron/one-time prompt. The scheduler fires it by spawning a fresh
 // session (runClaude/runCodex, no resume) at `nextRunAt`, exactly as the
@@ -269,6 +345,9 @@ export type WorkspacesResponse = { workspaces: Workspace[] };
 export type SavedCommandsResponse = { commands: SavedCommand[] };
 export type MessageSearchResponse = { hits: MessageSearchHit[] };
 export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionListItem[] };
+// Result of the composer's @-mention file search: repo-relative POSIX paths
+// under the workspace cwd, matched by substring on the needle.
+export type FileSearchResponse = { cwd: string; results: string[] };
 export type SchedulesResponse = { schedules: Schedule[] };
 export type HealthResponse = { ok: boolean; model: string };
 export type AuthStatusResponse = { required: boolean };

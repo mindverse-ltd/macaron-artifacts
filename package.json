@@ -1,7 +1,7 @@
 {
   "name": "mcc",
   "version": "0.1.0",
-  "description": "Claude Code plugin for the Macaron model — WebUI for GenUI builder, workspace + session management.",
+  "description": "Macaron artifacts for Claude Code and Codex — WebUI runtime, GenUI tooling, and plugin manifests.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,magenta \"pnpm --filter @macaron/server dev\" \"pnpm --filter @macaron/web dev\"",

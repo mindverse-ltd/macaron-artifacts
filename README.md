@@ -1,18 +1,22 @@
-# Macaron · Claude Code plugin
+# Macaron artifacts
 
-A Claude Code plugin that opens a local **WebUI** giving you three things you can't get from the CLI alone:
+Macaron artifacts publishes the plugin manifests, local WebUI runtime, GenUI tooling, and docs for running Macaron with Claude Code and Codex.
 
-1. **Visual `/resume`** — browse Claude Code workspaces & sessions with previews; one click copies the `--resume` command.
-2. **Live chat** — continue any session (or start a new one) in the browser; streams thinking, tool calls and GenUI previews via the Claude Agent SDK.
-3. **Provider switcher** — run sessions against your ambient Claude Code login or any Anthropic-compatible endpoint (Macaron, OpenRouter, LiteLLM, …).
+1. **Visual sessions** — browse workspaces and sessions with previews, then continue a turn from the browser.
+2. **Live chat** — stream thinking, tool calls, and GenUI previews from supported agent runtimes.
+3. **Provider controls** — run against an ambient login or a compatible endpoint such as Macaron, OpenRouter, or LiteLLM.
 
-The plugin bundles the official **`genui-builder` skill** so any Claude Code instance that has it loaded can also produce GenUI TSX from the command line.
+The plugin bundle includes the official **`genui-builder` skill** so supported agents can produce GenUI TSX from the command line.
 
 ---
 
 ## Install
 
-The repo doubles as its own plugin marketplace (`.claude-plugin/marketplace.json`). Use the full https URL — the `owner/repo` shorthand may clone over SSH, which fails without a GitHub SSH key. In a Claude Code session, run each command separately (pasting both lines at once merges them into one command):
+The repo doubles as its own plugin marketplace. Use the full https URL — the `owner/repo` shorthand may clone over SSH, which fails without a GitHub SSH key.
+
+### Claude Code
+
+In a Claude Code session, run each command separately (pasting both lines at once merges them into one command):
 
 ```
 /plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
@@ -31,6 +35,13 @@ claude plugin install macaron@macaron
 
 For local development, install your checkout directly: `claude plugin install /path/to/macaron`.
 
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
+codex plugin add macaron@macaron
+```
+
 Verify:
 
 ```bash
@@ -40,13 +51,15 @@ claude plugin list
 
 ## Use
 
-Inside any Claude Code session:
+Inside Claude Code:
 
 ```
 /macaron
 ```
 
 The slash command starts the local server (`node server/dist/index.js`, port `7878` by default) and opens `http://localhost:7878` in your browser. Pass a custom port with `/macaron 8080`.
+
+Inside Codex, ask it to open the Macaron WebUI. The Codex-side default port is `7979`.
 
 ### Views
 
@@ -83,7 +96,7 @@ Remote requests must then present the token; localhost stays frictionless (loopb
 ```
 .claude-plugin/                   plugin manifest + marketplace (install from GitHub)
 commands/macaron.md               /macaron slash command
-skills/genui-builder/             bundled skill (used by Claude Code directly)
+skills/genui-builder/             bundled GenUI authoring skill
 start.sh                          one-time npm install + build, boots server in background
 shared/                           domain types + SSE protocol (server ↔ web)
 server/                           Fastify API, Claude Agent SDK runner, provider relay

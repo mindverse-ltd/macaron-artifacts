@@ -8,6 +8,43 @@
    respond to any pointer and stay verifiable in automated checks. */
 @custom-variant hovered (&:hover);
 
+/* Fumadocs Steps normally inherit prose margins. The landing page is not a
+   prose container, so restore deliberate rhythm around its install content. */
+#nd-home-layout .fd-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+#nd-home-layout .fd-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#nd-home-layout section.max-w-3xl > .mt-8 {
+  margin-top: 2.5rem;
+}
+
+#nd-home-layout section.max-w-3xl > .mt-8 + p {
+  margin-bottom: 1.25rem;
+  line-height: 1.6;
+}
+
+#nd-home-layout [role='tabpanel'] > .flex.flex-col {
+  gap: 1.25rem;
+}
+
+#nd-home-layout [role='tabpanel'] > .flex.flex-col > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#nd-home-layout [role='tabpanel'] > .flex.flex-col > div > .flex {
+  margin-bottom: 0;
+}
+
 html {
   scrollbar-gutter: stable;
 }

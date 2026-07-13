@@ -48,7 +48,7 @@ The published tarball ships the prebuilt server + web bundles and exposes two bi
 
 ```bash
 bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@<sha>   # Claude → http://localhost:7878
-bunx mcx@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcx@<sha>   # Codex  → http://localhost:7979
+bunx mcx@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@<sha>   # Codex  → http://localhost:7979
 ```
 
 `bunx` resolves by bin name, so `mcx@…` runs the Codex launcher from the same `mcc` package. Replace `<sha>` with a commit on `main` (see the [pkg.pr.new builds](https://github.com/mindverse-ltd/macaron-claude-code/commits/main)). Both accept `--host` / `--port`; run with `--help` for the full list.

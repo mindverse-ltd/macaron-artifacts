@@ -62,7 +62,7 @@ export const RENDER_UI_TOOL_DESCRIPTION = `Render an interactive TSX UI inline i
 - login / signup / settings / profile / pricing / checkout / onboarding page or form
 - comparison, leaderboard, roadmap, status report, changelog, KPIs, metrics
 - interactive demo, mini editor, playground, animation, toy component
-- "draw a X", "show me X", "make X", "draw X", "design X", "prototype X", "generate a X", "build a X"
+- "draw X", "show me X", "make X", "design X", "prototype X", "generate a X"
 
 **Structural fit** — call render_ui even when the user did NOT ask visually, if your answer would contain any of:
 - **Choice**: 2+ options the user needs to pick from → render clickable buttons that call \`sendUserMessage\` with the chosen option. (You would otherwise write "Options: 1. A  2. B  3. C, which do you want?" — that's a bad answer; render buttons instead.)

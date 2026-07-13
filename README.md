@@ -119,6 +119,7 @@ start.sh                          one-time npm install + build, boots server in 
 shared/                           domain types + SSE protocol (server ↔ web)
 server/                           Fastify API, Claude Agent SDK runner, provider relay
 web/                              Vite + React UI
+docs-site/                        Fumadocs documentation site (standalone, not in the workspace)
 ```
 
 ## Notes

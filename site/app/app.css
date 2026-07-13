@@ -9,17 +9,36 @@
 @custom-variant hovered (&:hover);
 
 /* Fumadocs Steps normally inherit prose margins. The landing page is not a
-   prose container, so restore deliberate rhythm around its install content. */
+   prose container, so give its install flow a deliberately spacious rhythm. */
 #nd-home-layout .fd-steps {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 2.5rem;
 }
 
 #nd-home-layout .fd-step {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 1rem;
+}
+
+/* The counter is 2rem square. Give the title the same alignment row so their
+   visual centers stay on one axis instead of relying on text baseline metrics. */
+#nd-home-layout .fd-step > :first-child {
+  display: flex;
+  min-height: 2rem;
+  align-items: center;
+  line-height: 1.5rem;
+}
+
+@media (min-width: 40rem) {
+  #nd-home-layout .fd-steps {
+    gap: 3rem;
+  }
+
+  #nd-home-layout .fd-step {
+    gap: 1.25rem;
+  }
 }
 
 #nd-home-layout section.max-w-3xl > .mt-8 {

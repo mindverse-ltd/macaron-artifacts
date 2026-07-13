@@ -1,82 +1,37 @@
 import { useEffect, useState } from 'react';
-import { Check, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
-type GenUI = 'form' | 'chart' | 'mixed';
-type Entry = { side: 'agent' | 'human'; lines: number[] } | { genui: GenUI };
+type GenUI = 'bar' | 'line' | 'scatter' | 'radar';
+type Entry = { side: 'agent' | 'human'; w: number; tall?: boolean } | { genui: GenUI };
 
-// One full loop of the placeholder conversation: alternating agent/human
-// bubbles with a highlighted GenUI block after every exchange. The feed cycles
-// through this script forever, so the loop is seamless by construction.
+// One full loop of the placeholder conversation: plain alternating bubbles
+// with an accent GenUI chart after every exchange. The feed cycles through
+// this script forever, so the loop is seamless by construction.
 const SCRIPT: Entry[] = [
-  { side: 'human', lines: [148] },
-  { side: 'agent', lines: [180, 116] },
-  { side: 'human', lines: [88] },
-  { genui: 'form' },
-  { side: 'human', lines: [132, 64] },
-  { side: 'agent', lines: [164] },
-  { side: 'human', lines: [104] },
-  { genui: 'chart' },
-  { side: 'human', lines: [156] },
-  { side: 'agent', lines: [120, 172] },
-  { side: 'human', lines: [92] },
-  { genui: 'mixed' },
+  { side: 'human', w: 150 },
+  { side: 'agent', w: 210, tall: true },
+  { side: 'human', w: 96 },
+  { genui: 'bar' },
+  { side: 'human', w: 170 },
+  { side: 'agent', w: 128 },
+  { side: 'human', w: 84 },
+  { genui: 'line' },
+  { side: 'human', w: 112, tall: true },
+  { side: 'agent', w: 190 },
+  { side: 'human', w: 76 },
+  { genui: 'scatter' },
+  { side: 'human', w: 160 },
+  { side: 'agent', w: 122, tall: true },
+  { side: 'human', w: 140 },
+  { genui: 'radar' },
 ];
 
 const KEEP = 10;
 const INITIAL = 4;
 
-function Lines({ widths, className }: { widths: number[]; className?: string }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {widths.map((w, i) => (
-        <div key={i} className={cn('h-2 max-w-full rounded-full', className ?? 'bg-fd-muted-foreground/35')} style={{ width: w }} />
-      ))}
-    </div>
-  );
-}
-
-function FormUI() {
-  const [choice, setChoice] = useState(1);
-  const [sent, setSent] = useState(false);
-  return (
-    <div className="flex flex-col gap-2.5">
-      <div className="h-2 w-14 rounded-full bg-fd-muted-foreground/35" />
-      <div className="flex h-8 items-center rounded-lg border bg-fd-background/60 px-2.5">
-        <div className="h-1.5 w-20 rounded-full bg-fd-muted-foreground/25" />
-      </div>
-      <div className="h-2 w-20 rounded-full bg-fd-muted-foreground/35" />
-      <div className="flex gap-1.5">
-        {[0, 1, 2].map((i) => (
-          <button
-            key={i}
-            type="button"
-            aria-label={`Option ${i + 1}`}
-            onClick={() => setChoice(i)}
-            className={cn(
-              'flex h-7 flex-1 items-center justify-center rounded-lg border transition-colors',
-              i === choice ? 'border-genui/60 bg-genui/15' : 'bg-fd-background/60 hovered:bg-fd-accent',
-            )}
-          >
-            <span className={cn('h-1.5 w-8 rounded-full', i === choice ? 'bg-genui/60' : 'bg-fd-muted-foreground/30')} />
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        aria-label="Submit"
-        onClick={() => setSent(true)}
-        className="mt-0.5 flex h-8 w-24 items-center justify-center rounded-lg bg-genui transition-transform active:scale-95"
-      >
-        {sent ? <Check className="size-4 text-white" /> : <span className="h-1.5 w-10 rounded-full bg-white/80" />}
-      </button>
-    </div>
-  );
-}
-
-// Bars rise from the baseline on mount; the springy overshoot lives in the
-// easing so height changes (mount and dataset switches) share one transition.
-const BAR_TRANSITION = 'height 0.6s cubic-bezier(0.34, 1.3, 0.64, 1)';
+// Bars and dots grow from the baseline on mount; the springy overshoot lives
+// in the easing so mount growth and later data changes share one transition.
+const SPRING = 'cubic-bezier(0.34, 1.4, 0.64, 1)';
 
 function useRaised() {
   const [raised, setRaised] = useState(false);
@@ -84,76 +39,156 @@ function useRaised() {
   return raised;
 }
 
-const CHART = [42, 68, 34, 88, 56, 74, 48, 62, 30, 80, 52, 66];
+const BARS = [42, 68, 34, 88, 56, 74, 48, 62, 30, 80];
 
-function ChartUI() {
+function BarChart() {
   const raised = useRaised();
   const [active, setActive] = useState(3);
   return (
-    <div className="flex h-24 items-end gap-1.5">
-      {CHART.map((h, i) => (
+    <div className="flex h-28 items-end gap-1.5">
+      {BARS.map((h, i) => (
         <button
           key={i}
           type="button"
           aria-label={`Bar ${i + 1}`}
           onClick={() => setActive(i)}
-          className={cn('flex-1 rounded-t-md transition-colors', i === active ? 'bg-genui' : 'bg-fd-muted-foreground/30 hovered:bg-fd-muted-foreground/50')}
-          style={{ height: raised ? `${h}%` : '6%', transition: `${BAR_TRANSITION}, background-color 0.2s`, transitionDelay: raised ? `${i * 45}ms` : '0ms' }}
+          className={cn('flex-1 cursor-pointer rounded-t-md', i === active ? 'bg-genui' : 'bg-genui/40 hovered:bg-genui/60')}
+          style={{ height: raised ? `${h}%` : '4%', transition: `height 0.6s ${SPRING}, background-color 0.2s`, transitionDelay: raised ? `${i * 40}ms` : '0ms' }}
         />
       ))}
     </div>
   );
 }
 
-const SETS = [
-  [64, 40, 82, 55, 70, 46, 62],
-  [38, 76, 48, 90, 30, 68, 54],
-  [85, 52, 66, 30, 58, 78, 44],
+const LINE = [22, 48, 38, 66, 55, 84, 68, 92];
+
+function LineChart() {
+  const raised = useRaised();
+  const [active, setActive] = useState(5);
+  const pts = LINE.map((v, i) => [(i / (LINE.length - 1)) * 100, 100 - v] as const);
+  const d = `M${pts.map((p) => p.join(' ')).join(' L')}`;
+  return (
+    <div className="relative mx-2 h-28">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full overflow-visible">
+        <path d={`${d} L100 100 L0 100 Z`} fill="var(--genui)" opacity={raised ? 0.12 : 0} style={{ transition: 'opacity 0.7s 0.5s' }} />
+        {/* pathLength=1 normalizes the dash so a single dashoffset sweep draws the line */}
+        <path
+          d={d}
+          fill="none"
+          stroke="var(--genui)"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          pathLength={1}
+          strokeDasharray="1"
+          strokeDashoffset={raised ? 0 : 1}
+          style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.5, 0, 0.3, 1)' }}
+        />
+      </svg>
+      {pts.map(([x, y], i) => (
+        <button
+          key={i}
+          type="button"
+          aria-label={`Point ${i + 1}`}
+          onClick={() => setActive(i)}
+          className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1.5"
+          style={{ left: `${x}%`, top: `${y}%` }}
+        >
+          {/* dot pop is timed to trail the ~1s line sweep across 8 points */}
+          <span
+            className={cn('chat-dot block size-2.5 rounded-full transition-all duration-200', i === active ? 'scale-125 bg-genui' : 'bg-genui/55 hovered:bg-genui/80')}
+            style={{ animationDelay: `${i * 120}ms` }}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// [x%, y%, size tier]
+const SCATTER: [number, number, number][] = [
+  [6, 62, 2], [13, 38, 3], [21, 55, 2], [28, 24, 2], [35, 48, 3], [42, 72, 2], [48, 16, 2],
+  [55, 42, 3], [62, 62, 2], [68, 30, 2], [75, 52, 3], [82, 20, 2], [89, 45, 2], [95, 68, 2],
 ];
 
-function MixedUI() {
+function ScatterChart() {
+  const [active, setActive] = useState(7);
+  return (
+    <div className="relative h-28">
+      {SCATTER.map(([x, y, s], i) => (
+        <button
+          key={i}
+          type="button"
+          aria-label={`Dot ${i + 1}`}
+          onClick={() => setActive(i)}
+          className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1.5"
+          style={{ left: `${x}%`, top: `${y}%` }}
+        >
+          <span
+            className={cn('chat-dot block rounded-full transition-all duration-200', s === 3 ? 'size-3' : 'size-2', i === active ? 'scale-150 bg-genui' : 'bg-genui/45 hovered:bg-genui/70')}
+            style={{ animationDelay: `${i * 55}ms` }}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const RADAR = [
+  [0.85, 0.6, 0.75, 0.5, 0.9],
+  [0.55, 0.85, 0.45, 0.8, 0.6],
+  [0.7, 0.5, 0.9, 0.65, 0.45],
+];
+
+function radarPath(values: number[]) {
+  const pts = values.map((v, i) => {
+    const a = (Math.PI * 2 * i) / values.length - Math.PI / 2;
+    return `${(50 + Math.cos(a) * 44 * v).toFixed(2)} ${(50 + Math.sin(a) * 44 * v).toFixed(2)}`;
+  });
+  return `M${pts.join(' L')} Z`;
+}
+
+function RadarChart() {
   const raised = useRaised();
   const [sel, setSel] = useState(0);
+  const axes = RADAR[0].length;
+  const d = radarPath(RADAR[sel]);
   return (
-    <div className="flex items-stretch gap-3">
-      <div className="flex w-24 shrink-0 flex-col justify-between gap-1.5">
-        {SETS.map((_, i) => (
-          <button
-            key={i}
-            type="button"
-            aria-label={`Series ${i + 1}`}
-            onClick={() => setSel(i)}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg border px-2 py-1.5 transition-colors',
-              i === sel ? 'border-genui/60 bg-genui/15' : 'bg-fd-background/60 hovered:bg-fd-accent',
-            )}
-          >
-            <span className={cn('size-2 rounded-full transition-colors', i === sel ? 'bg-genui' : 'bg-fd-muted-foreground/30')} />
-            <span className="h-1.5 w-10 rounded-full bg-fd-muted-foreground/35" />
-          </button>
+    <button type="button" aria-label="Radar dataset" onClick={() => setSel((s) => (s + 1) % RADAR.length)} className="mx-auto block h-28 cursor-pointer">
+      <svg viewBox="0 0 100 100" className="size-full overflow-visible">
+        {[1, 0.66, 0.33].map((r) => (
+          <path key={r} d={radarPath(Array(axes).fill(r))} fill="none" stroke="currentColor" strokeWidth={0.75} className="text-fd-muted-foreground/30" />
         ))}
-      </div>
-      <div className="flex h-24 flex-1 items-end gap-1.5">
-        {SETS[sel].map((h, i) => (
-          <div
-            key={i}
-            className="flex-1 rounded-t-md bg-genui/75"
-            style={{ height: raised ? `${h}%` : '6%', transition: BAR_TRANSITION, transitionDelay: raised ? `${i * 40}ms` : '0ms' }}
-          />
-        ))}
-      </div>
-    </div>
+        {Array.from({ length: axes }, (_, i) => {
+          const a = (Math.PI * 2 * i) / axes - Math.PI / 2;
+          return <line key={i} x1={50} y1={50} x2={50 + Math.cos(a) * 44} y2={50 + Math.sin(a) * 44} stroke="currentColor" strokeWidth={0.75} className="text-fd-muted-foreground/30" />;
+        })}
+        {/* CSS `d` interpolates in Chromium, so clicking morphs the polygon springily */}
+        <path
+          d={d}
+          fill="var(--genui)"
+          fillOpacity={0.35}
+          stroke="var(--genui)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          style={{
+            d: `path("${d}")`,
+            transform: raised ? 'scale(1)' : 'scale(0)',
+            transformOrigin: '50px 50px',
+            transition: `transform 0.7s ${SPRING}, d 0.5s ${SPRING}`,
+          }}
+        />
+      </svg>
+    </button>
   );
 }
 
 function GenUICard({ kind }: { kind: GenUI }) {
   return (
-    <div className="flex w-full flex-col gap-3 rounded-2xl rounded-bl-md border border-genui/30 bg-genui/8 p-3.5">
-      <div className="flex items-center gap-1.5 text-genui">
-        <Sparkles className="size-3.5" />
-        <div className="h-2 w-16 rounded-full bg-genui/40" />
-      </div>
-      {kind === 'form' ? <FormUI /> : kind === 'chart' ? <ChartUI /> : <MixedUI />}
+    <div className="w-full rounded-2xl rounded-bl-md bg-genui/10 p-4">
+      {kind === 'bar' ? <BarChart /> : kind === 'line' ? <LineChart /> : kind === 'scatter' ? <ScatterChart /> : <RadarChart />}
     </div>
   );
 }
@@ -168,9 +203,10 @@ function Row({ entry, animate }: { entry: Entry; animate: boolean }) {
             {'genui' in entry ? (
               <GenUICard kind={entry.genui} />
             ) : (
-              <div className={cn('rounded-2xl px-3.5 py-2.5', human ? 'rounded-br-md bg-fd-foreground/10' : 'rounded-bl-md bg-fd-secondary')}>
-                <Lines widths={entry.lines} />
-              </div>
+              <div
+                className={cn('max-w-full rounded-2xl', human ? 'rounded-br-md bg-fd-foreground/10' : 'rounded-bl-md bg-fd-secondary')}
+                style={{ width: entry.w, height: entry.tall ? 52 : 36 }}
+              />
             )}
           </div>
         </div>

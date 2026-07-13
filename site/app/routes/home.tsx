@@ -2,12 +2,18 @@ import type { Route } from './+types/home';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { Card, Cards } from 'fumadocs-ui/components/card';
 import { Tab, Tabs, TabsList, TabsTrigger } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { DynamicCodeBlock } from 'fumadocs-ui/components/dynamic-codeblock';
 import { Link } from 'react-router';
 import { MonitorPlay, MessagesSquare, SlidersHorizontal, Wand2, Puzzle, Terminal } from 'lucide-react';
 import ClaudeCode from '@lobehub/icons/es/ClaudeCode/components/Mono';
 import Codex from '@lobehub/icons/es/Codex/components/Mono';
-import { CopyCommand } from '@/components/copy-command';
 import { baseOptions } from '@/lib/layout.shared';
+
+// Fumadocs' code block ships shiki highlighting + a copy button; wrap it so the install steps stay terse.
+function Command({ code }: { code: string }) {
+  return <DynamicCodeBlock lang="bash" code={code} />;
+}
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -67,24 +73,42 @@ export default function Home() {
               </TabsTrigger>
             </TabsList>
             <Tab value="claude-code">
-              <div className="flex flex-col gap-2">
-                <CopyCommand command="claude plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
-                <CopyCommand command="claude plugin install macaron@macaron" />
-              </div>
-              <p className="mt-3 text-sm text-fd-muted-foreground">
-                Then run <code className="text-fd-foreground">/macaron</code> in a session — the WebUI opens on{' '}
-                <code className="text-fd-foreground">http://localhost:7878</code>.
-              </p>
+              <Steps>
+                <Step>
+                  <p className="font-medium">Add the marketplace source</p>
+                  <Command code="claude plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
+                </Step>
+                <Step>
+                  <p className="font-medium">Install the plugin</p>
+                  <Command code="claude plugin install macaron@macaron" />
+                </Step>
+                <Step>
+                  <p className="font-medium">Run it and open the WebUI</p>
+                  <p className="text-sm text-fd-muted-foreground">
+                    Run <code className="text-fd-foreground">/macaron</code> in a session — the WebUI opens on{' '}
+                    <code className="text-fd-foreground">http://localhost:7878</code>.
+                  </p>
+                </Step>
+              </Steps>
             </Tab>
             <Tab value="codex">
-              <div className="flex flex-col gap-2">
-                <CopyCommand command="codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
-                <CopyCommand command="codex plugin add macaron@macaron" />
-              </div>
-              <p className="mt-3 text-sm text-fd-muted-foreground">
-                Ask Codex to open the Macaron WebUI — it serves on{' '}
-                <code className="text-fd-foreground">http://localhost:7979</code>.
-              </p>
+              <Steps>
+                <Step>
+                  <p className="font-medium">Add the marketplace source</p>
+                  <Command code="codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
+                </Step>
+                <Step>
+                  <p className="font-medium">Add the plugin</p>
+                  <Command code="codex plugin add macaron@macaron" />
+                </Step>
+                <Step>
+                  <p className="font-medium">Run it and open the WebUI</p>
+                  <p className="text-sm text-fd-muted-foreground">
+                    Ask Codex to open the Macaron WebUI — it serves on{' '}
+                    <code className="text-fd-foreground">http://localhost:7979</code>.
+                  </p>
+                </Step>
+              </Steps>
             </Tab>
           </Tabs>
 
@@ -95,18 +119,12 @@ export default function Home() {
             <code className="text-fd-foreground">mcx</code> (Codex, port 7979). Replace{' '}
             <code className="text-fd-foreground">&lt;sha&gt;</code> with a commit on <code className="text-fd-foreground">main</code>.
           </p>
-          <Tabs items={['bunx', 'npx']}>
-            <Tab value="bunx">
-              <div className="flex flex-col gap-2">
-                <CopyCommand command={`bunx mcc@${PKG}`} />
-                <CopyCommand command={`bunx mcx@${PKG}`} />
-              </div>
+          <Tabs items={['bun', 'npm']}>
+            <Tab value="bun">
+              <Command code={`bunx mcc@${PKG}\nbunx mcx@${PKG}`} />
             </Tab>
-            <Tab value="npx">
-              <div className="flex flex-col gap-2">
-                <CopyCommand command={`npx mcc@${PKG}`} />
-                <CopyCommand command={`npx mcx@${PKG}`} />
-              </div>
+            <Tab value="npm">
+              <Command code={`npx mcc@${PKG}\nnpx mcx@${PKG}`} />
             </Tab>
           </Tabs>
         </section>

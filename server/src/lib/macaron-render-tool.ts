@@ -21,16 +21,26 @@ export type RenderUIResult = {
 export const RENDER_UI_INSTRUCTIONS =
   'Macaron GenUI bridge. `render_ui` is your PRIMARY answer format whenever the response ' +
   'has structure — call it, do not describe it. Structure means any of: (a) explicit visual ' +
-  'ask ("画一个 …", "show me …", "make …", dashboard/card/form/chart/table/widget/page); ' +
+  'ask ("draw a …", "show me …", "make …", dashboard/card/form/chart/table/widget/page); ' +
   '(b) the user needs to CHOOSE between 2+ options — render clickable buttons that call ' +
   'sendUserMessage; (c) COMPARING or SUMMARIZING 2+ items with attributes — render a Card / ' +
   'Table / StatGrid, not a Markdown table; (d) DATA the user shared (JSON, CSV, list of ' +
   'records) — visualize it; (e) a FORM / wizard / configurator — render inputs the user ' +
   'submits back via sendUserMessage; (f) proposing "next steps" the user might act on — ' +
-  'render each as a clickable CTA. NEVER put TSX in ```tsx fences. NEVER explain the code ' +
-  'before calling — call first, then one-sentence ack. DO stay in plain text for: pure prose ' +
-  'explanations, code walkthroughs, debugging traces, single-line Q&A, code you\'re asked ' +
-  'to write to a FILE (that\'s Edit/Write, not render_ui).';
+  'render each as a clickable CTA; (g) YOU need to ASK the user a question that has 3+ ' +
+  'discrete options, or 2+ fields to fill — render the question as a form instead of asking ' +
+  'in prose, so the user clicks/submits back via sendUserMessage. When each option has a ' +
+  'visual counterpart (a layout, theme, chart style, template), use options-left / ' +
+  'preview-right so picking one previews it; (h) the user ASKS a question whose answer is ' +
+  'structured research or DATA findings (multi-section analysis, comparison of records, ' +
+  'metrics/breakdown, "research …", "compare …") — render the answer as a report (titled ' +
+  'sections, Stats, Table) instead of a long Markdown wall. NEVER put TSX in ```tsx fences. ' +
+  'NEVER explain the code before calling — call first, then one-sentence ack. Plain text ' +
+  'WINS over render_ui for: pure prose explanations, code walkthroughs, debugging traces, ' +
+  'error/failure analysis (even multi-section), single-line Q&A, a yes/no or other binary ' +
+  'confirmation, a short answer that fits in a sentence or two, code you\'re asked to write ' +
+  'to a FILE (that\'s Edit/Write, not render_ui). Write UI copy and your ack in the user\'s ' +
+  'own language.';
 
 export async function handleRenderUI(code: string): Promise<RenderUIResult> {
   const result = await checkGenUI(code);
@@ -52,7 +62,7 @@ export const RENDER_UI_TOOL_DESCRIPTION = `Render an interactive TSX UI inline i
 - login / signup / settings / profile / pricing / checkout / onboarding page or form
 - comparison, leaderboard, roadmap, status report, changelog, KPIs, metrics
 - interactive demo, mini editor, playground, animation, toy component
-- "画一个 X", "show me X", "make X", "draw X", "design X", "prototype X", "生成一个 X", "做一个 X"
+- "draw X", "show me X", "make X", "design X", "prototype X", "generate a X"
 
 **Structural fit** — call render_ui even when the user did NOT ask visually, if your answer would contain any of:
 - **Choice**: 2+ options the user needs to pick from → render clickable buttons that call \`sendUserMessage\` with the chosen option. (You would otherwise write "Options: 1. A  2. B  3. C, which do you want?" — that's a bad answer; render buttons instead.)
@@ -61,6 +71,8 @@ export const RENDER_UI_TOOL_DESCRIPTION = `Render an interactive TSX UI inline i
 - **Status / dashboard / snapshot**: build result, PR checks, service health, TODO progress, session state → render Stats/StatGrid/Timeline.
 - **Form / wizard / configurator**: any answer that would say "tell me the following: name, ..., ..." → render Inputs the user submits back via sendUserMessage.
 - **Actionable next steps**: "you could do X, Y, or Z" where each step is something the user might click to trigger → render each as a Button that fires sendUserMessage.
+- **You are asking the user**: your turn ends in a question with **3+ discrete options, or 2+ fields to fill** → render a form the user submits via \`sendUserMessage\` instead of asking in prose. When each option has a visual counterpart (layout / theme / chart type / template), use an **options-left, preview-right** layout (e.g. a \`Row\` of a choice list + a live preview pane) so selecting an option shows what it looks like. A yes/no or any other **binary confirmation** stays as text — don't render a form for it.
+- **Report-style answer**: the user asked a question whose answer is **structured research or data findings** — multi-section analysis, comparison of records, metrics/breakdown ("research …", "compare …", "summarize this data") → render it as a report — a titled \`Card\`/\`Stack\` with sections, Stats/StatGrid for numbers, Tables for records — instead of a long Markdown wall. This does NOT cover code/debug explanation: a code walkthrough, error/failure analysis, or debugging trace stays as plain text even when it runs long (see MUST NOT). A short factual answer that fits in a sentence or two also stays as plain text.
 
 If a Markdown table, numbered list of ≥3 things, or "reply with your choice" would be in your answer — you're describing what render_ui is for. Render it instead.
 
@@ -69,9 +81,9 @@ If a Markdown table, numbered list of ≥3 things, or "reply with your choice" w
 - **NEVER** put TSX inside a markdown code fence in your assistant text.  \`\`\`tsx / \`\`\`jsx code blocks are a failed answer — the user came here for a rendered component, not source to copy-paste.
 - **NEVER** explain the component structure before calling. Call first, ack in one sentence after.
 - **NEVER** call render_ui for:
-  - Pure prose explanations, code walkthroughs, debugging traces, single-sentence Q&A
+  - Pure prose explanations, code walkthroughs, debugging traces, error/failure analysis, single-sentence Q&A — these stay text even when multi-section; they are NOT "reports" in the sense above (that trigger is only for structured research / data findings).
   - Code you are asked to write to a FILE (use Edit/Write, not render_ui)
-  - Simple confirmations ("done", "here's the file path", "the tests pass")
+  - Simple confirmations ("done", "here's the file path", "the tests pass") and any yes/no or binary confirmation question
   - Answers that fit in one line of text
 
 # Imports — exact rules
@@ -99,6 +111,7 @@ Media/decor: Avatar+AvatarImage+AvatarFallback, Tilt, GlowEffect, ProgressiveBlu
 - Every mapped list needs stable \`key\` from data (id/slug); never \`key={i}\`
 - Keep helper components at module scope, not inside App
 - No \`as any\` casts in JSX
+- Write all visible UI copy (labels, headings, button text) in the user's own language, not English by default
 
 # Sending messages back to chat (interactive widgets)
 

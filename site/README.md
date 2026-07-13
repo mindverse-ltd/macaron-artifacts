@@ -1,6 +1,6 @@
-# Macaron artifacts docs
+# Macaron Artifacts site
 
-The public documentation site, built with [Fumadocs](https://fumadocs.dev) on React Router (SPA / static export). Content lives in `content/docs/*.mdx`.
+The public docs + landing site, built with [Fumadocs](https://fumadocs.dev) on React Router (SPA / static export). Content lives in `content/docs/*.mdx`.
 
 This is a standalone package: it is intentionally **not** part of the root pnpm workspace, so its Vite / React Router / Tailwind stack stays isolated from the web app. Install and run it on its own.
 

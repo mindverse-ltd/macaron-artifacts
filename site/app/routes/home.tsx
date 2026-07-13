@@ -22,7 +22,7 @@ const PKG = 'https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@<sha>';
 export default function Home() {
   return (
     <HomeLayout {...baseOptions()}>
-      <main className="flex flex-col items-center flex-1 px-4">
+      <div className="flex flex-col items-center flex-1 px-4">
         <section className="flex flex-col items-center text-center max-w-2xl pt-20 pb-16">
           <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-fd-muted-foreground mb-6">
             <Terminal className="size-3.5" /> Claude Code &amp; Codex
@@ -33,11 +33,17 @@ export default function Home() {
             sessions, live chat, and generated UI, straight from your terminal.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link className="text-sm bg-fd-primary text-fd-primary-foreground rounded-full font-medium px-5 py-2.5" to="/docs">
-              Read the docs
+            <Link
+              className="text-sm bg-fd-primary text-fd-primary-foreground rounded-full font-medium px-5 py-2.5 transition-opacity hovered:opacity-90"
+              to="/docs"
+            >
+              Read the Docs
             </Link>
-            <Link className="text-sm border rounded-full font-medium px-5 py-2.5" to="/docs/usage">
-              Quick start
+            <Link
+              className="text-sm border rounded-full font-medium px-5 py-2.5 transition-colors hovered:bg-fd-accent hovered:text-fd-accent-foreground"
+              to="/docs/usage"
+            >
+              Quick Start
             </Link>
           </div>
         </section>
@@ -50,7 +56,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="mb-4 text-sm font-medium text-fd-muted-foreground">Plugin marketplace</div>
+          <div className="mb-4 text-sm font-medium text-fd-muted-foreground">Plugin Marketplace</div>
           <Tabs defaultValue="claude-code">
             <TabsList>
               <TabsTrigger value="claude-code" className="gap-2">
@@ -82,7 +88,7 @@ export default function Home() {
             </Tab>
           </Tabs>
 
-          <div className="mt-8 mb-4 text-sm font-medium text-fd-muted-foreground">Run without installing</div>
+          <div className="mt-8 mb-4 text-sm font-medium text-fd-muted-foreground">Run Without Installing</div>
           <p className="mb-3 text-sm text-fd-muted-foreground">
             The <code className="text-fd-foreground">pkg.pr.new</code> tarball ships prebuilt bundles and two bins —{' '}
             <code className="text-fd-foreground">mcc</code> (Claude, port 7878) and{' '}
@@ -107,35 +113,35 @@ export default function Home() {
 
         <section className="w-full max-w-5xl pb-24">
           <div className="mb-6">
-            <h2 className="text-2xl font-semibold mb-1">Run agents with a UI</h2>
+            <h2 className="text-2xl font-semibold mb-1">Run Agents With a UI</h2>
             <p className="text-fd-muted-foreground">Drive Macaron sessions from the browser and watch every turn as it happens.</p>
           </div>
-          <Cards>
-            <Card icon={<MonitorPlay />} title="Visual sessions" href="/docs/usage">
+          <Cards className="grid-cols-1 sm:grid-cols-3">
+            <Card icon={<MonitorPlay />} title="Visual Sessions" href="/docs/usage">
               Browse workspaces and sessions with previews, then continue a turn from the browser.
             </Card>
-            <Card icon={<MessagesSquare />} title="Live chat" href="/docs/usage">
+            <Card icon={<MessagesSquare />} title="Live Chat" href="/docs/usage">
               Stream thinking, tool calls, and GenUI previews from supported agent runtimes.
             </Card>
-            <Card icon={<SlidersHorizontal />} title="Provider controls" href="/docs/usage">
+            <Card icon={<SlidersHorizontal />} title="Provider Controls" href="/docs/usage">
               Run against an ambient login or a compatible endpoint such as Macaron, OpenRouter, or LiteLLM.
             </Card>
           </Cards>
 
           <div className="mt-12 mb-6">
-            <h2 className="text-2xl font-semibold mb-1">Generate and extend</h2>
+            <h2 className="text-2xl font-semibold mb-1">Generate and Extend</h2>
             <p className="text-fd-muted-foreground">GenUI tooling and plugin manifests that plug into your existing agent setup.</p>
           </div>
           <Cards>
-            <Card icon={<Wand2 />} title="genui-builder skill" href="/docs/usage">
+            <Card icon={<Wand2 />} title="genui-builder Skill" href="/docs/usage">
               The bundled skill lets supported agents produce GenUI TSX from the command line.
             </Card>
-            <Card icon={<Puzzle />} title="Plugin manifests" href="/docs">
-              Ship the manifests that register Macaron artifacts with Claude Code and Codex.
+            <Card icon={<Puzzle />} title="Plugin Manifests" href="/docs">
+              Ship the manifests that register Macaron Artifacts with Claude Code and Codex.
             </Card>
           </Cards>
         </section>
-      </main>
+      </div>
     </HomeLayout>
   );
 }

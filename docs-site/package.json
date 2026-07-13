@@ -11,6 +11,7 @@
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
+    "@lobehub/icons": "5.11.0",
     "@orama/orama": "^3.1.18",
     "@react-router/node": "^8.2.0",
     "cnfast": "^0.0.8",

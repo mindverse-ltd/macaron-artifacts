@@ -1,8 +1,12 @@
 import type { Route } from './+types/home';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { Card, Cards } from 'fumadocs-ui/components/card';
+import { Tab, Tabs, TabsList, TabsTrigger } from 'fumadocs-ui/components/tabs';
 import { Link } from 'react-router';
 import { MonitorPlay, MessagesSquare, SlidersHorizontal, Wand2, Puzzle, Terminal } from 'lucide-react';
+import ClaudeCode from '@lobehub/icons/es/ClaudeCode/components/Mono';
+import Codex from '@lobehub/icons/es/Codex/components/Mono';
+import { CopyCommand } from '@/components/copy-command';
 import { baseOptions } from '@/lib/layout.shared';
 
 export function meta({}: Route.MetaArgs) {
@@ -11,6 +15,9 @@ export function meta({}: Route.MetaArgs) {
     { name: 'description', content: 'The local WebUI, GenUI tooling, and plugin manifests for running Macaron with Claude Code and Codex.' },
   ];
 }
+
+// pkg.pr.new ships prebuilt tarballs per commit; `<sha>` stands in for a commit on main.
+const PKG = 'https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@<sha>';
 
 export default function Home() {
   return (
@@ -33,6 +40,69 @@ export default function Home() {
               Quick start
             </Link>
           </div>
+        </section>
+
+        <section className="w-full max-w-3xl pb-20">
+          <div className="mb-6 text-center">
+            <h2 className="text-2xl font-semibold mb-1">Install</h2>
+            <p className="text-fd-muted-foreground">
+              Add the plugin to your agent, or run the published build with no install at all.
+            </p>
+          </div>
+
+          <div className="mb-4 text-sm font-medium text-fd-muted-foreground">Plugin marketplace</div>
+          <Tabs defaultValue="claude-code">
+            <TabsList>
+              <TabsTrigger value="claude-code" className="gap-2">
+                <ClaudeCode size={16} /> Claude Code
+              </TabsTrigger>
+              <TabsTrigger value="codex" className="gap-2">
+                <Codex size={16} /> Codex
+              </TabsTrigger>
+            </TabsList>
+            <Tab value="claude-code">
+              <div className="flex flex-col gap-2">
+                <CopyCommand command="claude plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
+                <CopyCommand command="claude plugin install macaron@macaron" />
+              </div>
+              <p className="mt-3 text-sm text-fd-muted-foreground">
+                Then run <code className="text-fd-foreground">/macaron</code> in a session — the WebUI opens on{' '}
+                <code className="text-fd-foreground">http://localhost:7878</code>.
+              </p>
+            </Tab>
+            <Tab value="codex">
+              <div className="flex flex-col gap-2">
+                <CopyCommand command="codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
+                <CopyCommand command="codex plugin add macaron@macaron" />
+              </div>
+              <p className="mt-3 text-sm text-fd-muted-foreground">
+                Ask Codex to open the Macaron WebUI — it serves on{' '}
+                <code className="text-fd-foreground">http://localhost:7979</code>.
+              </p>
+            </Tab>
+          </Tabs>
+
+          <div className="mt-8 mb-4 text-sm font-medium text-fd-muted-foreground">Run without installing</div>
+          <p className="mb-3 text-sm text-fd-muted-foreground">
+            The <code className="text-fd-foreground">pkg.pr.new</code> tarball ships prebuilt bundles and two bins —{' '}
+            <code className="text-fd-foreground">mcc</code> (Claude, port 7878) and{' '}
+            <code className="text-fd-foreground">mcx</code> (Codex, port 7979). Replace{' '}
+            <code className="text-fd-foreground">&lt;sha&gt;</code> with a commit on <code className="text-fd-foreground">main</code>.
+          </p>
+          <Tabs items={['bunx', 'npx']}>
+            <Tab value="bunx">
+              <div className="flex flex-col gap-2">
+                <CopyCommand command={`bunx mcc@${PKG}`} />
+                <CopyCommand command={`bunx mcx@${PKG}`} />
+              </div>
+            </Tab>
+            <Tab value="npx">
+              <div className="flex flex-col gap-2">
+                <CopyCommand command={`npx mcc@${PKG}`} />
+                <CopyCommand command={`npx mcx@${PKG}`} />
+              </div>
+            </Tab>
+          </Tabs>
         </section>
 
         <section className="w-full max-w-5xl pb-24">

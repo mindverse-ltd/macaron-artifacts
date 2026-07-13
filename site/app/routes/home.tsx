@@ -85,9 +85,10 @@ export default function Home() {
                 </Step>
                 <Step>
                   <p className="font-medium">Run It and Open the WebUI</p>
+                  <Command code="/macaron" />
                   <p className="text-sm text-fd-muted-foreground">
-                    Run <code className="text-fd-foreground">/macaron</code> in a session — the WebUI opens on{' '}
-                    <code className="text-fd-foreground">http://localhost:7878</code>.
+                    Run it in a session — the WebUI opens on{' '}
+                    <a className="text-fd-foreground underline underline-offset-4" href="http://localhost:7878">http://localhost:7878</a>.
                   </p>
                 </Step>
               </Steps>
@@ -106,7 +107,7 @@ export default function Home() {
                   <p className="font-medium">Run It and Open the WebUI</p>
                   <p className="text-sm text-fd-muted-foreground">
                     Ask Codex to open the Macaron WebUI — it serves on{' '}
-                    <code className="text-fd-foreground">http://localhost:7979</code>.
+                    <a className="text-fd-foreground underline underline-offset-4" href="http://localhost:7979">http://localhost:7979</a>.
                   </p>
                 </Step>
               </Steps>

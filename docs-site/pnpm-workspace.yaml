@@ -1,0 +1,4 @@
+# Standalone package: this file marks docs-site as its own pnpm workspace root,
+# so `pnpm install` here does NOT climb into the repo-root workspace (which would
+# skip docs-site's deps entirely). Keep the docs toolchain isolated from the app.
+packages: []

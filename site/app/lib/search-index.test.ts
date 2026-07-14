@@ -108,10 +108,18 @@ test('real structure() split chunks: escaped quotes, generic defaults, OOB entit
   assert.ok(!esc2.some((t) => /ESCAPEQUOTE|]}>|<Tabs/.test(t)), `escaped-quote residue leaked: ${JSON.stringify(esc2)}`);
   assert.ok(esc2.includes('body'), 'escaped-quote body must survive');
 
-  // A TypeScript generic with a DEFAULT (`<T = string>`): the `=` is NOT a JSX
-  // attribute (its value is a bare word, not a quote/brace), so the whole thing is
-  // prose and must survive verbatim — the old `=`-means-attribute rule deleted it.
+  // A TypeScript generic with a DEFAULT type: the `=` is a type-param default, NOT
+  // a JSX attribute — an attribute name is a separate identifier after whitespace
+  // (`<Tabs items=`), whereas `<T =` sits right on the tag/param name. Every default
+  // form must survive verbatim: bare word, quoted string, object, and template
+  // literal (EVE round 7's three build-time samples + the round-6 bare word).
   assert.deepEqual(clean('type Box\\<T = string> keeps VALUE'), ['type Box<T = string> keeps VALUE']);
+  assert.deepEqual(clean('type Box\\<T = "DEFAULTNEEDLE"> keeps VALUE'), ['type Box<T = "DEFAULTNEEDLE"> keeps VALUE']);
+  assert.deepEqual(clean('type Box\\<T = { x: string }> keeps OBJNEEDLE'), ['type Box<T = { x: string }> keeps OBJNEEDLE']);
+  // The template-literal default's backticks are stripped as code-span punctuation,
+  // but the type text (and searchable needle) must remain.
+  const tpl = clean('type Box\\<T = `x`> keeps TPLNEEDLE');
+  assert.ok(tpl.every((t) => /T = x> keeps TPLNEEDLE/.test(t)) && !tpl.some((t) => /<Box|]}>/.test(t)), `template default mangled: ${JSON.stringify(tpl)}`);
 
   // An out-of-range numeric entity is not a real code point: String.fromCodePoint
   // would throw and abort the index build, so it must be kept as literal text.

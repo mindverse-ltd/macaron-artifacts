@@ -97,13 +97,15 @@ function stripComponentResidue(text: string): string {
     let j = lt + 1;
     if (closing) j++;
     while (isNameChar(text[j])) j++;
-    // Scan to the terminating `>` at brace depth 0, tracking whether we ever saw a
-    // real JSX attribute (`name="…"` / `name={…}`) or a self-closing `/`. structure()
-    // markdown-escapes the JSX punctuation (`\{`, `\[`, `\<`), so a `\{` counts as a
-    // brace; inside a quote / template a `\`-escape hides the next char, so a `\"` or
-    // an escaped backtick can't close the attribute string early. Crucially `=` marks
-    // an attribute ONLY when its value is a quote/brace — a bare `<T = string>`
-    // generic default has `= string` and is therefore prose, not a component.
+    // Scan to the terminating `>` at brace depth 0. structure() markdown-escapes the
+    // JSX punctuation (`\{`, `\[`, `\<`), so a `\{` counts as a brace; inside a quote
+    // / template a `\`-escape hides the next char, so a `\"` or an escaped backtick
+    // can't close the attribute string early. hasAttr is decided SOLELY by finding a
+    // real JSX attribute — a `name=` where `name` is a separate identifier after the
+    // tag name (preceded by whitespace). A quote / brace / template alone does NOT
+    // imply an attribute: a TS generic default `<T = "x">` / `<T = { … }>` / `` <T = `x`> ``
+    // carries the same characters as prose, and its `=` sits right after the type
+    // param name (no separating whitespace), so it stays searchable.
     let quote = '', brace = 0, closed = false, hasAttr = closing, selfClose = false;
     let k = j;
     while (k < text.length) {
@@ -115,13 +117,19 @@ function stripComponentResidue(text: string): string {
       }
       if (ch === '\\' && /[<>{}[\]]/.test(text[k + 1] ?? '')) { // structure()'s markdown-escaped punctuation
         const p = text[k + 1];
-        if (p === '{') { brace++; hasAttr = true; } else if (p === '}' && brace > 0) brace--;
+        if (p === '{') brace++; else if (p === '}' && brace > 0) brace--;
         k += 2; continue;
       }
-      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; hasAttr = true; }
-      else if (ch === '{') { brace++; hasAttr = true; }
+      if (ch === '"' || ch === "'" || ch === '`') quote = ch;
+      else if (ch === '{') brace++;
       else if (ch === '}' && brace > 0) brace--;
-      else if (ch === '=' && !brace) { let m = k + 1; while (text[m] === ' ') m++; if (text[m] === '\\') m++; if (/["'`{]/.test(text[m] ?? '')) hasAttr = true; }
+      else if (ch === '=' && !brace) {
+        // An attribute name is an identifier preceded by whitespace; the tag / type
+        // param name is preceded by `<` (or `\<`). `<Tabs items=` → attr; `<T =` → generic.
+        let b = k - 1; while (text[b] === ' ' || text[b] === '\t') b--;
+        const nameEnd = b; while (b >= 0 && isNameChar(text[b])) b--;
+        if (nameEnd > b && (text[b] === ' ' || text[b] === '\t')) hasAttr = true;
+      }
       else if (ch === '/' && !brace && text[k + 1] === '>') selfClose = true;
       else if (ch === '>' && !brace) { k++; closed = true; break; }
       k++;

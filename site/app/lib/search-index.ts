@@ -138,7 +138,7 @@ export function pairResidues(chunks: string[]): Set<string> {
   chunks.forEach((text, ci) => {
     let i = 0;
     while (i < text.length) {
-      if (text[i] === '`') { let f = 0; while (text[i + f] === '`') f++; const e = text.indexOf(text.slice(i, i + f), i + f); i = e === -1 ? text.length : e + f; continue; }
+      if (text[i] === '`') { const cs = codeSpanEnd(text, i); if (cs !== -1) { i = cs; continue; } }
       const tag = scanTag(text, i);
       if (!tag) { i++; continue; }
       // Only a STANDALONE residue opener enters the pairing stack. structure() emits a flow
@@ -147,13 +147,19 @@ export function pairResidues(chunks: string[]): Set<string> {
       // a type-argument (`factory()\<Name>()`), a constrained generic (`\<Name extends …>`), a
       // comparison (`a\<Name`) or a nested first-param (`\<Name\<U>>`). Pushing such a same-named
       // in-body generic lets the outer `</Name>` pop IT instead of the real opener, deleting the
-      // generic and leaking the outer markup. Skip a glued ESCAPED OPENER UNLESS its own matching
-      // closer sits later in THIS chunk — a real inline component (`prefix\<Panel …>b\</Panel>suffix`)
-      // carries its closer in-chunk, but an in-body generic never does (its `</Name>` is elsewhere).
-      // A CLOSING tag is never a generic, so it must always pair (else a glued `\</$Panel>` whose
-      // suffix has no further closer would be skipped and its opener never pops).
+      // generic and leaking the outer markup. A glued escaped opener is an IN-BODY GENERIC — never
+      // stacked — when EITHER its own tag body carries a nested `<` type-argument (`\<Name\<U>>`, the
+      // unambiguous generic tell that survives even when a real same-name inline component follows it
+      // LATER in the chunk), OR it has no matching closer anywhere later in this chunk (a bare generic
+      // `factory()\<Name>()` whose `</Name>` lives elsewhere). A real glued inline component
+      // (`prefix\<Panel …>b\</Panel>suffix`) has no nested `<` and carries its closer in-chunk, so it
+      // still stacks. The closer probe is CommonMark code-span aware (`outsideCode`) so a `` `</Name>` ``
+      // literal can't masquerade as the opener's own closer. A CLOSING tag is never a generic, so it
+      // must always pair (else a glued `\</$Panel>` whose suffix has no further closer never pops).
       const glued = text.slice(0, tag.esc ? tag.lt - 1 : tag.lt).trim() !== '';
-      const inBodyGeneric = glued && tag.esc && !tag.closing && !rawCloserRe(tag.name).test(outsideCode(text.slice(tag.closed ? tag.end : tag.nameEnd)));
+      const tagBody = text.slice(tag.nameEnd, tag.closed ? tag.end - 1 : tag.end);
+      const nestedArg = /\\?</.test(tagBody); // a `<` inside the opener's own tag body → type-argument, a generic
+      const inBodyGeneric = glued && tag.esc && !tag.closing && (nestedArg || !rawCloserRe(tag.name).test(outsideCode(text.slice(tag.closed ? tag.end : tag.nameEnd))));
       if (!tag.selfClose && !inBodyGeneric) {
         if (tag.closing) { for (let s = stack.length - 1; s >= 0; s--) if (stack[s].name === tag.name) { paired.add(stack[s].key); paired.add(`${ci}:${tag.lt}`); stack.length = s; break; } }
         else stack.push({ name: tag.name, key: `${ci}:${tag.lt}` });
@@ -169,14 +175,13 @@ function stripComponentResidue(text: string, chunkIndex: number, paired: Set<str
   let i = 0;
   while (i < text.length) {
     const c = text[i];
-    // A code span is verbatim: copy `…` runs (matching the opening fence length)
-    // untouched so a `<version>` or `<T>` generic inside code is never scanned.
+    // A code span is verbatim: copy the whole `…` run (CommonMark-correct fence — exact-length
+    // close, escaped `` \` `` is literal not a fence) untouched so a `<version>` or `<T>` generic
+    // inside code is never scanned. A lone escaped/unterminated backtick is NOT a span, so it
+    // falls through as an ordinary character and the real tag after it is still processed.
     if (c === '`') {
-      let f = 0; while (text[i + f] === '`') f++;
-      const fence = text.slice(i, i + f);
-      const end = text.indexOf(fence, i + f);
-      const stop = end === -1 ? text.length : end + f;
-      out += text.slice(i, stop); i = stop; continue;
+      const stop = codeSpanEnd(text, i);
+      if (stop !== -1) { out += text.slice(i, stop); i = stop; continue; }
     }
     // Fragment boundaries `<>` / `</>` (possibly escaped `\<>`): pure markup, drop.
     const frag = /^\\?<\/?>/.exec(text.slice(i));
@@ -207,15 +212,21 @@ function stripComponentResidue(text: string, chunkIndex: number, paired: Set<str
     // `\[`) — structural AND string-content alike — but leaves closes bare, so a brace/bracket-depth
     // scan is fooled by unbalanced brackets inside the corrupted attribute STRING: `items={["a }] > x"]}>`
     // under-counts and scanTag cuts EARLY at the string-internal `>` (attr residue leaks as fake suffix),
-    // while `items={["a { [ x"]}>` over-counts so scanTag never closes (body+suffix swallowed).
-    // Re-anchor the real `>` to the LAST `>` before that closer — but ONLY for a CONFIRMED-DESYNC
-    // opener: scanTag never reached the closer (`!closed`), or the region it left between its `>` and
-    // the closer is UNBALANCED (leaked string/bracket residue). A clean glued opener's visible body can
-    // legitimately hold a `>` (`LEFT > RIGHT`), an entity, or a nested inline tag — re-anchoring it would
-    // delete that body, so leave scanTag's honest `>` untouched.
-    if (glued && !closing && !selfClose && closerAfter !== -1 && (!closed || !balancedBody(text.slice(k, tag.nameEnd + closerAfter)))) {
+    // while `items={["a { [ x"]}>` over-counts so scanTag never closes (body+suffix swallowed). A dropped
+    // string-quote backslash (`title="a \" b"` → `title="a " b"`) desyncs the quote state the same way,
+    // leaving scanTag unclosed. Re-anchor the real `>` to the LAST `>` before that closer, decided from
+    // OPENER-LOCAL signals only, never whole-body balance (a body apostrophe or a masking body quote
+    // defeats that in both directions): the opener must be ESCAPED (`tag.esc` — structure() only escapes
+    // a glued opener that carries a `{…}`/`[…]` attribute OR a lossy string attribute; a bare honest
+    // opener is left unescaped so its visible `>` is trustworthy), AND either scanTag never reached its
+    // `>` (`!closed` — quote OR brace desync) or the region between its `>` and the closer carries an
+    // unmatched bare bracket (`bracketDesync` — quote-agnostic leaked `}]` / `]}` residue). When the
+    // gate fires and a real `>` is found before the closer, the opener is a CONFIRMED lossy component —
+    // strip it directly (the mangled attribute residue is ungrammatical, so grammar classification below
+    // would wrongly KEEP it as prose).
+    if (glued && esc && !closing && !selfClose && closerAfter !== -1 && (!closed || bracketDesync(text.slice(k, tag.nameEnd + closerAfter)))) {
       const gt = text.lastIndexOf('>', tag.nameEnd + closerAfter);
-      if (gt > tag.nameEnd) { k = gt + 1; closed = true; }
+      if (gt > tag.nameEnd) { out += ' '; i = gt + 1; continue; }
     }
     // Fallback brace/bracket-depth recovery for a GLUED or non-escaped opener with no in-chunk closer
     // to anchor on — cut at the first `>` OUTSIDE any `{…}`/`[…]` expression past the tag name. A
@@ -314,6 +325,22 @@ function deEscape(s: string): string {
   return s.replace(/\\([^0-9A-Za-z\s])/g, '$1');
 }
 
+// End of a CommonMark code span opened at `i` (a backtick run of length N): the index just PAST
+// the first later run of EXACTLY N backticks. Returns -1 when `i` isn't a span opener — the run is
+// backslash-escaped (`` \` `` is a literal backtick, not a fence) or never closes (an unterminated
+// run is literal text, not a span). This is the single source of truth for every code-span skip so
+// a `</Name>` / generic inside `` `…` `` (including a `` `` ` `` `` double-backtick span) is never
+// mistaken for markup, and a lone escaped backtick never swallows the real tag that follows it.
+function codeSpanEnd(text: string, i: number): number {
+  if (text[i] !== '`' || text[i - 1] === '\\') return -1;
+  let n = 0; while (text[i + n] === '`') n++;
+  for (let j = i + n; j < text.length; ) {
+    if (text[j] === '`') { let m = 0; while (text[j + m] === '`') m++; if (m === n) return j + m; j += m; }
+    else j++;
+  }
+  return -1;
+}
+
 // A `</Name>` closer regex tolerant of structure()'s per-char markdown escaping (`</\_Panel>`,
 // `</\$Panel>`), so a custom-name closer is located directly in RAW text and its match offsets
 // stay in raw space — no deEscape/offset remapping needed. Iterates code points (astral-safe).
@@ -322,34 +349,36 @@ function rawCloserRe(name: string): RegExp {
   return new RegExp(`</${body}\\s*>`);
 }
 
-// Blank out code-span regions so a `</Name>` inside `` `…` `` isn't counted when probing whether
-// a glued opener carries its own closer later in the chunk (else a fake code-span closer makes an
-// in-body generic look like a real inline component and mispairs with the outer closer).
+// Blank out code-span regions (CommonMark-correct fences) so a `</Name>` inside `` `…` `` isn't
+// counted when probing whether a glued opener carries its own closer later in the chunk (else a
+// fake code-span closer makes an in-body generic look like a real inline component and mispairs).
 function outsideCode(text: string): string {
   let out = '', i = 0;
   while (i < text.length) {
-    if (text[i] === '`') { let f = 0; while (text[i + f] === '`') f++; const e = text.indexOf(text.slice(i, i + f), i + f); i = e === -1 ? text.length : e + f; continue; }
+    const cs = codeSpanEnd(text, i);
+    if (cs !== -1) { i = cs; continue; }
     out += text[i++];
   }
   return out;
 }
 
-// Does a candidate body region (between scanTag's `>` and the real closer) carry balanced quotes
-// and brackets? A CLEAN component body is visible prose — balanced, possibly with a stray `>`. A
-// LOSSY opener whose corrupted attribute leaked past scanTag's fake `>` exposes unbalanced string /
-// bracket residue (`… "c"]}`). Used ONLY to gate the closer anchor so it never re-cuts a clean
-// glued opener's real body (which may legitimately contain `>`, entities, nested inline tags).
-function balancedBody(seg: string): boolean {
-  let quote = '', depth = 0;
+// Is the region a scanTag left between its `>` and the real closer BRACKET-unbalanced? structure()
+// markdown-escapes every OPENING bracket (`\{`, `\[`) — string-content ones included — but leaves
+// closes bare, so a lossy opener whose corrupted attribute leaked past scanTag's fake `>` exposes an
+// unmatched bare `}` / `]` (`… "c"]}`) here. Bracket depth ONLY — quotes are deliberately ignored:
+// an apostrophe in visible prose (`don't`) or a masking body quote would make a quote-aware balance
+// check misfire in BOTH directions (EVE's round-18 counterexamples). Used together with `tag.esc`
+// (structure() only escapes+corrupts an opener that carries a `{…}` attribute — a bare/string-attr
+// opener is never lossy), so a legitimate stray `]` in a bare opener's body can't trigger recovery.
+function bracketDesync(seg: string): boolean {
+  let depth = 0;
   for (let m = 0; m < seg.length; m++) {
     const ch = seg[m];
-    if (ch === '\\') { m++; continue; }
-    if (quote) { if (ch === quote) quote = ''; continue; }
-    if (ch === '"' || ch === "'" || ch === '`') quote = ch;
-    else if (ch === '{' || ch === '[') depth++;
-    else if (ch === '}' || ch === ']') { if (depth === 0) return false; depth--; }
+    if (ch === '\\') { const n = seg[m + 1]; if (n === '{' || n === '[') depth++; else if (n === '}' || n === ']') { if (depth === 0) return true; depth--; } m++; continue; }
+    if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') { if (depth === 0) return true; depth--; }
   }
-  return quote === '' && depth === 0;
+  return depth !== 0;
 }
 
 // Unambiguous JSX-opener body: an `attr={…}` JSX expression or a `{...spread}`. Neither can

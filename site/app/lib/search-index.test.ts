@@ -592,6 +592,58 @@ test('real structure() round-18: desync-gated anchor, custom-name × bracket mat
   assert.ok(p3.some((t) => /INNER594/.test(t)), `p3 nested generic text lost: ${JSON.stringify(p3)}`);
 });
 
+// EVE round 19 — three residual P1s the round-18 fixes mis-handled, all rooted in unreliable heuristics:
+//  P1 — round-18's `balancedBody` judged opener desync from WHOLE-BODY quote+bracket balance, which
+//       misfires both ways: a visible-body apostrophe (`don't`) reads as an unclosed quote and a clean
+//       `<Panel>LEFT don't > RIGHT</Panel>` gets re-anchored (LEFT lost), while a masking body quote can
+//       re-balance a genuinely lossy attribute so its residue leaks. Fixed by deciding desync from
+//       OPENER-LOCAL signals only — the opener is escaped (`tag.esc`; structure() only corrupts a `{…}`
+//       attribute opener) AND scanTag never closed or the post-`>` region is BRACKET-unbalanced (quotes
+//       ignored entirely, so a body apostrophe / masking quote can't sway it).
+//  P1 — round-18's `inBodyGeneric` treated "no in-chunk closer" as the only generic tell, so a glued
+//       generic FOLLOWED by a real same-name inline component in the SAME chunk (`factory()<$Panel<GEN>>()
+//       then <$Panel>INNER</$Panel>`) found the inline's closer and got stacked, stealing the outer real
+//       closer. Fixed by keying on the unambiguous hierarchy tell: a nested `<` type-argument inside the
+//       opener's own tag body marks a generic regardless of any later inline closer.
+//  P1 — round-18's code-span skip used `indexOf(fence)`, which is not CommonMark: a `` `…` `` double
+//       backtick span with an inner single backtick closed early (real closer leaked, body lost), and an
+//       escaped literal backtick (`` \` ``) was read as an unterminated fence that swallowed the real
+//       closer after it. Fixed with a CommonMark-correct `codeSpanEnd` (exact-length close; escaped /
+//       unterminated run is literal, not a fence) shared by every code-span skip.
+test('real structure() round-19: opener-local desync, hierarchy attribution, CommonMark code spans', () => {
+  const clean = (raw: string) => {
+    const chunks = structure(raw).contents.map((c) => c.content);
+    const paired = pairResidues(chunks);
+    return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
+  };
+
+  // P1 #1 — a bare opener's visible body with an apostrophe (false unclosed-quote) keeps ALL its text;
+  // a genuinely lossy attribute whose residue a later body quote could "re-balance" still gets stripped.
+  const apos = clean("prefix<Panel>LEFT52 don't compare > RIGHT52</Panel>SUF52").join(' ');
+  assert.ok(/LEFT52/.test(apos) && /RIGHT52/.test(apos) && /SUF52/.test(apos), `apostrophe body lost: ${apos}`);
+  const mask = clean('prefix<Panel items={["a \\" }] > MASKLEAK52", "c"]}>BODY52 " QUOTE52</Panel>SUF52').join(' ');
+  assert.ok(!mask.includes('MASKLEAK52') && !mask.includes('items='), `masked attr leaked: ${mask}`);
+  assert.ok(/BODY52/.test(mask) && /QUOTE52/.test(mask) && /SUF52/.test(mask), `masked-case body/suffix lost: ${mask}`);
+
+  // P1 #2 — a glued same-name generic FOLLOWED by a real inline component in the same chunk: the generic
+  // is attributed by its nested `<` type-arg (not stacked), the inline pairs, and both texts survive.
+  for (const name of ['$Panel', '_Panel', '𐐀Panel', 'ns.Qualified'] as const) {
+    const tag = name.replace('.', '');
+    const r = clean(`<${name} x={["O52"]}>\n\nfactory()<${name}<GEN${tag}52>>() then <${name}>INNER${tag}52</${name}>\n\n</${name}>`).join(' ');
+    assert.ok(r.includes(`GEN${tag}52`), `${name}: generic type-arg lost: ${r}`);
+    assert.ok(r.includes(`INNER${tag}52`), `${name}: inline body lost: ${r}`);
+  }
+
+  // P1 #3 — CommonMark code spans. A double-backtick span with an inner single backtick keeps its full
+  // content and does not leak the surrounding tags; an escaped literal backtick is NOT a fence, so the
+  // real closer after it is still stripped (bare opener/closer must not survive).
+  const db = clean('prefix<$Panel>``ALPHA52 ` > </$Panel> FAKE52`` BODY52</$Panel>SUF52').join(' ');
+  assert.ok(/ALPHA52/.test(db) && /BODY52/.test(db) && /SUF52/.test(db), `double-backtick body lost: ${db}`);
+  const eb = clean('prefix<$Panel>text \\` > </$Panel> KEEP52</$Panel>SUF52').join(' ');
+  assert.ok(/KEEP52/.test(eb) && /SUF52/.test(eb), `escaped-backtick body lost: ${eb}`);
+  assert.ok(!/<\/?\$?Panel>/.test(eb), `escaped-backtick left bare tag markup: ${eb}`);
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

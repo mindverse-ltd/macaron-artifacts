@@ -14,14 +14,14 @@ GenUI is Macaron's headline feature: the model doesn't just describe a UI, it **
     Exposed in-process via the Agent SDK's `createSdkMcpServer` — the tool lives inside the server.
   </Card>
   <Card title="Codex side">
-    Exposed by a standalone stdio MCP server (`macaron-mcp-stdio.ts`) spawned as a child of `codex exec`.
+    Exposed by a standalone stdio MCP server (`macaron-mcp-stdio.ts`) injected into every Codex turn, so `render_ui` is available over the `codex app-server` transport too.
   </Card>
 </Cards>
 
 Both surfaces return an **identical `tool_result` shape**, so the model self-corrects the same way regardless of engine. Before returning, the handler runs `checkGenUI` — a TypeScript diagnose pass over the submitted module — and flips `ok: false` when the code has type errors, so the model gets actionable feedback instead of a silent broken preview.
 
-<Callout type="warn" title="UI changes require a preview first">
-  The tool's server-level instructions enforce a hard rule: if the user asks to change any visual surface, the model must render a `render_ui` preview of the *after* state (ending in Apply / Tweak / Discard buttons) and stop — it may only touch files after the user clicks Apply. The preview, not the file edit, is the deliverable for a UI-change turn.
+<Callout type="info" title="UI changes preview first — by convention">
+  The tool's server-level instructions ask the model to treat a preview as the deliverable for a UI-change turn: render a `render_ui` preview of the *after* state (ending in Apply / Tweak / Discard buttons) and stop, only editing files once the user clicks Apply. This is a **prompt policy**, not a server-enforced edit gate — the runtime does not block file writes on a prior preview, so it holds only as far as the model follows the instruction.
 </Callout>
 
 ## The Live Renderer
@@ -42,12 +42,12 @@ On the browser side, `web/src/macaron-vendor/StaticGenUIRenderer.tsx` (wrapped b
 <Step>
 ### Resolve imports
 
-An import-map resolver maps bare specifiers (`react`, `$macaron/ui`, charts, lucide, motion) to local modules. React specifiers are pinned back to the page's own React via an injected import map so third-party components pulled from an `esm.sh` fallback never bring a **second copy of React**.
+An import-map resolver maps bare specifiers (`react`, `$macaron/ui`, charts, lucide, motion) to the locally-served shim modules, so `react` and friends resolve to the page's own copy rather than a bundled duplicate. A further guard (`ensureNativeReactImportMap`) exists to also pin React for third-party components pulled from an `esm.sh` fallback, but it is **not currently wired into the render path** — the esm.sh fallback route therefore has no active second-React protection yet.
 </Step>
 <Step>
 ### Mount and cross-fade
 
-The compiled module is mounted; on update the renderer cross-fades (~200 ms) between the old and new tree so live edits don't flash.
+The compiled module is mounted. In-place updates just re-render the live tree, but when the renderer has to **rebuild** (e.g. the import map changed and the old root is torn down) it holds a snapshot of the old DOM and cross-fades (~200 ms) to the new tree so the swap doesn't flash. Streaming token updates are not each a cross-fade — only the rebuild path is.
 </Step>
 </Steps>
 

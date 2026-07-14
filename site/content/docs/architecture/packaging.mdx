@@ -28,7 +28,7 @@ The repo root **is** the `mcc` package. Its `bin` is `./bin/mcc.mjs`, and `files
 </Tab>
 </Tabs>
 
-Both declare `engines.node >= 22` and externalize every npm dep (`bun build --packages=external`), so the server bundle stays small and `@macaron/shared` — being types-only — never reaches the bundler.
+Both declare `engines.node >= 22` and externalize every npm dep (`bun build --packages=external`), so the server bundle stays small. The **server** imports `@macaron/shared` for types only, so it never reaches the runtime bundle; the **web** side does pull a few real runtime values from it (e.g. the `SEARCH_HL_OPEN` / `SEARCH_HL_CLOSE` highlight markers), so there the dependency is not type-only.
 
 ## Per-Commit Releases
 
@@ -41,7 +41,7 @@ pnpm exec pkg-pr-new publish --no-compact --bin . ./mcx
 `npm pack` fires each package's `prepack` hook, so both tarballs ship prebuilt `server/dist` + `web/dist` and run without Vite at runtime. The published URLs are pinned to the commit:
 
 <Callout title="This is what the install page links to">
-  The [Usage](/docs/usage) page's `bunx mcc@…` / `bunx mcx@…` commands point at exactly these pkg.pr.new URLs, with the `<sha>` pinned to the commit that built the docs. Swap in any other commit on `main` to pull that build.
+  The [Usage](/docs/usage) page's `bunx mcc@…` / `bunx mcx@…` commands carry a `<sha>` placeholder that a build-time remark plugin (`remarkCommitSha`) rewrites to the build commit's short SHA — pulled from `VERCEL_GIT_COMMIT_SHA` / `GITHUB_SHA`, or `git rev-parse` locally. When none is available (e.g. a shallow copy or a deploy without the commit env wired in), it leaves the literal `<sha>` in place rather than guessing. So the pin is only as precise as the environment the docs were built in.
 </Callout>
 
 ## The Plugin Manifests
@@ -50,14 +50,19 @@ For agents that install Macaron as a plugin rather than running a tarball:
 
 <Files>
   <Folder name=".claude-plugin" defaultOpen>
-    <File name="plugin.json — name, description, keywords" />
-    <File name="marketplace.json — registers the plugin source" />
+    <File name="plugin.json" />
+    <File name="marketplace.json" />
+  </Folder>
+  <Folder name=".codex-plugin" defaultOpen>
+    <File name="plugin.json" />
   </Folder>
   <Folder name="commands">
-    <File name="macaron.md — the /macaron slash command" />
+    <File name="macaron.md" />
   </Folder>
-  <File name="start.sh — install + build + launch on first run" />
+  <File name="start.sh" />
 </Files>
+
+`.claude-plugin/plugin.json` carries the name / description / keywords and `marketplace.json` registers the plugin source; `.codex-plugin/plugin.json` is the Codex-side manifest. `commands/macaron.md` defines the `/macaron` slash command, and `start.sh` installs, builds, and launches on first run.
 
 The `/macaron` command runs `start.sh`, which is the interesting piece:
 

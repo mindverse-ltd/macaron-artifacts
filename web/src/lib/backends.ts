@@ -38,6 +38,17 @@ function localDefault(): Backend {
   return { id: LOCAL_BACKEND_ID, label: 'Local', baseUrl: '' };
 }
 
+// Pure parse of a stored registry string into a LOCAL-bearing list — NO storage side effects
+// (unlike hydrate, which also mutates cache / legacy state). Used by the intent-replay path in
+// flush() to re-read the freshest raw without re-entering hydrate → flush.
+function parseRegistry(raw: string | null): Backend[] {
+  let parsed: unknown = null;
+  try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+  const stored = Array.isArray(parsed) ? parsed.filter((b): b is Backend => !!b && typeof (b as Backend).id === 'string') : null;
+  if (stored && stored.some((b) => b.id === LOCAL_BACKEND_ID)) return stored;
+  return stored ? [localDefault(), ...stored] : [localDefault()];
+}
+
 // Read the raw registry string. `ok: false` means the read itself threw (private
 // mode SecurityError) — distinct from a real absent key (`ok: true, raw: null`),
 // which is what another tab deleting the registry looks like. Conflating the two
@@ -57,10 +68,17 @@ function readLegacyRaw(): { ok: boolean; value: string } {
 
 function readLegacy(): string { return readLegacyRaw().value; }
 
-// The persisted retirement tombstone (a legacy value known dead), or '' if none.
-// Read defensively — a thrown read just means "no durable tombstone available".
-function readTombstone(): string {
-  try { return localStorage.getItem(LEGACY_TOMBSTONE_KEY) || ''; } catch { return ''; }
+// The persisted retirement tombstone (a legacy value known dead). `ok:false` means the
+// read THREW — distinct from a real absent tombstone (`ok:true, value:''`). The two must
+// not be conflated: an absent tombstone means "not retired, safe to migrate", but a thrown
+// read means retirement is UNKNOWN — migrating then would resurrect a value we can't verify.
+function readTombstone(): { ok: boolean; value: string } {
+  try { return { ok: true, value: localStorage.getItem(LEGACY_TOMBSTONE_KEY) || '' }; }
+  catch { return { ok: false, value: '' }; }
+}
+
+function writeTombstone(value: string): boolean {
+  try { localStorage.setItem(LEGACY_TOMBSTONE_KEY, value); return true; } catch { return false; }
 }
 
 // The persisted shape of the registry. The default LOCAL backend is synthetic —
@@ -122,6 +140,10 @@ let legacyBackedLocalToken: string | undefined;
 // must never be re-absorbed onto LOCAL — not by a hydrate(null) after another tab
 // wipes the registry, nor by any later reset. Retirement outlives the legacy key.
 let retiredLegacyToken: string | undefined;
+// The retired value still needs its durable tombstone written (the write failed under
+// private mode / quota). Retried by flush() so the tombstone lands once storage recovers,
+// before the legacy key is removed — otherwise a reload between the two resurrects the value.
+let pendingTombstoneWrite = false;
 // The raw registry string this module last read from / wrote to storage. Used to
 // detect another tab clearing or reconfiguring a backend: if storage no longer
 // matches what we last saw AND we have nothing unpersisted, adopt the newer value
@@ -134,13 +156,18 @@ let lastSeenRaw: string | null = null;
 // `idResolved` = the active id was actually readable at call time; when false the id
 // is only a guessed default and must be RE-READ against fresh storage at replay time.
 let pendingMutations: Array<{ id: string; token: string | undefined; idResolved: boolean }> = [];
+// Reconciled token intents whose persistence write FAILED (private mode / quota). Unlike a
+// whole-list `dirty` flush — which would re-write the entire cached snapshot and roll back a
+// concurrent cross-tab rename/add — these are replayed by re-hydrating the FRESHEST raw and
+// re-applying only the one (id → token) change each names, so cross-tab edits survive.
+let pendingIntents: Array<{ id: string; token: string | undefined }> = [];
 
 // Retire a legacy value: mark it dead so it's never re-absorbed, and schedule the
 // key for removal. Also persist a durable tombstone so the retirement survives a
 // real page reload even if the legacy-key removal keeps failing — otherwise the
 // next process, with no in-memory marker, would re-absorb the still-present key.
 function retireLegacy(value: string | undefined): void {
-  if (value) { retiredLegacyToken = value; try { localStorage.setItem(LEGACY_TOMBSTONE_KEY, value); } catch { /* best-effort; in-memory marker still guards this session */ } }
+  if (value) { retiredLegacyToken = value; if (!writeTombstone(value)) pendingTombstoneWrite = true; }
   legacyBackedLocalToken = undefined;
   pendingLegacyRemoval = true;
 }
@@ -150,19 +177,32 @@ function retireLegacy(value: string | undefined): void {
 // value was never retired and must survive (deleting it would drop a fresh login).
 // Returns true when the retirement is settled (key gone, or no longer our value),
 // so the caller can stop retrying. The tombstone outlives the key by one step: once
-// the retired value is gone from the key, the tombstone's job is done — clear it.
+// the retired value is gone from the key, the tombstone's job is done — but only clear
+// it when it STILL names OUR retired value. Another tab may have retired a DIFFERENT
+// value and written its own tombstone Y; blindly removing it would resurrect Y's value.
 function removeLegacyKey(expected: string | undefined): boolean {
   const cur = readLegacyRaw();
   if (!cur.ok) return false;                          // couldn't read → retry later
   if (expected && cur.value && cur.value !== expected) {
     // Another tab replaced the retired token with a live one. Our retirement no longer
-    // applies; leave the key and drop the stale tombstone so it can't block the new value.
-    try { localStorage.removeItem(LEGACY_TOMBSTONE_KEY); } catch { /* best-effort */ }
+    // applies; leave the key and drop the tombstone ONLY if it still names our (now
+    // superseded) value — never a tombstone another tab wrote for a different value.
+    dropTombstoneIfMatches(expected);
     return true;
   }
   if (cur.value) { try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { return false; } }
-  try { localStorage.removeItem(LEGACY_TOMBSTONE_KEY); } catch { /* harmless leftover: an absent legacy key can't be re-absorbed */ }
+  dropTombstoneIfMatches(expected);
   return true;
+}
+
+// Remove the tombstone only when it still holds `expected` — the value WE retired. A
+// mismatch means another tab retired a different value; leaving its tombstone intact keeps
+// that value dead. A thrown read leaves the tombstone (harmless: an absent legacy key can't
+// be re-absorbed, and a stale tombstone only ever blocks re-migration of a dead value).
+function dropTombstoneIfMatches(expected: string | undefined): void {
+  const t = readTombstone();
+  if (!t.ok) return;
+  if (!expected || t.value === expected || t.value === '') { try { localStorage.removeItem(LEGACY_TOMBSTONE_KEY); } catch { /* best-effort */ } }
 }
 
 // Retry any deferred persistence. Clearing a token only ever shrinks the registry,
@@ -173,6 +213,22 @@ function removeLegacyKey(expected: string | undefined): boolean {
 // state). Order matters: persist the registry first, and only drop the legacy key
 // once it's safely written, so a crash between the two can't lose the token.
 function flush(): void {
+  // Replay any single-backend intents whose write failed, by re-hydrating the freshest raw and
+  // re-applying ONLY that backend's change. Doing this before the whole-list branch means a
+  // concurrent cross-tab rename/add is preserved — we never re-write the whole stale snapshot.
+  if (pendingIntents.length > 0) {
+    const { ok, raw } = readRegistryRaw();
+    if (ok) {
+      const still: Array<{ id: string; token: string | undefined }> = [];
+      for (const intent of pendingIntents) {
+        const base = applyToken(parseRegistry(raw), intent.id, intent.token);
+        const stored = toStored(base);
+        if (write(BACKENDS_KEY, stored)) { cache = base; lastSeenRaw = JSON.stringify(stored); }
+        else still.push(intent); // storage still frozen — retry next time
+      }
+      pendingIntents = still;
+    }
+  }
   // Only a cache reconciled with storage may overwrite it. An unreconciled cache
   // (a blind mutation during a read failure) stays pending until the next read
   // merges it — see loadBackends. We still process pendingLegacyRemoval below.
@@ -197,16 +253,15 @@ function flush(): void {
     }
   }
   if (pendingLegacyRemoval) {
-    // Dropping the legacy key while the registry is still unpersisted is safe when the
-    // in-memory LOCAL no longer needs it: either its token was cleared (reload seeds a
-    // fresh tokenless LOCAL, which IS the cleared state) or the value is retired (dead).
-    // Mid-migration (LOCAL still holds an un-persisted token backed ONLY by the legacy
-    // key) we must persist the registry first, else a session ending between the two
-    // loses the sole credential.
     const localHasToken = !!cache?.find((b) => b.id === LOCAL_BACKEND_ID)?.token;
     const localBackedByLegacy = !!legacyBackedLocalToken && localHasToken;
     if (!localBackedByLegacy && (!dirty || !localHasToken || !!retiredLegacyToken)) {
-      if (removeLegacyKey(retiredLegacyToken)) { pendingLegacyRemoval = false; legacyBackedLocalToken = undefined; } /* else retry next time */
+      // Try to remove the legacy key. If it's gone, the value can't resurrect and the durable
+      // tombstone is unnecessary — drop the pending write. If removal FAILS (key still present),
+      // the tombstone is the ONLY thing guarding against re-migration on reload, so make sure it
+      // lands: retry the write and keep retrying the whole retirement until one of them settles.
+      if (removeLegacyKey(retiredLegacyToken)) { pendingLegacyRemoval = false; pendingTombstoneWrite = false; legacyBackedLocalToken = undefined; }
+      else if (pendingTombstoneWrite && retiredLegacyToken && writeTombstone(retiredLegacyToken)) { pendingTombstoneWrite = false; }
     }
   }
 }
@@ -239,9 +294,12 @@ function hydrate(raw: string | null): Backend[] {
   cacheReconciled = true;
   // Load any durable tombstone into the in-memory marker FIRST. On a real reload the
   // in-memory `retiredLegacyToken` is gone, so this is the only thing standing between
-  // a permanently-undeletable dead legacy key and its resurrection below.
+  // a permanently-undeletable dead legacy key and its resurrection below. A tombstone
+  // read that THREW leaves retirement UNKNOWN — we must not migrate a legacy value we
+  // can't verify is dead, so remember that to suppress the absorb branch.
   const tomb = readTombstone();
-  if (tomb) retiredLegacyToken = tomb;
+  if (tomb.value) retiredLegacyToken = tomb.value;
+  const tombUnknown = !tomb.ok;
   if (stored && stored.length > 0 && stored.some((b) => b.id === LOCAL_BACKEND_ID)) {
     cache = stored;
     lastSeenRaw = raw;
@@ -263,8 +321,11 @@ function hydrate(raw: string | null): Backend[] {
   // another tab wiped the registry); just keep trying to remove the key. Non-LOCAL kept.
   const local = localDefault();
   const legacy = readLegacy();
-  if (legacy && legacy !== retiredLegacyToken) { local.token = legacy; legacyBackedLocalToken = legacy; pendingLegacyRemoval = true; }
-  else if (legacy) { pendingLegacyRemoval = true; } // retired leftover — schedule removal, don't absorb
+  // A tombstone read that threw means we can't confirm this legacy value is dead OR alive.
+  // Refuse to migrate it (resurrection risk) but don't remove it either — a later load with
+  // a readable tombstone resolves it correctly. Only absorb when retirement is KNOWN-absent.
+  if (legacy && !tombUnknown && legacy !== retiredLegacyToken) { local.token = legacy; legacyBackedLocalToken = legacy; pendingLegacyRemoval = true; }
+  else if (legacy && !tombUnknown) { pendingLegacyRemoval = true; } // retired leftover — schedule removal, don't absorb
   cache = stored ? [local, ...stored] : [local];
   dirty = true; // persist the seeded / reconstructed list (in its original stored shape)
   flush();
@@ -290,10 +351,18 @@ export function loadBackends(): Backend[] {
   // through hydrate + applyToken preserves backends we never saw and the user's intent.
   if (cache && dirty && !cacheReconciled) {
     let merged = hydrate(raw);
+    const stillDeferred: Array<{ id: string; token: string | undefined; idResolved: boolean }> = [];
     for (const m of pendingMutations) {
       // If the id was a guess (active read threw at call time), re-resolve it now that the
       // active key is readable again — the intent targeted "the active backend", whatever it is.
-      const id = m.idResolved ? m.id : readActiveId().value;
+      // If the active read STILL throws, we can't safely resolve the target: keep the mutation
+      // deferred rather than applying it to a guessed id (which could clear the wrong backend).
+      let id = m.id;
+      if (!m.idResolved) {
+        const active = readActiveId();
+        if (!active.ok) { stillDeferred.push(m); continue; }
+        id = active.value;
+      }
       merged = applyToken(merged, id, m.token);
       // A blind clear we couldn't classify at the time is now resolvable against the real
       // registry: if it targeted LOCAL (or an id absent from the registry), retire the
@@ -304,8 +373,11 @@ export function loadBackends(): Backend[] {
       }
     }
     cache = merged;
-    pendingMutations = [];
+    pendingMutations = stillDeferred;
     dirty = true;
+    // Unresolved mutations remain (active still unreadable): keep the cache unreconciled so a
+    // later load re-enters this merge branch and replays them — a reconciled cache would skip it.
+    if (stillDeferred.length > 0) cacheReconciled = false;
     flush();
     return cache;
   }
@@ -330,7 +402,11 @@ export function saveBackends(list: Backend[]): void {
   // A full-list save with readable storage is authoritative and safe to persist.
   // Only a save made while storage is unreadable (a blind mutation) stays
   // unreconciled, to be replayed onto the real registry once reads recover.
-  if (readRegistryRaw().ok) cacheReconciled = true;
+  // BUT if blind mutations are still queued, this cache descends from an ephemeral
+  // LOCAL default built while the registry was unreadable — even if reads have since
+  // recovered, marking it reconciled would let it overwrite the real (REMOTE-bearing)
+  // registry we never merged. Leave it unreconciled so loadBackends replays the intent.
+  if (pendingMutations.length === 0 && readRegistryRaw().ok) cacheReconciled = true;
   flush();
 }
 
@@ -345,22 +421,32 @@ export function __resetForTests(): void {
   retiredLegacyToken = undefined;
   lastSeenRaw = null;
   pendingMutations = [];
+  pendingIntents = [];
+  pendingTombstoneWrite = false;
+  lastActiveId = undefined;
 }
 
 export function getActiveBackendId(): string {
   return readActiveId().value;
 }
 
+// The last active id we read SUCCESSFULLY. A later read that throws (SecurityError) is a
+// transient failure, not a switch to LOCAL — falling back to this remembered id keeps a warm
+// REMOTE session routing to REMOTE instead of misrouting to a guessed LOCAL default.
+let lastActiveId: string | undefined;
+
 // Read the active id, distinguishing a real value / default (`ok: true`) from a
-// read that threw (`ok: false`). Callers that would take a DESTRUCTIVE action based
-// on the id being LOCAL (e.g. retiring the legacy token) must not act on a guessed
-// default — an unreadable active key is unknown, not "definitely LOCAL".
+// read that threw (`ok: false`). On a thrown read, `value` is the last id we read
+// successfully (or LOCAL if we never did) — a best guess, NOT confirmation. Callers
+// taking a DESTRUCTIVE action keyed on the id (retiring the legacy token, clearing) must
+// gate on `ok`: an unreadable active key is unknown, not "definitely this id".
 function readActiveId(): { ok: boolean; value: string } {
-  try { return { ok: true, value: localStorage.getItem(ACTIVE_KEY) || LOCAL_BACKEND_ID }; }
-  catch { return { ok: false, value: LOCAL_BACKEND_ID }; }
+  try { const v = localStorage.getItem(ACTIVE_KEY) || LOCAL_BACKEND_ID; lastActiveId = v; return { ok: true, value: v }; }
+  catch { return { ok: false, value: lastActiveId || LOCAL_BACKEND_ID }; }
 }
 
 export function setActiveBackendId(id: string): void {
+  lastActiveId = id;
   try { localStorage.setItem(ACTIVE_KEY, id); } catch { /* private mode */ }
 }
 
@@ -382,6 +468,10 @@ function persistTokenIntent(id: string, token: string | undefined): Backend[] {
   const base = ok ? hydrate(raw) : (cache ?? [localDefault()]);
   const next = applyToken(base, id, token);
   saveBackends(next);
+  // If the persistence write failed (still dirty), remember this as a SINGLE-backend intent so
+  // flush() replays it by re-reading raw — not by re-writing the whole stale snapshot, which
+  // would roll back a concurrent cross-tab rename/add. Clear `dirty` so flush skips whole-list.
+  if (dirty && ok) { pendingIntents.push({ id, token }); dirty = false; }
   return next;
 }
 
@@ -401,10 +491,15 @@ export function setActiveBackendToken(token: string): void {
   setBackendToken(active.value, token, active.ok);
 }
 
-// Clear a SPECIFIC backend's token by id, regardless of which backend is now active. The 401
-// handler uses this with the id captured in the failing request's snapshot, so a backend switch
-// while the request was in flight can't misdirect the clear onto the wrong backend.
-export function clearBackendToken(id: string): void {
+// Clear a SPECIFIC backend's token by id, but ONLY if it still holds `expectedToken` — the
+// value captured in the failing request's snapshot. The 401 handler uses this so that (1) a
+// token REFRESHED on the same backend mid-flight isn't wiped by a stale 401 for the old token,
+// and (2) if that backend was DELETED mid-flight, the clear finds no match and is a no-op —
+// never falling back onto LOCAL and clobbering an unrelated token.
+export function clearBackendTokenIfMatches(id: string, expectedToken: string): void {
+  const list = loadBackends();
+  const target = list.find((b) => b.id === id);
+  if (!target || target.token !== expectedToken) return; // refreshed, or backend gone — do nothing
   setBackendToken(id, '', true); // id is explicit and authoritative — never re-resolve it
 }
 

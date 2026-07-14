@@ -32,11 +32,18 @@ function localDefault(): Backend {
   return { id: LOCAL_BACKEND_ID, label: 'Local', baseUrl: '' };
 }
 
-function read<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch { return null; }
+function rawOf(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+// The persisted shape of the registry. The default LOCAL backend is synthetic —
+// it's always re-seeded on load — so it needn't be stored. Omitting it keeps the
+// stored registry in its ORIGINAL shape (a REMOTE-only list stays REMOTE-only),
+// which is what lets a REMOTE token clear only ever SHRINK the stored value and
+// therefore persist even under a full quota. A LOCAL that carries a token or
+// non-default config is real state and is kept.
+function toStored(list: Backend[]): Backend[] {
+  return list.filter((b) => !(b.id === LOCAL_BACKEND_ID && !b.token && b.label === 'Local' && b.baseUrl === ''));
 }
 
 function write(key: string, value: unknown): boolean {
@@ -69,7 +76,8 @@ let lastSeenRaw: string | null = null;
 // once it's safely written, so a crash between the two can't lose the token.
 function flush(): void {
   if (dirty && cache) {
-    if (write(BACKENDS_KEY, cache)) { dirty = false; lastSeenRaw = JSON.stringify(cache); }
+    const stored = toStored(cache);
+    if (write(BACKENDS_KEY, stored)) { dirty = false; lastSeenRaw = JSON.stringify(stored); }
   }
   if (pendingLegacyRemoval) {
     // Dropping the legacy key while the registry is still unpersisted is safe ONLY
@@ -86,68 +94,49 @@ function flush(): void {
   }
 }
 
-// Load the backend list, seeding + migrating on first run. Always returns at
-// least the built-in LOCAL backend, and guarantees LOCAL is present even if a
-// stored list somehow dropped it.
-export function loadBackends(): Backend[] {
-  if (cache) {
-    // Revalidate against storage: another tab may have cleared a token or added a
-    // backend. If we have nothing unpersisted and storage now holds a different
-    // registry, adopt it — otherwise the next saveBackends() would clobber the
-    // other tab's change with our stale cache.
-    if (!dirty) {
-      let raw: string | null = null;
-      try { raw = localStorage.getItem(BACKENDS_KEY); } catch { /* ignore */ }
-      if (raw && raw !== lastSeenRaw) {
-        const fresh = read<Backend[]>(BACKENDS_KEY);
-        if (fresh && Array.isArray(fresh) && fresh.some((b) => b.id === LOCAL_BACKEND_ID)) {
-          cache = fresh;
-          lastSeenRaw = raw;
-        }
-      }
-    }
-    flush();
+// Normalize a (possibly null / LOCAL-less) stored registry into the in-memory
+// cache, always LOCAL-bearing. This is the single cold-load path: a fresh page
+// load, an external delete, and another tab's reconfiguration all funnel through
+// here from ONE raw read of storage, so raw and cache never disagree.
+function hydrate(raw: string | null): Backend[] {
+  let stored: Backend[] | null = null;
+  try { stored = raw ? (JSON.parse(raw) as Backend[]) : null; } catch { stored = null; }
+  if (stored && Array.isArray(stored) && stored.length > 0 && stored.some((b) => b.id === LOCAL_BACKEND_ID)) {
+    cache = stored;
+    lastSeenRaw = raw;
+    // A LOCAL-bearing registry means migration already happened; any leftover legacy
+    // key is stale (a previous removal must have failed). Reconcile it — retried every
+    // load — so a later reset can't re-migrate the old token. On failure defer via
+    // pendingLegacyRemoval so flush() retries it (the cache-hit path only retries that).
+    try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { pendingLegacyRemoval = true; }
     return cache;
   }
-  const stored = read<Backend[]>(BACKENDS_KEY);
-  if (stored && Array.isArray(stored) && stored.length > 0) {
-    if (stored.some((b) => b.id === LOCAL_BACKEND_ID)) {
-      cache = stored;
-      lastSeenRaw = localStorage.getItem(BACKENDS_KEY);
-      // A LOCAL-bearing registry means migration already happened; any leftover
-      // legacy key is stale (a previous removal must have failed). Reconcile it
-      // here — retried every load — so a later reset can't re-migrate the old token.
-      // If the removal fails, defer it via pendingLegacyRemoval so flush() retries
-      // it on the next operation (the cache-hit path only retries pending removals).
-      try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { pendingLegacyRemoval = true; }
-      return cache;
-    }
-    // Stored backends exist but LOCAL is missing: rebuild it. If a legacy token is
-    // still present it was never migrated (no LOCAL ever held it), so absorb it
-    // now — otherwise rebuilding a tokenless LOCAL would drop the sole credential.
-    const local = localDefault();
-    let legacy = '';
-    try { legacy = localStorage.getItem(LEGACY_TOKEN_KEY) || ''; } catch { /* ignore */ }
-    if (legacy) { local.token = legacy; pendingLegacyRemoval = true; }
-    cache = [local, ...stored];
-    dirty = true; // persist the reconstructed (LOCAL-containing) list
-    flush();
-    return cache;
-  }
-  // First run on a multi-backend build: fold any legacy single token into the
-  // local backend so a remembered share-link/tunnel token keeps working. The
-  // legacy key is only removed once the seeded list is confirmed persisted (via
-  // flush) — else a failed write (private mode / quota) would drop the token with
-  // nothing to re-migrate from. A failed persist leaves dirty + pendingLegacyRemoval
-  // set, so the next operation after storage recovers completes the migration.
+  // No stored list, or one missing LOCAL: (re)build LOCAL. If a legacy token is still
+  // present it was never migrated (no LOCAL ever held it), so absorb it now — else a
+  // tokenless LOCAL would drop the sole credential. Any non-LOCAL entries are kept.
   const local = localDefault();
   let legacy = '';
   try { legacy = localStorage.getItem(LEGACY_TOKEN_KEY) || ''; } catch { /* ignore */ }
   if (legacy) { local.token = legacy; pendingLegacyRemoval = true; }
-  cache = [local];
-  dirty = true;
+  cache = stored && Array.isArray(stored) ? [local, ...stored] : [local];
+  dirty = true; // persist the seeded / reconstructed list (in its original stored shape)
   flush();
   return cache;
+}
+
+// Load the backend list, seeding + migrating on first run. Always returns at
+// least the built-in LOCAL backend, and guarantees LOCAL is present even if a
+// stored list somehow dropped it.
+export function loadBackends(): Backend[] {
+  // Unpersisted local changes are authoritative — never let storage clobber them.
+  if (cache && dirty) { flush(); return cache; }
+  // Single read of the raw registry drives both the no-op and revalidation paths, so
+  // the parsed value and the raw we compare against can't drift out of sync.
+  const raw = rawOf(BACKENDS_KEY);
+  if (cache && raw === lastSeenRaw) { flush(); return cache; }
+  // Cold load, or another tab changed storage (including a delete → raw null): adopt
+  // it through the same normalization a fresh page load uses.
+  return hydrate(raw);
 }
 
 // Update the in-memory source of truth first, then best-effort mirror to

@@ -283,6 +283,55 @@ test('cross-tab clear is adopted, not clobbered, on the next load', async () => 
   assert.equal(persistedNow.find((b) => b.id === 'remote')?.baseUrl, 'https://box.example.com');
 });
 
+test('REMOTE-only stored registry: clearing the active REMOTE token persists under a full quota', async () => {
+  // Blocker A: a stored [remote] list has no LOCAL. Loading rebuilds [local, remote]
+  // in-memory, but the SYNTHETIC default LOCAL isn't persisted -- the stored shape
+  // stays [remote]. So clearing REMOTE only ever shrinks the stored value and
+  // persists even when the quota is full; a reload does NOT resurrect the token.
+  const stored = JSON.stringify([{ id: 'remote', label: 'Box', baseUrl: 'https://box.example.com', token: 'remote-tok' }]);
+  const ls = installLocalStorage({ macaron_backends: stored, macaron_active_backend: 'remote' });
+  const { backends, auth } = await freshModules();
+  assert.equal(auth.getToken(), 'remote-tok');   // active = remote
+  ls.quotaFull = true;                            // growing writes fail, shrinking ones don't
+  auth.clearToken();                              // clears the REMOTE token
+  assert.equal(auth.getToken(), '');
+  const persistedNow = JSON.parse(localStorage.getItem('macaron_backends')!) as Backend[];
+  assert.equal(persistedNow.find((b) => b.id === 'remote')?.token, undefined);
+  assert.equal(persistedNow.find((b) => b.id === 'remote')?.baseUrl, 'https://box.example.com');
+  // A reload (still quota-full) reads the cleared REMOTE back -- no resurrection.
+  backends.__resetForTests();
+  backends.setActiveBackendId('remote');
+  assert.equal(auth.getToken(), '');
+});
+
+test('another tab deleting the registry is adopted, not overwritten from stale cache', async () => {
+  // Blocker B: revalidation must treat an external delete (raw === null) the same as
+  // any other storage change and re-hydrate through the cold-load path, instead of
+  // ignoring it and later re-persisting the stale cached token.
+  const persisted = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'tok-1' }]);
+  installLocalStorage({ macaron_backends: persisted });
+  const { backends, auth } = await freshModules();
+  assert.equal(auth.getToken(), 'tok-1');
+  localStorage.removeItem('macaron_backends');   // another tab wipes the registry
+  const list = backends.loadBackends();          // must re-seed a fresh tokenless LOCAL
+  assert.equal(list.find((b) => b.id === 'local')?.token, undefined);
+  assert.equal(auth.getToken(), '');
+});
+
+test('another tab clearing a REMOTE-only token is adopted on the next load', async () => {
+  // Blocker B: a REMOTE-only stored registry (no LOCAL) changed by another tab must
+  // still be revalidated -- the earlier LOCAL-only guard ignored REMOTE-only updates.
+  const stored = JSON.stringify([{ id: 'remote', label: 'Box', baseUrl: 'https://box.example.com', token: 'remote-tok' }]);
+  installLocalStorage({ macaron_backends: stored, macaron_active_backend: 'remote' });
+  const { backends, auth } = await freshModules();
+  assert.equal(auth.getToken(), 'remote-tok');
+  // Another tab clears the REMOTE token directly in storage.
+  localStorage.setItem('macaron_backends', JSON.stringify([{ id: 'remote', label: 'Box', baseUrl: 'https://box.example.com' }]));
+  const list = backends.loadBackends();
+  assert.equal(list.find((b) => b.id === 'remote')?.token, undefined);
+  assert.equal(auth.getToken(), '');
+});
+
 test('no legacy token → LOCAL backend has no token', async () => {
   installLocalStorage();
   const { auth } = await freshModules();

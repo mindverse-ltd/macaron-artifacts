@@ -9,7 +9,7 @@
 // token, so same-origin local usage behaves exactly as it did with the old
 // single global token.
 
-import { getActiveBackend, setActiveBackendToken } from './backends';
+import { getActiveBackend, setActiveBackendToken, clearBackendToken } from './backends';
 import type { Backend } from './backends';
 
 // Derive the request URL / auth header from a SINGLE backend snapshot. authedFetch
@@ -59,7 +59,9 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
   if (auth.Authorization) headers.set('Authorization', auth.Authorization);
   const resp = await fetch(urlFor(backend, input), { ...init, headers });
   if (resp.status === 401) {
-    clearToken();
+    // Clear the token of the backend THIS request used (by id from the snapshot), not whatever
+    // is active now — the user may have switched backends while the request was in flight.
+    clearBackendToken(backend.id);
     window.dispatchEvent(new Event('macaron:auth-required'));
   }
   return resp;

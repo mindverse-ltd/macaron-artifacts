@@ -720,3 +720,150 @@ test('token write re-hydrates freshest raw: a concurrent cross-tab backend edit 
   assert.ok(stored.find((b) => b.id === 'b'));                        // cross-tab new backend preserved
   assert.equal(stored.find((b) => b.id === 'b')?.token, 'tok-b');
 });
+
+test('401 clears the token of the request-snapshot backend, not the one active now', async () => {
+  // Meeseeks: on 401 authedFetch must clear the backend THIS request used (by snapshot id).
+  // If the user switched backends mid-flight, clearing "the active backend" would wrongly
+  // wipe the new backend's token and leave the failing one authed.
+  installLocalStorage();
+  const { backends, auth } = await freshModules();
+  backends.saveBackends([
+    { id: 'a', label: 'A', baseUrl: 'https://a.test', token: 'tok-a' },
+    { id: 'b', label: 'B', baseUrl: 'https://b.test', token: 'tok-b' },
+  ]);
+  backends.setActiveBackendId('a');
+  const realFetch = globalThis.fetch;
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () => {
+    backends.setActiveBackendId('b'); // user switches to B while A's request is in flight
+    return { status: 401 } as Response;
+  }) as typeof fetch;
+  const realDispatch = (globalThis as { window?: { dispatchEvent(e: unknown): boolean } }).window?.dispatchEvent;
+  (globalThis as unknown as { window: { dispatchEvent(e: unknown): boolean } }).window = { dispatchEvent: () => true };
+  await auth.authedFetch('/api/x');
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = realFetch;
+  if (realDispatch) (globalThis as unknown as { window: { dispatchEvent(e: unknown): boolean } }).window.dispatchEvent = realDispatch;
+  const list = backends.loadBackends();
+  assert.equal(list.find((b) => b.id === 'a')?.token, undefined); // A (the 401'd backend) cleared
+  assert.equal(list.find((b) => b.id === 'b')?.token, 'tok-b');   // B (now active) untouched
+});
+
+test('tombstone WRITE exception: in-memory retirement still guards this session', async () => {
+  // Meeseeks: retireLegacy's setItem(tombstone) can throw. The durable guard is lost, but the
+  // in-memory retiredLegacyToken must still prevent re-absorb within the session.
+  const ls = installLocalStorage({ macaron_auth_token: 'legacy-abc' });
+  const realSet = localStorage.setItem.bind(localStorage);
+  (localStorage as unknown as { setItem: (k: string, v: string) => void }).setItem = (k: string, v: string) => {
+    if (k === 'macaron_auth_token_retired') throw new Error('quota'); // tombstone write fails
+    realSet(k, v);
+  };
+  const { backends, auth } = await freshModules();
+  assert.equal(auth.getToken(), 'legacy-abc');
+  auth.clearToken();
+  assert.equal(auth.getToken(), '');
+  assert.equal(localStorage.getItem('macaron_auth_token_retired'), null); // write threw → no tombstone
+  (localStorage as unknown as { setItem: (k: string, v: string) => void }).setItem = realSet;
+  // Another tab wipes the registry; in-memory retirement (not the tombstone) must hold.
+  localStorage.removeItem('macaron_backends');
+  assert.equal(backends.loadBackends().find((b) => b.id === 'local')?.token, undefined);
+});
+
+test('tombstone READ exception during hydrate: cold recovery still yields a LOCAL backend', async () => {
+  // Meeseeks: readTombstone() can throw on a cold hydrate. It must degrade to "no durable
+  // tombstone" without crashing the load.
+  const ls = installLocalStorage({ macaron_auth_token_retired: 'legacy-abc', macaron_auth_token: 'legacy-abc' });
+  const { backends } = await freshModules();
+  const realGet = localStorage.getItem.bind(localStorage);
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = (k: string) => {
+    if (k === 'macaron_auth_token_retired') throw new Error('SecurityError');
+    return realGet(k);
+  };
+  const list = backends.loadBackends();               // must not throw
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = realGet;
+  assert.ok(list.find((b) => b.id === 'local'));       // LOCAL present
+});
+
+test('tombstone REMOVE exception: legacy key still removed, stale tombstone harmless', async () => {
+  // Meeseeks: removeLegacyKey removes the legacy key then the tombstone; if the tombstone
+  // removeItem throws, the legacy key is still gone (nothing to re-absorb) and the load succeeds.
+  installLocalStorage({ macaron_backends: JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'reg-tok' }]), macaron_auth_token: 'stale', macaron_auth_token_retired: 'stale' });
+  const { backends } = await freshModules();
+  const realRemove = localStorage.removeItem.bind(localStorage);
+  (localStorage as unknown as { removeItem: (k: string) => void }).removeItem = (k: string) => {
+    if (k === 'macaron_auth_token_retired') throw new Error('fail'); // tombstone removal throws
+    realRemove(k);
+  };
+  const list = backends.loadBackends();               // reconcile removes the stale legacy key
+  (localStorage as unknown as { removeItem: (k: string) => void }).removeItem = realRemove;
+  assert.equal(list.find((b) => b.id === 'local')?.token, 'reg-tok'); // registry token intact
+  assert.equal(localStorage.getItem('macaron_auth_token'), null);     // stale legacy key gone
+});
+
+test('by-value CAS keeps a different tombstone from blocking another tab’s fresh legacy token', async () => {
+  // Meeseeks: if the tombstone records value X but the legacy key now holds a NEW value Y
+  // (another tab logged in), removeLegacyKey must NOT delete Y, and must drop the stale
+  // tombstone X so it can't shadow Y on the next cold load.
+  const ls = installLocalStorage({ macaron_auth_token: 'legacy-abc' });
+  ls.failWrites = true;                                // clear defers removal
+  const { backends, auth } = await freshModules();
+  auth.clearToken();                                   // retire 'legacy-abc'
+  ls.failWrites = false;
+  localStorage.setItem('macaron_auth_token', 'fresh-xyz'); // another tab writes a new token
+  backends.loadBackends();                             // CAS: leave fresh, drop stale tombstone
+  assert.equal(localStorage.getItem('macaron_auth_token'), 'fresh-xyz');
+  assert.equal(localStorage.getItem('macaron_auth_token_retired'), null); // stale tombstone dropped
+  // Cold reload: the fresh legacy token migrates onto LOCAL (not blocked by the old tombstone).
+  backends.__resetForTests();
+  assert.equal(backends.getActiveBackend().token, 'fresh-xyz');
+});
+
+test('cold recovery hydrates real registry then replays the deferred clear onto real LOCAL', async () => {
+  // Meeseeks: a clear issued while reads AND writes fail is fully blind. On recovery loadBackends
+  // must hydrate the real registry first, then replay the intent — the clear wins over the
+  // persisted LOCAL token, and it survives a subsequent real reload.
+  const persisted = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'reg-tok' }]);
+  const ls = installLocalStorage({ macaron_backends: persisted });
+  ls.failReads = true;
+  const { backends, auth } = await freshModules();
+  auth.clearToken();                                   // blind clear, deferred
+  assert.equal(auth.getToken(), '');
+  ls.failReads = false;
+  const list = backends.loadBackends();                // hydrate(real) THEN replay
+  assert.equal(list.find((b) => b.id === 'local')?.token, undefined); // clear won over reg-tok
+  backends.__resetForTests();
+  assert.equal(backends.getActiveBackend().token, undefined);         // durable across reload
+});
+
+test('recovery re-reads the CURRENT active id when replaying a token set', async () => {
+  // Meeseeks: on recovery the replay must resolve against the freshest state. A token SET made
+  // while storage was unreadable targets the id read at call time; after recovery the registry
+  // is re-hydrated and the set lands on the real backend of that id.
+  const persisted = JSON.stringify([
+    { id: 'local', label: 'Local', baseUrl: '', token: 'lt' },
+    { id: 'remote', label: 'Box', baseUrl: 'https://box.example.com' },
+  ]);
+  const ls = installLocalStorage({ macaron_backends: persisted, macaron_active_backend: 'remote' });
+  ls.failReads = true;
+  const { backends, auth } = await freshModules();
+  auth.setToken('new-remote-tok');                     // blind set against active 'remote'
+  ls.failReads = false;
+  const list = backends.loadBackends();                // hydrate real registry, replay set
+  assert.equal(list.find((b) => b.id === 'remote')?.token, 'new-remote-tok'); // landed on remote
+  assert.equal(list.find((b) => b.id === 'local')?.token, 'lt');              // local untouched
+});
+
+test('failed token intent replays once storage recovers (no lost login under a frozen write)', async () => {
+  // Meeseeks: a token set whose write fails must be retried by flush() once storage recovers,
+  // without the caller re-issuing it.
+  const ls = installLocalStorage();
+  const { backends, auth } = await freshModules();
+  backends.loadBackends();
+  ls.failWrites = true;                                // writes freeze
+  auth.setToken('tok-1');                              // in-memory authoritative, persist deferred
+  assert.equal(auth.getToken(), 'tok-1');
+  const midRaw = localStorage.getItem('macaron_backends');
+  assert.ok(!midRaw || !midRaw.includes('tok-1'));     // token not persisted yet (write frozen)
+  ls.failWrites = false;                               // storage recovers
+  backends.loadBackends();                             // flush() retries the deferred write
+  const stored = JSON.parse(localStorage.getItem('macaron_backends')!) as Backend[];
+  assert.equal(stored.find((b) => b.id === 'local')?.token, 'tok-1'); // login persisted on recovery
+});

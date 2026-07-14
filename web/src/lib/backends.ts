@@ -131,7 +131,9 @@ let lastSeenRaw: string | null = null;
 // cache yet). They can't be persisted blind — doing so would clobber unseen state.
 // On the next successful read they're REPLAYED onto the real registry, so the
 // user's intent survives without overwriting backends we couldn't observe.
-let pendingMutations: Array<{ id: string; token: string | undefined }> = [];
+// `idResolved` = the active id was actually readable at call time; when false the id
+// is only a guessed default and must be RE-READ against fresh storage at replay time.
+let pendingMutations: Array<{ id: string; token: string | undefined; idResolved: boolean }> = [];
 
 // Retire a legacy value: mark it dead so it's never re-absorbed, and schedule the
 // key for removal. Also persist a durable tombstone so the retirement survives a
@@ -289,11 +291,14 @@ export function loadBackends(): Backend[] {
   if (cache && dirty && !cacheReconciled) {
     let merged = hydrate(raw);
     for (const m of pendingMutations) {
-      merged = applyToken(merged, m.id, m.token);
+      // If the id was a guess (active read threw at call time), re-resolve it now that the
+      // active key is readable again — the intent targeted "the active backend", whatever it is.
+      const id = m.idResolved ? m.id : readActiveId().value;
+      merged = applyToken(merged, id, m.token);
       // A blind clear we couldn't classify at the time is now resolvable against the real
       // registry: if it targeted LOCAL (or an id absent from the registry), retire the
       // legacy value BY VALUE so the just-cleared token can't re-migrate on a later reload.
-      if (!m.token && (m.id === LOCAL_BACKEND_ID || !merged.some((b) => b.id === m.id))) {
+      if (!m.token && (id === LOCAL_BACKEND_ID || !merged.some((b) => b.id === id))) {
         retireLegacy(legacyBackedLocalToken || readLegacy());
         merged = merged.map((b) => (b.id === LOCAL_BACKEND_ID ? { ...b, token: undefined } : b));
       }
@@ -383,28 +388,42 @@ function persistTokenIntent(id: string, token: string | undefined): Backend[] {
 // Persist a token against the active backend (used by the login flow). Writing
 // an empty string clears it. This replaces the old single-key token storage.
 export function setActiveBackendToken(token: string): void {
-  const list = loadBackends();
-  const reconciled = cacheReconciled; // did the load above see real storage?
   const active = readActiveId();
-  const id = active.value;
   // A CLEAR whose target we only GUESSED is destructive on the wrong backend: applying it to a
   // guessed LOCAL both drops LOCAL's token and lets flush() retire the legacy value. Skip it
   // ONLY when the registry WAS readable (reconciled) but the active-id read threw — there we're
   // about to act immediately on a wrong LIVE target and can't confirm it. When nothing was
-  // readable (unreconciled), we instead defer via pendingMutations below, which re-resolves the
+  // readable (unreconciled), setBackendToken defers via pendingMutations and re-resolves the
   // real target on replay, so a legitimate blind clear still survives.
-  if (!token && reconciled && !active.ok) return;
+  if (!token && !active.ok && readRegistryRaw().ok) return;
+  // active.ok tells the deferred-replay path whether `active.value` is a real id or a guess it
+  // must re-resolve once the active key is readable again.
+  setBackendToken(active.value, token, active.ok);
+}
+
+// Clear a SPECIFIC backend's token by id, regardless of which backend is now active. The 401
+// handler uses this with the id captured in the failing request's snapshot, so a backend switch
+// while the request was in flight can't misdirect the clear onto the wrong backend.
+export function clearBackendToken(id: string): void {
+  setBackendToken(id, '', true); // id is explicit and authoritative — never re-resolve it
+}
+
+// Shared token set/clear for a known backend id. `token===''` clears. `idResolved` = the id
+// is authoritative (not a guessed active default); a deferred replay re-reads active when false.
+function setBackendToken(id: string, token: string, idResolved: boolean): void {
+  const list = loadBackends();
+  const reconciled = cacheReconciled; // did the load above see real storage?
   // Explicitly clearing the LOCAL token must also invalidate the legacy source,
   // even if the registry write below fails (private mode / quota): otherwise the
   // next loadBackends() would re-migrate the stale legacy token and resurrect a
   // token the user just cleared. Retire the value so it stays dead across a failed
   // removal / registry wipe, and defer the key removal to flush().
-  if (!token && active.ok && (id === LOCAL_BACKEND_ID || !list.some((b) => b.id === id))) {
+  if (!token && (id === LOCAL_BACKEND_ID || !list.some((b) => b.id === id))) {
     retireLegacy(legacyBackedLocalToken || readLegacy());
   }
   // If storage was unreadable, this mutation was applied blind: record it so the next
   // successful read replays it onto the real registry rather than overwriting.
-  if (!reconciled) { pendingMutations.push({ id, token: token || undefined }); saveBackends(applyToken(list, id, token)); return; }
+  if (!reconciled) { pendingMutations.push({ id, token: token || undefined, idResolved }); saveBackends(applyToken(list, id, token)); return; }
   // Reconciled: persist by re-hydrating the freshest raw so a concurrent cross-tab change to a
   // different backend survives — we only mutate the one backend this intent names.
   persistTokenIntent(id, token);

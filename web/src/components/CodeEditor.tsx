@@ -14,7 +14,7 @@ const MONACO_THEMES: Record<ResolvedTheme, string> = { light: 'vitesse-light', d
 
 // Mirrored from macaron-genui-demo's modernMonacoConfig.ts EDITOR_OPTIONS so
 // both apps' editors feel identical — interval line numbers, sticky scroll,
-// phase cursor, no indent guides. Only the font stack differs (ours).
+// phase cursor, no indent guides. Typography is tuned for our compact tiles.
 const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   automaticLayout: true,
   minimap: { enabled: true },
@@ -26,7 +26,7 @@ const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   tabSize: 2,
   insertSpaces: true,
   padding: { top: 16, bottom: 16 },
-  fontSize: 13,
+  fontSize: 12,
   lineHeight: 20,
   fontLigatures: true,
   lineNumbers: 'interval',

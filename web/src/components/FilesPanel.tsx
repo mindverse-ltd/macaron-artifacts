@@ -6,6 +6,7 @@
 // Mirrors GitPanel's slide-in shell (fixed backdrop + right-side panel
 // via the .above-modal escape hatch so it stacks over the composer).
 
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type FileEntry, type FileContentSearchResponse } from '../lib/api';
 
@@ -56,7 +57,7 @@ function TreeRow({
         onClick={toggle}
         title={entry.path}
       >
-        <span className="fp-caret">{isDir ? (open ? '▾' : '▸') : ' '}</span>
+        <span className="fp-caret">{isDir ? (open ? <ChevronDown size={10} aria-hidden="true" /> : <ChevronRight size={10} aria-hidden="true" />) : ' '}</span>
         <span className="fp-name">{entry.name}</span>
       </button>
       {isDir && open && (
@@ -151,7 +152,7 @@ export function FilesPanel({
     <aside className="fp-panel" aria-label="Files panel">
         <div className="fp-head">
           <div className="fp-title">Files</div>
-          <button className="fp-close" onClick={onClose} title="Close" aria-label="Close">×</button>
+          <button className="fp-close" onClick={onClose} title="Close" aria-label="Close"><X size={14} aria-hidden="true" /></button>
         </div>
         <div className="fp-search">
           <input

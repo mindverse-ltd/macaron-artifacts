@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
 import { sessionToMarkdown, type Diagnostic } from '@macaron/shared';
 import {
   api,
@@ -379,8 +380,8 @@ function TodoItem({ id, todos }: { id?: string; todos: TodoEntry[] }) {
             t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content;
           return (
             <li key={idx} className={`ti-todo-li ti-todo-${t.status}`}>
-              <span className="ti-todo-icon">
-                {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '▪' : '☐'}
+              <span className="ti-todo-icon" role="img" aria-label={t.status.replace('_', ' ')}>
+                {t.status === 'completed' ? <Check size={12} aria-hidden="true" /> : t.status === 'in_progress' ? <CircleDot size={12} aria-hidden="true" /> : <Square size={12} aria-hidden="true" />}
               </span>
               <span className="ti-todo-text">{label}</span>
             </li>
@@ -389,7 +390,7 @@ function TodoItem({ id, todos }: { id?: string; todos: TodoEntry[] }) {
       </ul>
       {hiddenCompleted > 0 && (
         <button className="ti-expand" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '↑ collapse' : `… +${hiddenCompleted} completed`}
+          {expanded ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : `… +${hiddenCompleted} completed`}
         </button>
       )}
     </div>
@@ -412,11 +413,11 @@ function SystemEventItem({ eventType, text }: { eventType: string; text: string 
   const shown = open || !isLong ? text : text.slice(0, 200) + '…';
   return (
     <div className="ti-sysevent">
-      <span className="ti-sysevent-mark">※</span>
+      <span className="ti-sysevent-mark"><Info size={12} aria-hidden="true" /></span>
       <span className="ti-sysevent-label">{label}:</span> {shown}
       {isLong && (
         <button className="ti-expand ti-sysevent-toggle" onClick={() => setOpen((v) => !v)}>
-          {open ? ' ↑ collapse' : ' expand'}
+          {open ? <> <ArrowUp size={12} aria-hidden="true" /> collapse</> : ' expand'}
         </button>
       )}
     </div>
@@ -440,7 +441,7 @@ function UserItem({
   if (!hasNonEmptyText && !hasImage) return null;
   return (
     <div className="ti-user">
-      <span className="ti-chev">❯</span>
+      <span className="ti-chev"><ChevronRight size={14} aria-hidden="true" /></span>
       <div className="ti-user-body">
         {parts.map((p, idx) =>
           p.kind === 'text' ? (
@@ -460,7 +461,7 @@ function UserItem({
           title="Fork a new session from before this message"
           aria-label="Fork"
         >
-          ⑂ fork
+          <GitFork size={13} aria-hidden="true" /> fork
         </button>
       )}
       {onRewind && (
@@ -471,7 +472,7 @@ function UserItem({
           title="Rewind to before this message"
           aria-label="Rewind"
         >
-          ↩ rewind
+          <Undo2 size={13} aria-hidden="true" /> rewind
         </button>
       )}
     </div>
@@ -501,7 +502,7 @@ function LiveAssistantItem({ text, streaming }: { text: string; streaming: boole
 }
 
 function ThinkingItem({ text }: { text: string }) {
-  return <div className="ti-thinking">💭 {text}</div>;
+  return <div className="ti-thinking"><MessageCircle size={14} aria-hidden="true" /> {text}</div>;
 }
 
 // Assistant-side inline image (rare — some models emit vision output).
@@ -559,14 +560,14 @@ function SubagentItem({
   return (
     <div className="ti-tool ti-subagent">
       <button type="button" className="ti-tool-head ti-subagent-head" onClick={toggle}>
-        <span className="ti-dot">🤖</span>
+        <span className="ti-dot"><Bot size={14} aria-hidden="true" /></span>
         <span className="ti-tool-name">{label}</span>
         {it.description && (
           <span className="ti-tool-args" title={it.description}>
             ({it.description})
           </span>
         )}
-        <span className="ti-subagent-toggle">{open ? '▾' : '▸'}</span>
+        <span className="ti-subagent-toggle">{open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</span>
       </button>
       {open && (
         <div className="ti-subagent-body">
@@ -595,7 +596,7 @@ function ToolItem({ id, name, input, result, durationMs, isError, diagnostics }:
   return (
     <div className="ti-tool" data-item-id={id}>
       <div className="ti-tool-head">
-        <span className={`ti-dot${isError ? ' ti-dot-error' : ''}`}>●</span>
+        <span className={`ti-dot${isError ? ' ti-dot-error' : ''}`}><Circle size={8} fill="currentColor" aria-hidden="true" /></span>
         <span className="ti-tool-name">{name}</span>
         {header && (
           <span className="ti-tool-args" title={header}>
@@ -611,7 +612,7 @@ function ToolItem({ id, name, input, result, durationMs, isError, diagnostics }:
             {previewLines.length > 0 && <pre>{previewLines.join('\n')}</pre>}
             {extra > 0 && (
               <button className="ti-expand" onClick={() => setOpen((v) => !v)}>
-                {open ? '↑ collapse' : `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)`}
+                {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)`}
               </button>
             )}
           </div>
@@ -754,7 +755,7 @@ function PermissionItem({
   const remember = it.suggestion?.label;
   return (
     <div className="ti-perm">
-      <span className="ti-perm-icon">🔒</span>
+      <span className="ti-perm-icon"><Lock size={14} aria-hidden="true" /></span>
       <span className="ti-perm-title">
         Run <strong>{it.toolName}</strong>?
       </span>
@@ -820,7 +821,7 @@ function PlanApprovalItem({
   return (
     <div className="ti-plan">
       <div className="ti-plan-head">
-        <span className="ti-plan-icon">📋</span>
+        <span className="ti-plan-icon"><ClipboardList size={14} aria-hidden="true" /></span>
         <span className="ti-plan-title">Ready to code?</span>
         <span className="ti-plan-sub">Here is the plan — choose how to proceed.</span>
       </div>
@@ -938,9 +939,9 @@ function CollapsedGroupItem({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <span className="ti-collapsed-dot">●</span>
+        <span className="ti-collapsed-dot"><Circle size={8} fill="currentColor" aria-hidden="true" /></span>
         <span className="ti-collapsed-summary">{summary || `${it.ids.length} operations`}</span>
-        <span className="ti-collapsed-caret">{open ? '▾' : '▸'}</span>
+        <span className="ti-collapsed-caret">{open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</span>
       </button>
       {open && (
         <div className="ti-collapsed-body">
@@ -999,11 +1000,7 @@ function SessionActionsMenu({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="5" cy="12" r="1.4" fill="currentColor" />
-          <circle cx="12" cy="12" r="1.4" fill="currentColor" />
-          <circle cx="19" cy="12" r="1.4" fill="currentColor" />
-        </svg>
+        <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
       </button>
       {open && (
         <div className="actions-menu">
@@ -1101,7 +1098,7 @@ function PendingQueue({
               aria-label="Move up"
               disabled={idx === 0}
               onClick={() => onMove(q.id, -1)}
-            >↑</button>
+            ><ArrowUp size={14} aria-hidden="true" /></button>
             <button
               type="button"
               className="icon-btn pending-item-btn"
@@ -1109,14 +1106,14 @@ function PendingQueue({
               aria-label="Move down"
               disabled={idx === queue.length - 1}
               onClick={() => onMove(q.id, 1)}
-            >↓</button>
+            ><ArrowDown size={14} aria-hidden="true" /></button>
             <button
               type="button"
               className="icon-btn pending-item-btn"
               title="Remove"
               aria-label="Remove"
               onClick={() => onRemove(q.id)}
-            >×</button>
+            ><X size={14} aria-hidden="true" /></button>
           </span>
         </div>
       ))}
@@ -2625,12 +2622,7 @@ export function Session(props: SessionProps = {}) {
               aria-label="Refresh"
               disabled={isNew || sending || polling || handoffPending}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16" />
-                <path d="M3 12a9 9 0 0 1 15.36-6.36L21 8" />
-                <polyline points="21 3 21 8 16 8" />
-                <polyline points="3 21 3 16 8 16" />
-              </svg>
+              <RefreshCw size={16} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -2768,7 +2760,9 @@ export function Session(props: SessionProps = {}) {
                   className="img-chip-x"
                   onClick={() => setImages((cur) => cur.filter((c) => c.id !== img.id))}
                   aria-label="Remove image"
-                >×</button>
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
               </div>
             ))}
           </div>
@@ -2840,9 +2834,7 @@ export function Session(props: SessionProps = {}) {
             aria-label="Attach image"
             onClick={() => fileInputRef.current?.click()}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
+            <Paperclip size={16} strokeWidth={2} aria-hidden="true" />
           </button>
           <SessionActionsMenu
             disabled={isNew || sending}
@@ -2861,13 +2853,7 @@ export function Session(props: SessionProps = {}) {
               aria-pressed={isolate}
               onClick={() => setIsolate((v) => !v)}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="6" cy="6" r="3" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="9" r="3" />
-                <path d="M6 9v6" />
-                <path d="M18 12a6 6 0 0 1-6 6H9" />
-              </svg>
+              <GitBranch size={16} strokeWidth={2} aria-hidden="true" />
             </button>
           )}
           <div className="session-input-spacer" />
@@ -2890,10 +2876,7 @@ export function Session(props: SessionProps = {}) {
                     title="Queue — sends after the current turn finishes"
                     aria-label="Queue message"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 5v14" />
-                      <path d="M5 12h14" />
-                    </svg>
+                    <Plus size={14} strokeWidth={2.4} aria-hidden="true" />
                   </button>
                 </>
               )}
@@ -2905,9 +2888,7 @@ export function Session(props: SessionProps = {}) {
                 title="Stop generation"
                 aria-label="Stop"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
-                </svg>
+                <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
               </button>
             </>
           ) : (
@@ -2917,10 +2898,7 @@ export function Session(props: SessionProps = {}) {
               disabled={!input.trim() && images.length === 0}
               aria-label="Send"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 19V5" />
-                <path d="m5 12 7-7 7 7" />
-              </svg>
+              <ArrowUp size={14} strokeWidth={2.4} aria-hidden="true" />
             </button>
           )}
         </div>

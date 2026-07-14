@@ -820,6 +820,50 @@ test('real structure() round-24: bidirectional generic classification, opener-lo
   assert.ok((await hits(single, 'singlebody24')) > 0 && (await hits(single, 'prefix')) > 0, 'single-close body/prefix lost');
 });
 
+// EVE round 25 — pairing runs on the REAL hierarchy (no `sameOpen` name-set guessing): a prior technical
+// generic, a later same-name real flow, and a same-name NESTED flow each pair by their actual level. The
+// lossy strip boundary is opener-LOCAL (a double-close-glued-`>` past the fake early `>`, code-span aware —
+// never a whole-chunk scan), and the `()` desync no longer misjudges JS lexical contexts (regex, comment).
+test('real structure() round-25: real-hierarchy pairing, opener-local lossy boundary, lexical-safe desync', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r25', data: { title: '/r25', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // P1 #1 — a PRIOR technical generic (`<$Panel extends STALEGEN24>`) then a LATER real same-name flow: the
+  // lone `</$Panel>` pops the nearer flow by LIFO, so the stale generic stays kept and the flow markup drops.
+  // Holds for a bare (`<$Panel>`) and an attr'd (`<$Panel attr="x">`) real opener alike.
+  const staleThenFlow = 'Technical type <$Panel extends STALEGEN24>.\n\nprefix<$Panel>FLOWINTRO24\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(staleThenFlow, 'STALEGEN24')) > 0 && (await hits(staleThenFlow, 'FLOWINTRO24')) > 0, 'stale generic or later-flow intro lost');
+  const staleThenAttr = 'Technical type <$Panel extends STALEGEN24>.\n\nprefix<$Panel attr="x">REALATTR24\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(staleThenAttr, 'STALEGEN24')) > 0 && (await hits(staleThenAttr, 'REALATTR24')) > 0, 'stale generic or attr-flow intro lost');
+  assert.equal(await hits(staleThenAttr, 'attr'), 0, 'real attr-flow opener attribute leaked');
+
+  // P1 #1 (nested) — a same-name flow NESTED inside a same-name flow, the inner opener generic-shaped
+  // (`<$Panel extends INNERATTR24>`): both `</$Panel>` closers pop both levels, so no opener attribute leaks.
+  const nested = '<$Panel a="1">\n\ntop\n\n<$Panel extends INNERATTR24>\n\n## H\n\ninner\n\n</$Panel>\n\nmid\n\n</$Panel>';
+  assert.ok((await hits(nested, 'top')) > 0 && (await hits(nested, 'inner')) > 0 && (await hits(nested, 'mid')) > 0, 'nested-flow body lost');
+  assert.equal(await hits(nested, 'INNERATTR24'), 0, 'nested-flow inner opener attribute leaked');
+
+  // P1 #2 — a LOSSY opener's cleanup boundary stays confined to the opener: it stops at the double-close
+  // glued to `>` (`)}>`) just past the fake early `>`, so honest intro AFTER it survives — a comparison
+  // (`arr[i]>0`) and a code span (`` `arr[i]}>0` ``, whose literal `]}>` the code-span-aware scan skips).
+  const lossyCmp = 'prefix<$Panel value={fn("a \\" } > x", y)}>LEFT25 arr[i]>0 RIGHT25\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(lossyCmp, 'LEFT25')) > 0 && (await hits(lossyCmp, 'arr')) > 0 && (await hits(lossyCmp, 'RIGHT25')) > 0, 'lossy+comparison intro lost');
+  assert.equal(await hits(lossyCmp, 'value'), 0, 'lossy opener attribute leaked past its own boundary');
+  const lossyCode = 'prefix<$Panel value={fn("a \\" } > x", y)}>LEFTCODE25 `arr[i]}>0` RIGHTCODE25\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(lossyCode, 'LEFTCODE25')) > 0 && (await hits(lossyCode, 'RIGHTCODE25')) > 0, 'lossy+code-span intro lost');
+  assert.equal(await hits(lossyCode, 'value'), 0, 'lossy opener attribute leaked past a code span');
+
+  // P1 #3 — the desync test must not misjudge JS lexical contexts: a regex `/(/` and a comment `/* ( */`
+  // inside an honest attribute are NOT unbalanced parens, so the opener is clean and the intro survives.
+  const regexAttr = 'prefix<$Panel pattern={/\\(/}>LEFT25 arr[i]>0 RIGHT25\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(regexAttr, 'LEFT25')) > 0 && (await hits(regexAttr, 'arr')) > 0 && (await hits(regexAttr, 'RIGHT25')) > 0, 'regex-attr opener misjudged lossy, intro eaten');
+  const commentAttr = 'prefix<$Panel x={/* ( */ 1}>LEFT25 arr[i]>0 RIGHT25\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(commentAttr, 'LEFT25')) > 0 && (await hits(commentAttr, 'arr')) > 0 && (await hits(commentAttr, 'RIGHT25')) > 0, 'comment-attr opener misjudged lossy, intro eaten');
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

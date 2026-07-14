@@ -31,6 +31,9 @@ import { subscribeSystemEvents } from '../lib/systemEvents';
 import { GitPanel } from '../components/GitPanel';
 import { Terminal } from '../components/Terminal';
 import { isTerminalSid, killTerminal } from '../lib/terminal';
+import { isFileSid, filePath } from '../lib/fileTile';
+import { FilesPanel } from '../components/FilesPanel';
+import { FileTile } from '../components/FileTile';
 
 // One row cell in the canvas grid (px). CSS grid-auto-rows uses this; a
 // tile's rowSpan is a multiplier. Kept in sync with `.ws-canvas-grid-v2`
@@ -64,6 +67,7 @@ export function Workspace() {
   // jsonl. Cleared after the tile picks it up.
   const [pendingSids, setPendingSids] = useState<Set<string>>(new Set());
   const [gitOpen, setGitOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -262,9 +266,9 @@ export function Workspace() {
           <button className="ghost small" onClick={() => canvas.addTerminal()}>
             + Terminal
           </button>
-          <Link className="ghost small" to={`/w/${encodeURIComponent(project)}/files`}>
+          <button className="ghost small" onClick={() => setFilesOpen(true)}>
             Files
-          </Link>
+          </button>
           <button className="ghost small" onClick={handleNewSession}>
             + New Session
           </button>
@@ -272,6 +276,17 @@ export function Workspace() {
       </header>
 
       {gitOpen && <GitPanel project={project} onClose={() => setGitOpen(false)} />}
+      {filesOpen && (
+        <FilesPanel
+          project={project}
+          onClose={() => setFilesOpen(false)}
+          focusedPath={canvas.focusedSid && isFileSid(canvas.focusedSid) ? filePath(canvas.focusedSid) : ''}
+          onOpen={(p) => {
+            canvas.addFile(p);
+            // Keep the panel open so the user can browse more files.
+          }}
+        />
+      )}
 
       {canvas.tiles.length === 0 ? (
         <div className="ws-canvas-empty">
@@ -299,13 +314,16 @@ export function Workspace() {
               {canvas.tiles.map((tile) => {
                 const draft = isDraftSid(tile.sid);
                 const terminal = isTerminalSid(tile.sid);
-                const meta = draft || terminal ? undefined : sessions.find((x) => x.sessionId === tile.sid);
+                const file = isFileSid(tile.sid);
+                const meta = draft || terminal || file ? undefined : sessions.find((x) => x.sessionId === tile.sid);
                 const isFocused = canvas.focusedSid === tile.sid;
                 const label = draft
                   ? 'New session'
                   : terminal
                     ? 'Terminal'
-                    : meta?.label || meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8);
+                    : file
+                      ? filePath(tile.sid).split('/').pop() || 'File'
+                      : meta?.label || meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8);
                 return (
                   <SortableTile
                     key={tile.sid}
@@ -315,6 +333,7 @@ export function Workspace() {
                     project={project}
                     isDraft={draft}
                     isTerminal={terminal}
+                    isFile={file}
                     initialPending={pendingSids.has(tile.sid)}
                     onPendingConsumed={() => clearPending(tile.sid)}
                     onCreated={handleDraftPromoted}
@@ -323,7 +342,7 @@ export function Workspace() {
                       if (terminal) killTerminal(project, tile.sid);
                       canvas.remove(tile.sid);
                     }}
-                    onDelete={draft || terminal ? undefined : () => {
+                    onDelete={draft || terminal || file ? undefined : () => {
                       // Same "delete the underlying session + unpin" flow
                       // as the sidebar's Delete Session context menu — kept
                       // reachable from the tile too so a user working on
@@ -361,6 +380,7 @@ function SortableTile({
   project,
   isDraft,
   isTerminal,
+  isFile,
   initialPending,
   onPendingConsumed,
   onCreated,
@@ -375,6 +395,7 @@ function SortableTile({
   project: string;
   isDraft: boolean;
   isTerminal: boolean;
+  isFile: boolean;
   initialPending: boolean;
   onPendingConsumed: () => void;
   onCreated: (newSid: string) => void;
@@ -463,7 +484,7 @@ function SortableTile({
       <div className="ws-tile-grip" {...attributes} {...listeners} title="Drag to reorder">
         <span className="ws-tile-grip-dots">⋮⋮</span>
         <span className="ws-tile-grip-label">{label}</span>
-        {!isDraft && !isTerminal && (
+        {!isDraft && !isTerminal && !isFile && (
         <button
           className="ws-tile-action"
           onPointerDown={(e) => e.stopPropagation()}
@@ -480,7 +501,7 @@ function SortableTile({
           </svg>
         </button>
         )}
-        {!isDraft && !isTerminal && (
+        {!isDraft && !isTerminal && !isFile && (
         <button
           className="ws-tile-action"
           onPointerDown={(e) => e.stopPropagation()}
@@ -537,6 +558,13 @@ function SortableTile({
       <div className="ws-tile-body">
         {isTerminal ? (
           <Terminal project={project} sid={tile.sid} focused={isFocused} />
+        ) : isFile ? (
+          <FileTile
+            project={project}
+            path={filePath(tile.sid)}
+            focused={isFocused}
+            refreshKey={refreshKey}
+          />
         ) : (
           <Session
             project={project}

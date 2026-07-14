@@ -16,6 +16,7 @@ export type {
   CreatePrRequest,
   CreatePrResult,
   FileSearchResponse,
+  FileContentSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirEntry,
@@ -63,6 +64,7 @@ import type {
   CreatePrRequest,
   CreatePrResult,
   FileSearchResponse,
+  FileContentSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirListing,
@@ -319,6 +321,10 @@ export const api = {
   searchFiles: (project: string, q: string, limit = 50) =>
     getJSON<FileSearchResponse>(
       `/api/workspaces/${encodeURIComponent(project)}/files?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+  searchFileContent: (project: string, q: string, limit = 100) =>
+    getJSON<FileContentSearchResponse>(
+      `/api/workspaces/${encodeURIComponent(project)}/files/content?q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
   session: (project: string, sid: string) =>
     getJSON<SessionDetail>(

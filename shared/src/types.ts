@@ -348,6 +348,8 @@ export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionL
 // Result of the composer's @-mention file search: repo-relative POSIX paths
 // under the workspace cwd, matched by substring on the needle.
 export type FileSearchResponse = { cwd: string; results: string[] };
+export type FileContentHit = { path: string; matches: { line: number; text: string }[] };
+export type FileContentSearchResponse = { cwd: string; results: FileContentHit[] };
 export type SchedulesResponse = { schedules: Schedule[] };
 export type HealthResponse = {
   ok: boolean;

@@ -482,6 +482,64 @@ test('real structure() round-16: syntactic-role pairing exemption, string-aware 
   assert.ok(g2t.includes('bodyG2t'), `G2 template body lost: ${JSON.stringify(g2t)}`);
 });
 
+// EVE round 17 — two residual P1s the round-16 fixes did not cover, plus her positive/negative
+// bracket matrix:
+//  P1 — a GLUED custom-name inline component (`prefix<$Panel>body</$Panel>suffix`) is serialized by
+//       structure() as two escaped tags in ONE chunk; the round-16 `inBodyGeneric` guard wrongly
+//       filtered the escaped CLOSING tag too (a closer never has a further closer after it), so the
+//       opener never popped, `pairResidues` returned {}, and the literal `<$Panel>` / attribute
+//       reached Orama. Reproduces for `$`, `_`, astral, and namespaced names (each escaped
+//       differently by structure() — `\_Panel`, astral surrogate pair, `ns.Qualified`).
+//  P1 — the round-16 bracket-pollution fix only handled STANDALONE / cross-chunk openers; a GLUED
+//       inline lossy opener still leaked. structure() escapes every OPENING bracket (`\{`, `\[`) —
+//       string-content ones included — but leaves closes bare, so the depth scan is fooled: an
+//       unbalanced `}]` / `]}` / `}}` / `]]` in the corrupted attribute string cuts EARLY (attr
+//       residue leaks as fake suffix) and an unbalanced `{ [` / `[ {` / `{{` / `[[` cuts NEVER
+//       (body + suffix swallowed). Anchoring on the in-chunk `</Name>` (escape-free) fixes both
+//       directions and keeps the visible body/suffix.
+test('real structure() round-17: glued custom-name pairing, glued inline bracket matrix', () => {
+  const clean = (raw: string) => {
+    const chunks = structure(raw).contents.map((c) => c.content);
+    const paired = pairResidues(chunks);
+    return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
+  };
+
+  // P1 #1 — glued custom-name inline component pairs and strips: markup gone, body/suffix kept, and a
+  // string attribute needle does not leak. Across the names structure() escapes distinctly.
+  for (const name of ['$Panel', '_Panel', '𐐀Panel', 'ns.Qualified'] as const) {
+    const tag = name.replace('.', '');
+    const bare = clean(`prefix<${name}>VIS${tag}BODY</${name}>suffix`);
+    assert.ok(bare.some((t) => t.includes(`VIS${tag}BODY`) && /prefix/.test(t) && /suffix/.test(t)), `glued ${name}: body/suffix lost: ${JSON.stringify(bare)}`);
+    assert.ok(!bare.some((t) => /[<>]/.test(t)), `glued ${name}: markup leaked: ${JSON.stringify(bare)}`);
+    const attr = clean(`prefix<${name} title="LEAK${tag}ATTR">bd${tag}</${name}>suffix`);
+    assert.ok(!attr.some((t) => new RegExp(`LEAK${tag}ATTR|title=|<${name.replace('.', '\\.').replace('$', '\\$')}`).test(t)), `glued-attr ${name}: opener/attr leaked: ${JSON.stringify(attr)}`);
+    assert.ok(attr.some((t) => t.includes(`bd${tag}`) && /prefix/.test(t) && /suffix/.test(t)), `glued-attr ${name}: body/suffix lost: ${JSON.stringify(attr)}`);
+  }
+
+  // P1 #2 — glued inline lossy opener with EVE's bracket matrix. Closes-heavy sets (`}]`, `]}`, `}}`,
+  // `]]`) must not leak the attribute residue as fake suffix; opens-heavy sets (`{ [`, `[ {`, `{{`,
+  // `[[`) must not swallow the body/suffix. All keep the in-chunk body + suffix, drop the needle.
+  for (const b of ['}]', ']}', '}}', ']]']) {
+    const needle = `GLUE${b.replace(/}/g, 'C').replace(/]/g, 'S')}`;
+    const r = clean(`prefix<Panel items={["a \\" ${b} > ${needle}", "c"]}>BODYX</Panel>SUFFIXX`);
+    assert.ok(!r.some((t) => new RegExp(`${needle}|items=|<Panel`).test(t)), `bracket ${b} leaked: ${JSON.stringify(r)}`);
+    assert.ok(r.some((t) => /BODYX/.test(t) && /SUFFIXX/.test(t)), `bracket ${b} body/suffix lost: ${JSON.stringify(r)}`);
+  }
+  for (const b of ['{ [', '[ {', '{{', '[[']) {
+    const r = clean(`prefix<Panel items={["a \\" ${b} x", "c"]}>BODYSW</Panel>SUFFIXSW`);
+    assert.ok(!r.some((t) => /items=|<Panel/.test(t)), `bracket ${b} residue leaked: ${JSON.stringify(r)}`);
+    assert.ok(r.some((t) => /BODYSW/.test(t) && /SUFFIXSW/.test(t)), `bracket ${b} body/suffix swallowed: ${JSON.stringify(r)}`);
+  }
+  // Template (escaped-backtick) variants of both directions — the lossy backtick desyncs even the
+  // code-span skip, so the fix must key on the in-chunk closer, not on pairing.
+  const tl = clean('prefix<Tabs items={[`a \\` }] > TPLLEAKG`, `c`]}>visbody</Tabs>suf');
+  assert.ok(!tl.some((t) => /TPLLEAKG|items=|<Tabs/.test(t)), `template-leak leaked: ${JSON.stringify(tl)}`);
+  assert.ok(tl.some((t) => /visbody/.test(t) && /suf/.test(t)), `template-leak body/suffix lost: ${JSON.stringify(tl)}`);
+  const tsw = clean('prefix<Tabs items={[`a \\` { [ x`, `c`]}>visbody</Tabs>suf');
+  assert.ok(!tsw.some((t) => /items=|<Tabs/.test(t)), `template-swallow residue leaked: ${JSON.stringify(tsw)}`);
+  assert.ok(tsw.some((t) => /visbody/.test(t) && /suf/.test(t)), `template-swallow body/suffix swallowed: ${JSON.stringify(tsw)}`);
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

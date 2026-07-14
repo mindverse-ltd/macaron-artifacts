@@ -4161,21 +4161,26 @@ textarea:focus, select:focus, input:focus {
 /* GitHub-style contribution heatmap. Columns are weeks, rows are weekdays;
    cell shade steps through 5 accent tints keyed by that day's message count. */
 .heatmap { overflow-x: auto; }
-.heatmap-months {
+/* Both the month-label track and the week grid share one column template driven
+   by --weeks (set inline from JS). minmax(11px, 1fr) makes short windows stretch
+   the columns to fill the panel, while long windows clamp to 11px and let the
+   .heatmap wrapper scroll — labels stay pitch-aligned since the track is shared. */
+.heatmap-months,
+.heatmap-grid {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 10px; /* 10px cell + 3px gap = 13px pitch, matching the week columns below */
+  grid-template-columns: repeat(var(--weeks, 1), minmax(11px, 1fr));
   gap: 3px;
+}
+.heatmap-months {
   font-size: 10px;
   color: var(--text-2);
   margin-bottom: 5px;
 }
-.heatmap-months span { white-space: nowrap; } /* labels overflow their 10px column onto the grid */
-.heatmap-grid { display: flex; gap: 3px; }
+.heatmap-months span { white-space: nowrap; } /* labels overflow their column onto the grid */
 .heatmap-week { display: flex; flex-direction: column; gap: 3px; }
 .heatmap-cell {
-  width: 10px;
-  height: 10px;
+  width: 100%;
+  height: 11px;
   border-radius: 2px;
   background: var(--surface-2);
   /* A theme-adaptive inset ring gives every cell — including the lowest shades —
@@ -4211,6 +4216,7 @@ textarea:focus, select:focus, input:focus {
   color: var(--text-2);
 }
 .heatmap-legend span { margin: 0 3px; }
+.heatmap-legend .heatmap-cell { width: 11px; } /* legend swatches are fixed, not grid-stretched */
 
 /* Command palette (Cmd-K) — overlay convention mirrors .confirm-backdrop,
    but top-anchored like a spotlight search rather than centered. */

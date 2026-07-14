@@ -109,7 +109,7 @@ function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: Analytic
   const captionText = active ? `${active.key} · ${active.count} message${active.count === 1 ? '' : 's'}` : 'Hover or focus a day for details';
 
   return (
-    <div className="heatmap">
+    <div className="heatmap" style={{ '--weeks': grid.weeks.length } as React.CSSProperties}>
       <div className="heatmap-months">
         {grid.months.map((m, i) => (
           <span key={i} style={{ gridColumnStart: m.col + 1 }}>{m.label}</span>

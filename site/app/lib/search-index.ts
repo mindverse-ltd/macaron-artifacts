@@ -51,32 +51,35 @@ function nodeText(node: Nodes): string {
   return 'value' in node ? node.value : '';
 }
 
-// structure() serializes a component tag it can't render into a chunk of plain
-// text, and — because Fumadocs splits a flow component around any nested heading —
-// often into a STANDALONE opening/closing residue that is not valid MDX on its own
-// (`\<Tabs items=\{[…]}>`, a lone `</Tabs>`, a `<>` / `</>` fragment boundary). The
-// MDX parser throws on those, so they must be removed here, BEFORE the parse, by a
-// scanner that deletes ONLY a confirmed component residue and never a searchable
-// `<` in prose. The distinction structure() hands us:
-//   - A real component tag is escaped (`\<Tabs …>`) only when it carries markdown-
-//     significant punctuation, but is ALWAYS one of: a closing tag (`</Name>`), a
-//     fragment boundary (`<>` / `</>`), a self-closing tag (`<Name … />`), or an
-//     opening tag with attributes. A bare `<T>` / `<version>` placeholder in prose
-//     has none of those and is kept verbatim.
-//   - A `` `<T>` `` inside a code span, or an `a<b` comparison, is never a tag.
-// The scan is code-span, quote, template-literal, brace and entity aware, so a `>`
-// hiding inside an attribute string / `{…}` expression / `` `…` `` template can't
-// end a tag early, and an encoded quote (`&#34;`) inside an attribute is opaque.
-function stripComponentResidue(text: string): string {
-  // A JSX/TS name may start with a letter, `_`, `$` or a non-ASCII letter, and continue
-  // with those plus digits / `.` / `-`. structure() markdown-escapes a leading/embedded
-  // `_` as `\_`, so a name char can arrive as a two-char `\x` — the *Len helpers report
-  // how many source chars one logical name char spans (0 when it isn't one) so the tag
-  // scanner sees through the escape instead of ending the name early.
-  const NAME_START = /[A-Za-z_$À-￿]/;
-  const isNameChar = (c: string | undefined) => !!c && /[A-Za-z0-9._$\-À-￿]/.test(c);
+// structure() serializes a component tag it can't render into a chunk of plain text,
+// and — because Fumadocs splits a flow component around any nested heading — often into
+// a STANDALONE opening/closing residue that is not valid MDX on its own (`\<Tabs …>`, a
+// lone `</Tabs>`, a `<>` / `</>` fragment boundary). The MDX parser throws on those, so
+// they must be removed here, BEFORE the parse, WITHOUT touching a searchable `<` in prose.
+//
+// The genuinely ambiguous case — `<out disabled>` / `<const dataÉ="x">` / `<in title="x">`
+// — is a valid JSX element AND a valid TS generic at the SAME time, so no per-chunk grammar
+// oracle can separate the two. structure() hands us a stronger, cross-chunk signal: it emits
+// a matching `</Name>` closing-residue chunk for every real flow component, but NEVER for a
+// TS generic. So `closerNames` (every `</Name>` seen anywhere in the page's chunk stream) is
+// the authority — if an opener's name is paired with a page closer, it is a component.
+// Falling back to structural signals for the unpaired remainder:
+//   - a `</Name>` / self-closing / fragment residue is always markup,
+//   - an opener that is JSX-valid but not TS-valid, or that fills its whole chunk standalone,
+//     is a split flow component,
+//   - everything else (a bare `<T>`, an `a<b` comparison, a `<T, U = …>` generic) is prose.
+// The scan is code-span, quote, template-literal, brace and entity aware, so a `>` hiding
+// inside an attribute string / `{…}` / `` `…` `` can't end a tag early.
+function stripComponentResidue(text: string, closerNames: Set<string>): string {
+  // A JSX/TS name may start with a letter, `_`, `$` or any Unicode ID_Start, and continue
+  // with those plus digits / `.` / `-`. structure() markdown-escapes a leading/embedded `_`
+  // as `\_`, so a name char can arrive as a two-char `\x` — the *Len helpers report how many
+  // source chars one logical name char spans (0 when it isn't one) so the scanner sees
+  // through the escape and covers `µPanel` and other Unicode identifiers, not just `À-￿`.
+  const NAME_START = /[\p{ID_Start}$_]/u;
+  const NAME_CONT = /[\p{ID_Continue}$.-]/u;
   const nameStartLen = (p: number) => (text[p] === '\\' && NAME_START.test(text[p + 1] ?? '') ? 2 : NAME_START.test(text[p] ?? '') ? 1 : 0);
-  const nameCharLen = (p: number) => (text[p] === '\\' && isNameChar(text[p + 1]) ? 2 : isNameChar(text[p]) ? 1 : 0);
+  const nameContLen = (p: number) => (text[p] === '\\' && NAME_CONT.test(text[p + 1] ?? '') ? 2 : NAME_CONT.test(text[p] ?? '') ? 1 : 0);
   let out = '';
   let i = 0;
   while (i < text.length) {
@@ -98,7 +101,7 @@ function stripComponentResidue(text: string): string {
     // A `<!-- … -->` INSIDE a code span never gets here, so its literal text stays.
     if (text.startsWith('<!--', i)) { const e = text.indexOf('-->', i + 4); out += ' '; i = e === -1 ? text.length : e + 3; continue; }
     // A tag opener: `<` or escaped `\<`, then optional `/`, then a JSX name start
-    // (letter / `_` / `$` / non-ASCII, possibly markdown-escaped as `\_`).
+    // (letter / `_` / `$` / Unicode ID_Start, possibly markdown-escaped as `\_`).
     const esc = c === '\\' && text[i + 1] === '<';
     const lt = esc ? i + 1 : i;
     const closing = text[lt + 1] === '/';
@@ -107,7 +110,10 @@ function stripComponentResidue(text: string): string {
     if (!opensTag) { out += c; i++; continue; }
     let j = nameAt;
     let nl: number;
-    while ((nl = nameCharLen(j)) > 0) j += nl;
+    while ((nl = nameContLen(j)) > 0) j += nl;
+    const name = deEscape(text.slice(nameAt, j)); // tag name, unescaped for the pairing lookup
+    const paired = !closing && closerNames.has(name); // a `</name>` residue exists elsewhere in the page → component
+    const glued = out.trim() !== ''; // real prose precedes this `<` in the same chunk
     // Scan to the terminating `>` at brace depth 0 so a `>` hidden in an attribute
     // string / `{…}` expression / `` `…` `` template can't end the tag early. structure()
     // markdown-escapes the JSX punctuation (`\{`, `\[`, `\<`), so a `\{` counts as a brace;
@@ -135,23 +141,23 @@ function stripComponentResidue(text: string): string {
       else if (ch === '>' && !brace) { k++; closed = true; break; }
       k++;
     }
-    // The opener body is the tag name + attributes, up to (not including) the closing
-    // `>`. Ask the real grammars — TypeScript for a type-param list (keep), MDX for a JSX
-    // element (strip) — instead of guessing from a `glued`/attribute heuristic. This is
-    // the single decision for spreads, namespaced/boolean props, modifiers, constraints,
-    // multi-param defaults and `$`/Unicode identifiers alike.
+    // Lossy recovery: structure() drops backslashes inside an attribute string (`\"` → `"`),
+    // which can desync the quote state machine so it never finds the real `>`. For a GLUED
+    // paired opener (a confirmed component with real prose before it), retry with a naive
+    // first unescaped `>` so the visible body/suffix after the tag survives. A STANDALONE
+    // opener chunk is left unclosed on purpose — it is swallowed to end-of-chunk below.
+    if (!closed && paired && glued) { let m = j; while (m < text.length) { if (text[m] === '>' && text[m - 1] !== '\\') { k = m + 1; closed = true; break; } m++; } }
+    // The opener body is the tag name + attributes, up to (not including) the closing `>`.
+    // A page closer pairs it (component); otherwise the grammars + standalone shape decide.
     const body = text.slice(lt + 1, closed ? k - 1 : k).replace(/\/\s*$/, '');
-    const attributed = !closing && !selfClose && opensJsxElement(body);
-    // structure()'s residue serialization is LOSSY inside an attribute string (a JS `\"`
-    // loses its backslash; a template's closing backtick gains one), and Fumadocs splits a
-    // multiline opener whose terminating `>` sits on its own line into a SEPARATE chunk —
-    // so an escaped opener residue often never finds a clean `>` in this chunk. Only treat
-    // an UNCLOSED escaped opener as split-flow residue (strip to end) when its body actually
-    // looks like a JSX opening tag — it carries an `attr={…}` or a `{...spread}`. A standalone
-    // prose generic (`\<T, U = "x">`) or a compact `alpha\<needle remains body` comparison has
-    // neither, so it is kept verbatim instead of swallowing the visible tail.
-    if (!closed && esc && looksLikeOpener(body)) { i = text.length; out = out.trimEnd(); continue; }
-    if (closed && (closing || selfClose || attributed)) { out += ' '; i = k; continue; }
+    const standalone = !glued && (!closed || text.slice(k).trim() === ''); // opener fills its whole chunk
+    const isComponent = !closing && !selfClose && (paired || opensJsxElement(body, standalone));
+    // An UNCLOSED opener is split-flow residue (strip to end) when it is confirmed a component
+    // (name paired), or its body carries a JSX `attr={…}` / `{...spread}`, or it fills the whole
+    // chunk and parses as JSX. A standalone prose generic (`\<T, U = "x">`) or a compact
+    // `alpha\<needle remains body` comparison matches none, so it is kept verbatim.
+    if (!closed && esc && (paired || looksLikeOpener(body) || (standalone && opensJsxElement(body, true)))) { i = text.length; out = out.trimEnd(); continue; }
+    if (closed && (closing || selfClose || isComponent)) { out += ' '; i = k; continue; }
     // KEEP: this `<…>` is prose (a TS generic / type-argument / comparison / placeholder).
     // A multi-token body (`keyof X`, `T, U = …`, `a instanceof B`) or a qualified name
     // (`ns.Member`) parses as a JSX element downstream and would be silently dropped, so
@@ -164,22 +170,22 @@ function stripComponentResidue(text: string): string {
   return out;
 }
 
-// Classify a `<…>` opener body (everything after `<` up to but excluding the closing
-// `>`, tag name included) as a JSX ELEMENT (strip as markup) or as TypeScript / prose
-// (keep as searchable text), using the REAL grammars instead of a hand-rolled heuristic:
-//   - The TypeScript parser decides whether the body is legal TS. Round 11 only wrapped it
-//     as a type-PARAMETER list (`type _<B> = 0;`), which wrongly rejected type-ARGUMENTS and
-//     comparisons; we now also try it as a call's type args (`f<B>();`, covering `keyof X`,
-//     `ns.Qualified`) and as a relational expression (`x = a<B>b;`, covering `a instanceof B`).
-//     Any of the three parsing clean means the body is valid TS → prose → KEEP.
-//   - Otherwise the MDX grammar decides whether the body is a valid JSX opening element.
-//   - A lowercase modifier tag (`<out T={…}>` / `<in …>` / `<const …>`) is BOTH a legal TS
-//     type-param list AND a legal JSX element, so the TS oracle alone can't break the tie.
-//     A real generic never carries a `name={…}` JSX-expression attribute, so when the body
-//     both parses as TS and has an `attr={…}`, it is JSX residue → STRIP.
+// Classify a `<…>` opener body (everything after `<` up to but excluding the closing `>`,
+// tag name included) as a JSX ELEMENT (strip) or as TypeScript / prose (keep), using the
+// REAL grammars. This is the fallback for openers the caller could NOT settle by cross-chunk
+// pairing (no matching `</Name>` residue in the page):
+//   - The TypeScript parser decides whether the body is legal TS: a type-PARAMETER list
+//     (`type _<B> = 0;`), a call's type ARGUMENTS (`f<B>();`, covering `keyof X` / `ns.Q`),
+//     or a relational expression (`x = a<B>b;`, covering `a instanceof B`). Any clean → TS.
+//   - The MDX grammar decides whether the body is a valid JSX opening element.
+//   - Both can be true for a genuinely ambiguous body (`out disabled`, `const dataÉ="x"`).
+//     Without a page closer to break the tie, `standalone` does: an opener that fills its
+//     WHOLE chunk is split flow-component residue (structure() only emits a bare opener chunk
+//     when it split a component around a nested heading), so strip it; an ambiguous body that
+//     sits INSIDE prose is a generic, so keep it.
 // structure() markdown-escapes JSX punctuation (`\<`, `\{`, `\_`, …); undo every such escape
 // for the grammar probes (the caller still deletes from the original text).
-function opensJsxElement(body: string): boolean {
+function opensJsxElement(body: string, standalone: boolean): boolean {
   const inner = deEscape(body).replace(/\s+/g, ' ').trim();
   // `parseDiagnostics` is TS-internal (not on the public SourceFile type) but is the
   // cheapest syntactic-error signal without a full Program — cast to reach it.
@@ -189,7 +195,7 @@ function opensJsxElement(body: string): boolean {
     let jsx = false;
     const walk = (n: { type: string; children?: unknown[] }) => { if (n.type.startsWith('mdxJsx')) jsx = true; for (const ch of (n.children ?? []) as typeof n[]) walk(ch); };
     walk(fromMarkdown(`<${inner} />`, { extensions: [mdxjs()], mdastExtensions: [mdxFromMarkdown()] }) as never);
-    return jsx && (!tsValid || /[\w$]+=\{/.test(inner)); // JSX-shaped, and either not-TS or carrying a JSX attr
+    return jsx && (!tsValid || standalone); // JSX-shaped, and either not-TS or a whole-chunk opener residue
   } catch {
     return false;
   }
@@ -233,12 +239,13 @@ function looksLikeOpener(body: string): boolean {
 //  4. Any chunk still not valid MDX (residual escapes, odd fragments) falls back to
 //     a CommonMark parse; step 2 already removed the component markup, so nothing
 //     tag-shaped remains to mis-handle.
-export function sanitizeSearchText(input: string): string {
+export function sanitizeSearchText(input: string, closerNames: Set<string> = collectCloserNames([input])): string {
   // stripComponentResidue removes component markup — including HTML comments — with
   // code-span awareness, so a `<!-- … -->` literal inside `` `…` `` survives while a
   // real comment outside code is dropped. It runs on the raw (still entity-encoded)
-  // chunk so a `>` hidden in an attribute entity can't end a tag early.
-  const cleaned = stripComponentResidue(decodeMarkdownPunctEntities(input));
+  // chunk so a `>` hidden in an attribute entity can't end a tag early. closerNames is
+  // the page-wide `</Name>` set so an opener split away from its closer still pairs.
+  const cleaned = stripComponentResidue(decodeMarkdownPunctEntities(input), closerNames);
   let text: string;
   try {
     text = nodeText(fromMarkdown(cleaned, { extensions: [mdxjs()], mdastExtensions: [mdxFromMarkdown()] }));
@@ -254,19 +261,33 @@ export function sanitizeSearchText(input: string): string {
     .trim();
 }
 
+// Collect every component name that appears as a `</Name>` closing residue anywhere in a
+// page's chunk stream (headings + contents). structure() emits one per real flow component
+// but never for a TS generic, so this set is the cross-chunk authority that tells an
+// ambiguous `<out …>` / `<const …>` opener apart from a same-named generic. Names are
+// deEscaped (structure() writes `</\_Panel>`) so they match the opener's unescaped name.
+export function collectCloserNames(chunks: Iterable<string>): Set<string> {
+  const names = new Set<string>();
+  for (const raw of chunks) for (const m of deEscape(raw).matchAll(/<\/\s*([^>\s/]+)\s*>/gu)) names.add(m[1]);
+  return names;
+}
+
 // Custom buildIndex passed to createFromSource: same shape as fumadocs' default
 // extractor, but every heading and content chunk is sanitized so the static
 // search JSON holds clean prose instead of markdown/entities.
 export async function buildIndex(page: Page) {
   const structuredData = await page.data.structuredData;
+  // Precompute the page-wide `</Name>` set once from every chunk so each opener is
+  // disambiguated against closers that structure() may have split into other chunks.
+  const closerNames = collectCloserNames([...structuredData.headings, ...structuredData.contents].map((c) => c.content));
   return {
     id: page.url,
     title: page.data.title ?? '',
     description: page.data.description,
     url: page.url,
     structuredData: {
-      headings: structuredData.headings.map((h) => ({ ...h, content: sanitizeSearchText(h.content) })),
-      contents: structuredData.contents.map((c) => ({ ...c, content: sanitizeSearchText(c.content) })),
+      headings: structuredData.headings.map((h) => ({ ...h, content: sanitizeSearchText(h.content, closerNames) })),
+      contents: structuredData.contents.map((c) => ({ ...c, content: sanitizeSearchText(c.content, closerNames) })),
     },
   };
 }

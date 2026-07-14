@@ -6,7 +6,7 @@ import path from 'node:path';
 import { structure } from 'fumadocs-core/mdx-plugins/remark-structure';
 import { initAdvancedSearch } from 'fumadocs-core/search/server';
 import { oramaStaticClient } from 'fumadocs-core/search/client/orama-static';
-import { buildIndex, sanitizeSearchText } from './search-index';
+import { buildIndex, sanitizeSearchText, collectCloserNames } from './search-index';
 
 // Unit: the sanitizer strips markdown/entity artifacts WITHOUT mangling
 // technical identifiers. The old regex stack turned `MACARON_CODEX_TRANSPORT`
@@ -60,7 +60,11 @@ test('sanitizeSearchText strips markup but preserves identifiers', () => {
 // `<X>…</X>` string never exercises. Each raw sample below is chosen so structure()
 // emits such a residue; the guarantee is that no needle-adjacent markup survives.
 test('real structure() split chunks: residue never leaks, prose survives', () => {
-  const clean = (raw: string) => structure(raw).contents.map((c) => sanitizeSearchText(c.content));
+  const clean = (raw: string) => {
+    const chunks = structure(raw).contents.map((c) => c.content);
+    const closers = collectCloserNames(chunks);
+    return chunks.map((c) => sanitizeSearchText(c, closers));
+  };
 
   // A template literal in a `<Tabs items={…}>` attribute, split off as its own
   // opening-tag chunk by the nested heading. The old CommonMark fallback dropped
@@ -95,7 +99,11 @@ test('real structure() split chunks: residue never leaks, prose survives', () =>
 // EVE round 6 — escaped-quote / template edge cases via real structure() split
 // chunks, plus boundary fidelity the earlier rounds missed.
 test('real structure() split chunks: escaped quotes, generic defaults, OOB entities', () => {
-  const clean = (raw: string) => structure(raw).contents.map((c) => sanitizeSearchText(c.content));
+  const clean = (raw: string) => {
+    const chunks = structure(raw).contents.map((c) => c.content);
+    const closers = collectCloserNames(chunks);
+    return chunks.map((c) => sanitizeSearchText(c, closers));
+  };
 
   // A backslash-escaped backtick inside the template, and a backslash-escaped quote
   // inside the JS expression string: the quote/template state machine must treat `\`
@@ -252,6 +260,70 @@ test('real structure() split chunks: escaped quotes, generic defaults, OOB entit
   assert.deepEqual(clean('show `<!-- KEEPNEEDLE -->` tail'), ['show <!-- KEEPNEEDLE --> tail']);
   // A real HTML comment OUTSIDE code is still dropped.
   assert.deepEqual(clean('before <!-- secret --> visible'), ['before visible']);
+});
+
+// EVE round 13 — re-converge the JSX/TS decision on a CROSS-CHUNK signal instead of a
+// per-chunk oracle union. structure() emits a `</Name>` closing residue for every real
+// flow component but never for a TS generic, so the page-wide `</Name>` set (collectCloserNames)
+// is the authority that separates genuinely-ambiguous openers (`<out disabled>` component vs
+// `<out T = "x">` generic) that BOTH grammars accept. Each raw sample is fed through real
+// structure() with the page-wide closer set, exactly as buildIndex does.
+test('real structure() cross-chunk closer pairing: lossy openers, ambiguous keywords, own-line >', () => {
+  const clean = (raw: string) => {
+    const chunks = structure(raw).contents.map((c) => c.content);
+    const closers = collectCloserNames(chunks);
+    return chunks.map((c) => sanitizeSearchText(c, closers));
+  };
+
+  // Blocker 1 — a glued opener whose attribute holds an escaped quote / escaped template
+  // backtick is serialized lossily by structure() (the `\` is dropped), desyncing the quote
+  // scan. The attribute needle must miss, but the VISIBLE body and the suffix must survive.
+  const lossyQuote = clean('prefix<Panel title="a \\" b">visiblebodyA</Panel>suffixA');
+  assert.ok(!lossyQuote.some((t) => /<Panel|title=/.test(t)), `lossy-quote opener leaked: ${JSON.stringify(lossyQuote)}`);
+  assert.ok(lossyQuote.some((t) => /prefix/.test(t) && /visiblebodyA/.test(t) && /suffixA/.test(t)), `lossy-quote body/suffix must survive: ${JSON.stringify(lossyQuote)}`);
+  const lossyTpl = clean('prefix<Panel title={`a \\` b`}>visiblebodyB</Panel>suffixB');
+  assert.ok(!lossyTpl.some((t) => /<Panel|title=/.test(t)), `lossy-template opener leaked: ${JSON.stringify(lossyTpl)}`);
+  assert.ok(lossyTpl.some((t) => /prefix/.test(t) && /visiblebodyB/.test(t) && /suffixB/.test(t)), `lossy-template body/suffix must survive: ${JSON.stringify(lossyTpl)}`);
+
+  // Blocker 2 — ambiguous keyword/qualified openers that BOTH grammars accept. Each has a
+  // real `</Name>` closer in the page, so cross-chunk pairing strips it as a component; the
+  // attribute needle must not enter the index, the body survives.
+  for (const [open, close, needle, body] of [
+    ['<out disabled>', '</out>', 'OUTDISABLEDNEEDLE', 'outbodyX'],
+    ['<in title="INTITLENEEDLE">', '</in>', 'INTITLENEEDLE', 'inbodyX'],
+    ['<Panel instanceof={["PANELINSTNEEDLE"]}>', '</Panel>', 'PANELINSTNEEDLE', 'instbodyX'],
+    ['<ns.Qualified prop={["NSQUALNEEDLE"]}>', '</ns.Qualified>', 'NSQUALNEEDLE', 'qualbodyX'],
+  ] as const) {
+    const r = clean(`${open}\n\n## H ${needle === 'OUTDISABLEDNEEDLE' ? '' : needle}\n\n${body}\n\n${close}`);
+    assert.ok(!r.some((t) => new RegExp(`${needle}|instanceof=|ns\\.Qualified`).test(t)), `ambiguous opener ${open} leaked: ${JSON.stringify(r)}`);
+    assert.ok(r.some((t) => t.includes(body)), `ambiguous opener ${open} body must survive: ${JSON.stringify(r)}`);
+  }
+  // A `<const dataÉ="x">` component with a Unicode attribute, paired by a page closer, strips.
+  const constUni = clean('<const dataÉ="CONSTUNINEEDLE">\n\n## H\n\nconstunibody\n\n</const>');
+  assert.ok(!constUni.some((t) => /CONSTUNINEEDLE|<const|dataÉ/.test(t)), `const-unicode opener leaked: ${JSON.stringify(constUni)}`);
+  assert.ok(constUni.some((t) => t.includes('constunibody')), `const-unicode body must survive: ${JSON.stringify(constUni)}`);
+
+  // Blocker 2 reverse — a genuinely-VALID no-space generic default (`<in T = "…">`) has NO
+  // page closer, is not JSX-valid-only, and is prose: the needle must stay searchable.
+  assert.deepEqual(clean('type Consumer\\<in T = "INGENERICMISS"> keeps INGENERICKEEP'), ['type Consumer<in T = "INGENERICMISS"> keeps INGENERICKEEP']);
+
+  // Blocker 3 — an own-line `>` split opener with a STRING / BOOLEAN attribute (not just an
+  // expression/spread body) must still be recognized and its residue stripped.
+  const ownLineString = clean('<Panel title="OWNLINESTRNEEDLE"\n>\n\nownlinestrbody\n\n</Panel>');
+  assert.ok(!ownLineString.some((t) => /OWNLINESTRNEEDLE|<Panel|title=/.test(t)), `own-line string opener leaked: ${JSON.stringify(ownLineString)}`);
+  assert.ok(ownLineString.includes('ownlinestrbody'), `own-line string body must survive: ${JSON.stringify(ownLineString)}`);
+  const ownLineBool = clean('<Panel disabled\n>\n\nownlineboolbody\n\n</Panel>');
+  assert.ok(!ownLineBool.some((t) => /<Panel|disabled/.test(t)), `own-line boolean opener leaked: ${JSON.stringify(ownLineBool)}`);
+  assert.ok(ownLineBool.includes('ownlineboolbody'), `own-line boolean body must survive: ${JSON.stringify(ownLineBool)}`);
+
+  // Blocker 4 — no-attribute paired tags whose NAME starts with `$` / `_` / a non-ASCII
+  // letter (including `µ`, outside the old `À-￿` range) are components, paired by a page
+  // closer. The literal opener must not enter the index; the body survives.
+  for (const [tag, body] of [['$Panel', 'dollarpairbody'], ['_Panel', 'uspairbody'], ['ÉPanel', 'unipairbody'], ['µPanel', 'mupairbody']] as const) {
+    const r = clean(`<${tag}>\n\n## H\n\n${body}\n\n</${tag}>`);
+    assert.ok(!r.some((s) => new RegExp(`<${tag.replace('$', '\\$')}`).test(s)), `no-attr paired <${tag}> leaked: ${JSON.stringify(r)}`);
+    assert.ok(r.some((s) => s.includes(body)), `no-attr paired <${tag}> body must survive: ${JSON.stringify(r)}`);
+  }
 });
 
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');

@@ -61,9 +61,12 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
   if (resp.status === 401) {
     // Clear the token THIS request actually used — bound by id AND value from the snapshot.
     // Binding the value means a token refreshed on this backend mid-flight survives a stale
-    // 401, and a backend deleted mid-flight clears nothing (no id fallback onto LOCAL).
-    clearBackendTokenIfMatches(backend.id, backend.token || '');
-    window.dispatchEvent(new Event('macaron:auth-required'));
+    // 401, and a backend deleted mid-flight clears nothing (no id fallback onto LOCAL). Only
+    // re-gate the UI when we ACTUALLY cleared the current credential: a no-op clear (already
+    // refreshed / backend gone) must not lock a still-valid active backend behind the login gate.
+    if (clearBackendTokenIfMatches(backend.id, backend.token || '')) {
+      window.dispatchEvent(new Event('macaron:auth-required'));
+    }
   }
   return resp;
 }

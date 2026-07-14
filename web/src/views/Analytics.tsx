@@ -104,11 +104,13 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
       return; // onFocus handles rovingKey/active; nothing left to reconcile
     }
     // No live focus, but the roving tab stop pointed at a now-hidden day → retarget
-    // it (and clear a stale caption) so Tab still lands on a visible cell.
-    if (rovingKey && !visible.has(rovingKey)) {
-      setRovingKey(firstVisible);
-      if (focusedRef.current && !visible.has(focusedRef.current.key)) { focusedRef.current = null; setActive(null); }
-    }
+    // it so Tab still lands on a visible cell.
+    if (rovingKey && !visible.has(rovingKey)) setRovingKey(firstVisible);
+    // A caption must never outlive its day. When the captioned day scrolls out of
+    // the visible set and nothing is focused to re-emit it (e.g. focus was already
+    // dropped onto the All pill before the resize), clear it — otherwise the detail
+    // line keeps naming a date the grid no longer shows.
+    if (active && !visible.has(active.key) && !focusedRef.current) setActive(null);
   }, [grid]);
 
   // Roving tabindex over a row-major (weekday × week) cell space. All target

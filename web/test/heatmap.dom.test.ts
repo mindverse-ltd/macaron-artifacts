@@ -123,3 +123,45 @@ test('bidirectional resize keeps focus, roving tab stop, and caption on one visi
 
   await act(async () => { root.unmount(); });
 });
+
+test('caption clears when a blurred old day is cropped away by narrowing (no stale detail)', async () => {
+  const React = (await import('react')).default;
+  const { act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { UsageHeatmap } = await import('../src/views/Analytics');
+
+  const daily: Array<{ date: string; messageCount: number }> = [];
+  for (let ms = Date.UTC(2025, 6, 14, 12); ms <= Date.UTC(2026, 6, 14, 12); ms += 86400000) {
+    const d = new Date(ms);
+    daily.push({ date: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`, messageCount: 3 });
+  }
+
+  const root = createRoot(container);
+  mockWidth = 900;
+  await act(async () => { root.render(React.createElement(UsageHeatmap, { daily, sinceDate: '2025-07-14', untilDate: '2026-07-14', window: 'all' })); });
+
+  const doc = dom.window.document;
+  const wideCells = [...doc.querySelectorAll<HTMLElement>('.heatmap-cell[data-key]')];
+  const earliest = wideCells.reduce((a, b) => (a.dataset.key! < b.dataset.key! ? a : b));
+  const earliestKey = earliest.dataset.key!;
+
+  // Focus an old day so the caption names it, then blur to <body> — this is what
+  // clicking the "All" window pill (outside the grid) does: focus leaves the grid
+  // BEFORE any resize, so focusedRef is already null when the reconcile runs.
+  await act(async () => { earliest.focus(); });
+  assert.equal(coherence().captionKey, earliestKey, 'caption names the focused old day');
+  await act(async () => { (doc.activeElement as HTMLElement).blur(); });
+
+  // Narrow so the old day is cropped out of the visible set. With nothing focused
+  // to re-emit it, the caption must drop back to the placeholder, not keep naming
+  // a date the grid no longer shows.
+  await resizeTo(220, (fn) => act(async () => { await fn(); }));
+  await act(async () => {});
+  const c = coherence();
+  assert.ok(!c.visible.has(earliestKey), 'the old day is cropped away when narrow');
+  const caption = doc.querySelector('.heatmap-detail')?.textContent ?? '';
+  assert.equal(caption, 'Hover or focus a day for details', 'caption fell back to the placeholder (no stale detail)');
+
+  await act(async () => { root.unmount(); });
+});
+

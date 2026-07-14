@@ -38,9 +38,16 @@ export type LiveTurnItem =
       status: 'pending' | 'allow' | 'deny';
     };
 
+export type LiveUserImage = { mimeType: string; dataUrl: string };
 export type LiveState = {
   cwd: string;
   userText: string;
+  // Attachments on the in-flight user turn. Kept in the module store so
+  // they survive a component remount (e.g. Workspace promotes a draft
+  // sid to a real sid — the tile re-keys and remounts, and local
+  // component state resets). Cleared once the turn is rolled into
+  // history or the store entry is dropped via clearLive.
+  userImages: LiveUserImage[];
   // Single ordered timeline. On each `delta`, we either append to the
   // last text item (if the previous entry was text) or push a new text
   // item; tool events push their own entries; text entries never merge
@@ -314,6 +321,13 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
                   states.set(sid, {
                     cwd: p.cwd || '',
                     userText: text,
+                    // Carry the user's attachments so a draft→real remount
+                    // in the Workspace canvas doesn't lose the image chips
+                    // rendered above the user bubble.
+                    userImages: (opts.images ?? []).map((i) => ({
+                      mimeType: i.mimeType,
+                      dataUrl: i.dataUrl,
+                    })),
                     timeline: [],
                     outputTokens: -1,
                     done: false,
@@ -526,6 +540,7 @@ export function attachLive(project: string, sid: string): Promise<AttachResult> 
               states.set(sid, {
                 cwd: p.type === 'meta' && typeof p.cwd === 'string' ? p.cwd : '',
                 userText: '',
+                userImages: [],
                 timeline: [],
                 outputTokens: -1,
                 done: false,

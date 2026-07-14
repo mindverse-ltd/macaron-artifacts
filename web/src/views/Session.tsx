@@ -1570,8 +1570,10 @@ export function Session(props: SessionProps = {}) {
       // in-memory completedTurns that were carrying the tail across a stale
       // "done" event.
       setCompletedTurns([]);
+      return d;
     } catch (e) {
       if (!opts?.silent) setError((e as Error).message);
+      return null;
     }
   }, [project, sid]);
 
@@ -1658,6 +1660,22 @@ export function Session(props: SessionProps = {}) {
       if (!s) return;
       setLiveUser(s.userText);
       setOutputTokens(s.outputTokens);
+      // Rehydrate image chips on the user bubble — needed on a
+      // draft→real remount where local liveUserImages state was reset.
+      // Only apply when we have images AND the local state is empty, so
+      // we don't clobber a locally-owned attachment mid-turn.
+      if (s.userImages?.length) {
+        setLiveUserImages((cur) =>
+          cur.length > 0
+            ? cur
+            : s.userImages.map((img, i) => ({
+                id: `hydrated-${i}`,
+                name: '',
+                mimeType: img.mimeType,
+                dataUrl: img.dataUrl,
+              })),
+        );
+      }
       // Project liveStore timeline → Session Item shape (fresh objects so
       // React notices identity changes even when the underlying entry was
       // mutated in-place).
@@ -1702,16 +1720,35 @@ export function Session(props: SessionProps = {}) {
         }),
       );
     };
+    // Snapshot the message count at subscribe time so we can tell when the
+    // CLI has actually flushed our just-streamed turn to disk. The
+    // reload → clear-live handoff below only fires once the count has grown.
+    const preCount = data?.messages?.length ?? 0;
+
     const finishLive = () => {
       setPolling(false);
       setSending(false);
       setReattached(false);
       clearLive(sid);
       onPendingConsumed?.();
-      // Reattach intentionally renders the authoritative live replay without
-      // JSONL alongside it. Once terminal, restore canonical prior history;
-      // load() leaves the just-finished live buffers mounted if disk flush lags.
-      void load({ silent: true });
+      // Atomic swap: reload the jsonl and — once disk actually has our new
+      // turn — clear the live buffers so we don't render both the live copy
+      // AND the persisted copy at the same time. Retry a couple times if
+      // the flush lags. If the CLI never catches up, leave live buffers
+      // mounted (the next send's rollLiveIntoHistory sweeps them up).
+      const swap = async () => {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 250 * attempt));
+          const d = await load({ silent: true });
+          if (d && d.messages.length > preCount) {
+            setLiveUser('');
+            setLiveTurn([]);
+            setLiveUserImages([]);
+            return;
+          }
+        }
+      };
+      void swap();
     };
     if (seed) {
       applyState(seed);

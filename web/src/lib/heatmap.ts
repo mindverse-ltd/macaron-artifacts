@@ -12,7 +12,12 @@ export const dayToUTC = (key: string) => { const [y, m, d] = key.split('-').map(
 export const utcToDay = (ms: number) => { const d = new Date(ms); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; };
 export const DAY = 86400000;
 
-export type HeatCell = { key: string; count: number } | null;
+// A real in-window day carries a key+count. `{ pad: true }` is a VISIBLE but
+// inert L0 square drawn to fill whole week-columns BEFORE sinceDate when history
+// is shorter than the container — it never focuses, never enters the ARIA date
+// range, and never counts as a data value. `null` is a hidden slot for days
+// AFTER untilDate (future) in the trailing week.
+export type HeatCell = { key: string; count: number } | { pad: true } | null;
 export type HeatGrid = { weeks: HeatCell[][]; max: number };
 
 // How many week-columns the active window spans (a leading partial week counts
@@ -29,12 +34,20 @@ export function availableWeeks(daily: Array<{ date: string }>, sinceDate: string
 }
 
 // Build the most-recent `weeks` columns (weekday rows Sun→Sat) ending at the
-// week that contains untilDate. Days outside the server's [sinceDate, untilDate]
-// window — the leading days before sinceDate in the first column and the trailing
-// days after untilDate in the last — are null placeholders (not zero-count cells),
-// so we never render a padding day the server didn't account for. Every in-window
-// slot is a real day whose count comes from `daily`, defaulting to 0 so empty
-// days still render as light squares.
+// week that contains untilDate.
+// A real day cell (has a date key). Pad squares and hidden future slots aren't.
+export function isDay(cell: HeatCell): cell is { key: string; count: number } {
+  return cell != null && 'key' in cell;
+}
+
+// Build the most-recent `weeks` columns (weekday rows Sun→Sat) ending at the
+// week that contains untilDate. Days BEFORE sinceDate become visible-but-inert
+// `{ pad: true }` L0 squares so the grid fills whole week-columns even when the
+// server window is shorter than the container fits — they never focus, never
+// join the ARIA date range, never count. Days AFTER untilDate (future days in
+// the trailing week) stay `null` hidden slots. Every in-window slot is a real
+// day whose count comes from `daily`, defaulting to 0 so empty days still render
+// as light squares.
 export function buildHeatmap(daily: Array<{ date: string; messageCount: number }>, sinceDate: string, untilDate: string, weeks: number): HeatGrid {
   const byDay = new Map(daily.map((d) => [d.date, d.messageCount]));
   const startMs = dayToUTC(sinceDate);
@@ -48,7 +61,8 @@ export function buildHeatmap(daily: Array<{ date: string; messageCount: number }
   for (let ms = gridStart, c = 0; c < n; c++) {
     const week: HeatCell[] = [];
     for (let row = 0; row < 7; row++, ms += DAY) {
-      if (ms < startMs || ms > endMs) { week.push(null); continue; } // outside window → placeholder
+      if (ms > endMs) { week.push(null); continue; } // future day → hidden slot
+      if (ms < startMs) { week.push({ pad: true }); continue; } // before window → inert fill square
       const key = utcToDay(ms);
       const count = byDay.get(key) ?? 0;
       if (count > max) max = count;
@@ -70,7 +84,7 @@ export function levelFor(count: number, max: number): number {
 export type NavCell = { key: string; row: number; col: number };
 export function navCells(grid: HeatGrid): NavCell[] {
   const out: NavCell[] = [];
-  grid.weeks.forEach((week, col) => week.forEach((cell, row) => { if (cell) out.push({ key: cell.key, row, col }); }));
+  grid.weeks.forEach((week, col) => week.forEach((cell, row) => { if (isDay(cell)) out.push({ key: cell.key, row, col }); }));
   return out;
 }
 

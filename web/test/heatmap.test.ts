@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { availableWeeks, buildHeatmap, levelFor, navCells, navTarget, utcToDay, dayToUTC, DAY } from '../src/lib/heatmap';
+import { availableWeeks, buildHeatmap, isDay, levelFor, navCells, navTarget, utcToDay, dayToUTC, DAY } from '../src/lib/heatmap';
 
 // Helper: synthesize a `daily` payload spanning [since, until] with 1 msg/day.
 function fill(since: string, until: string) {
@@ -26,23 +26,47 @@ test('buildHeatmap renders exactly the requested whole columns, no stretch', () 
 test('buildHeatmap shows the MOST-RECENT days when fewer columns than history fit', () => {
   const daily = fill('2024-01-01', '2026-07-14');
   const grid = buildHeatmap(daily, '2024-01-01', '2026-07-14', 4); // only 4 weeks fit
-  const firstRealKey = grid.weeks.flat().filter(Boolean).map((c) => c!.key).sort()[0];
+  const firstRealKey = grid.weeks.flat().filter(isDay).map((c) => c.key).sort()[0];
   // 4 columns back from the week of 2026-07-14 (Tue) → grid starts 2026-06-21 (Sun).
   assert.equal(firstRealKey, '2026-06-21');
 });
 
-test('buildHeatmap strictly clips to the server since..until window (no padding days)', () => {
-  // untilDate is a Tuesday; the last column's Wed–Sat are AFTER the window and
-  // the first column's days before sinceDate are BEFORE it — both must be null,
-  // never zero-count cells the server didn't account for.
+test('buildHeatmap keeps real day keys inside the window; pads before, hides after', () => {
+  // untilDate is a Tuesday; the last column's Wed–Sat are AFTER the window → null
+  // hidden slots. The first column's days before sinceDate are BEFORE it → visible
+  // inert pad squares (fill the column, no date key), never real day cells.
   const daily = fill('2026-07-01', '2026-07-14');
   const grid = buildHeatmap(daily, '2026-07-01', '2026-07-14', 4);
-  const keys = grid.weeks.flat().filter(Boolean).map((c) => c!.key).sort();
-  assert.equal(keys[0], '2026-07-01', 'no day before sinceDate');
-  assert.equal(keys.at(-1), '2026-07-14', 'no day after untilDate');
-  // The last column (week of untilDate, Sun 2026-07-12) keeps Sun/Mon/Tue, drops Wed+.
+  const keys = grid.weeks.flat().filter(isDay).map((c) => c.key).sort();
+  assert.equal(keys[0], '2026-07-01', 'no real day before sinceDate');
+  assert.equal(keys.at(-1), '2026-07-14', 'no real day after untilDate');
+  // First column (week 2026-06-21..27) is entirely before the window → all pads.
+  const firstCol = grid.weeks[0]!;
+  assert.deepEqual(firstCol.map((c) => (isDay(c) ? c.key : c && 'pad' in c ? 'pad' : null)), ['pad', 'pad', 'pad', 'pad', 'pad', 'pad', 'pad']);
+  // The window opens mid-column: Wed 2026-07-01 is the first real day, preceded
+  // by pads for Sun–Tue in that same column.
+  const openCol = grid.weeks.find((w) => w.some((c) => isDay(c) && c.key === '2026-07-01'))!;
+  assert.deepEqual(openCol.map((c) => (isDay(c) ? c.key : c && 'pad' in c ? 'pad' : null)), ['pad', 'pad', 'pad', '2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04']);
+  // Last column (week of untilDate, Sun 2026-07-12) keeps Sun/Mon/Tue, hides Wed+.
   const lastCol = grid.weeks.at(-1)!;
-  assert.deepEqual(lastCol.map((c) => c?.key ?? null), ['2026-07-12', '2026-07-13', '2026-07-14', null, null, null, null]);
+  assert.deepEqual(lastCol.map((c) => (isDay(c) ? c.key : null)), ['2026-07-12', '2026-07-13', '2026-07-14', null, null, null, null]);
+});
+
+test('buildHeatmap fills the full requested width with inert pads when history is short', () => {
+  // A 2-week window rendered into a 12-column container: every column exists (no
+  // half-empty grid), the earlier columns are inert pad squares, and the real
+  // days still match the server window exactly — pads never become date cells.
+  const daily = fill('2026-07-01', '2026-07-14');
+  const grid = buildHeatmap(daily, '2026-07-01', '2026-07-14', 12);
+  assert.equal(grid.weeks.length, 12, 'renders all 12 requested columns');
+  const realKeys = grid.weeks.flat().filter(isDay).map((c) => c.key).sort();
+  assert.equal(realKeys[0], '2026-07-01', 'earliest real day is still sinceDate');
+  assert.equal(realKeys.at(-1), '2026-07-14', 'latest real day is still untilDate');
+  // The leading columns are entirely pad squares (no real day leaks earlier).
+  const pads = grid.weeks.flat().filter((c) => c && !isDay(c)).length;
+  assert.ok(pads > 0, 'pre-window columns are filled with inert pad squares');
+  // navCells (the ARIA/keyboard model) sees only real days, never pads.
+  assert.equal(navCells(grid).length, realKeys.length, 'pads never enter the nav/ARIA set');
 });
 
 test('first-frame long history clamps to fitted columns (no full-width overflow)', () => {

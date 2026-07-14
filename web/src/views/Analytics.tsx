@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import { api, fmtAgo, type AnalyticsResponse, type UsageBySession } from '../lib/api';
-import { availableWeeks, buildHeatmap, levelFor, navCells, navTarget } from '../lib/heatmap';
+import { availableWeeks, buildHeatmap, isDay, levelFor, navCells, navTarget } from '../lib/heatmap';
 
 const WINDOWS: Array<{ id: string; label: string }> = [
   { id: '7d', label: '7d' },
@@ -74,7 +74,11 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
   }, []);
 
   const maxWeeks = useMemo(() => availableWeeks(daily, sinceDate, untilDate, window), [daily, sinceDate, untilDate, window]);
-  const weeks = Math.min(fitWeeks || maxWeeks, maxWeeks);
+  // Always fill the container: render as many whole columns as fit, even when
+  // the window's own span is shorter — buildHeatmap pads the pre-window columns
+  // with inert L0 squares so a short history never leaves the panel half-blank.
+  // Fall back to the window span only before the first measurement lands.
+  const weeks = fitWeeks || maxWeeks;
   // For 'all', clamp the window's low bound to the first active day (sinceDate is
   // epoch), so buildHeatmap clips leading padding to real in-window days only.
   const effectiveSince = window === 'all' ? (daily.length ? daily[0]!.date : untilDate) : sinceDate;
@@ -89,7 +93,7 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
   // focus to <body> — so we drive re-focus from focusedRef (remembered on focus),
   // not from document.activeElement, which is already gone by the time this runs.
   useLayoutEffect(() => {
-    const visibleKeys = grid.weeks.flat().filter(Boolean).map((c) => c!.key);
+    const visibleKeys = grid.weeks.flat().filter(isDay).map((c) => c.key);
     const visible = new Set(visibleKeys);
     const firstVisible = visibleKeys[0] ?? null;
     const wasFocused = focusedRef.current;
@@ -123,7 +127,7 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
   const captionText = active ? `${active.key} · ${active.count} message${active.count === 1 ? '' : 's'}` : 'Hover or focus a day for details';
 
   // The tabbable cell: the keyboard-visited one, else the first in-range day.
-  const firstKey = grid.weeks.flat().find((c) => c)?.key ?? null;
+  const firstKey = grid.weeks.flat().find(isDay)?.key ?? null;
   const tabKey = rovingKey ?? firstKey;
 
   return (
@@ -149,7 +153,7 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
           <div key={r} className="heatmap-row" role="row" aria-rowindex={r + 1}>
             {grid.weeks.map((week, wi) => {
               const cell = week[r];
-              return cell ? (
+              if (isDay(cell)) return (
                 <div
                   key={cell.key}
                   className="heatmap-cell"
@@ -166,9 +170,12 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
                   onFocus={() => { const a = { key: cell.key, count: cell.count }; focusedRef.current = a; setActive(a); setRovingKey(cell.key); }}
                   onBlur={() => { focusedRef.current = null; }}
                 />
-              ) : (
-                <div key={`empty-${r}-${wi}`} className="heatmap-cell heatmap-cell--empty" style={{ gridColumnStart: wi + 1 }} role="presentation" aria-hidden="true" />
               );
+              // Pre-window pad → a visible-but-inert L0 square (fills the column,
+              // never focuses, never enters the ARIA date range). Future day → a
+              // hidden slot that only reserves grid space.
+              if (cell) return <div key={`pad-${r}-${wi}`} className="heatmap-cell" style={{ gridColumnStart: wi + 1 }} data-level={0} role="presentation" aria-hidden="true" />;
+              return <div key={`empty-${r}-${wi}`} className="heatmap-cell heatmap-cell--empty" style={{ gridColumnStart: wi + 1 }} role="presentation" aria-hidden="true" />;
             })}
           </div>
         ))}

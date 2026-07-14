@@ -644,6 +644,49 @@ test('real structure() round-19: opener-local desync, hierarchy attribution, Com
   assert.ok(!/<\/?\$?Panel>/.test(eb), `escaped-backtick left bare tag markup: ${eb}`);
 });
 
+// EVE round 20 — three residual P1s, verified through the real structure() → buildIndex() → Orama
+// chain (not just the string sanitizer), because a leak only matters if it changes what queries hit.
+test('real structure() round-20: syntactic-role generics, opener-local recovery, code-span parity', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r20', data: { title: '/r20', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // P1 #1 — a NON-nested same-name generic followed by a real same-name inline component. The generic
+  // must be excluded by syntactic role (its own body is unambiguously a generic) so the later inline
+  // closer does not drag it onto the stack; both the generic identifier and the inline body must index.
+  const forms = {
+    constrained: '<$Panel extends CONSTRAINEDARROW20>(x: $Panel) => x',
+    bare: 'keep<$Panel>(x: $Panel) => x',
+    default: '<$Panel = DEFAULTARROW20>(x: $Panel) => x',
+    compound: '<$Panel, U extends COMPOUNDARROW20>(x: $Panel) => x',
+    comparison: 'const c = a <$Panel extends COMPARISONARROW20> b',
+  } as const;
+  for (const [kind, decl] of Object.entries(forms)) {
+    const needle = decl.match(/[A-Z]+ARROW20/)?.[0];
+    if (!needle) continue; // 'bare' carries no attribute needle; its guarantee is the inline below
+    const raw = `Body ${kind}. \`const fn = ${decl};\` then <$Panel>INLINE${kind}20</$Panel> done.`;
+    assert.ok((await hits(raw, needle)) > 0, `${kind}: generic "${needle}" 0-hit`);
+    assert.ok((await hits(raw, `INLINE${kind}20`)) > 0, `${kind}: inline body 0-hit`);
+  }
+
+  // P1 #2 — a HONEST escaped opener (brace attribute forces the `\<` escape) whose visible body carries
+  // an unbalanced `[` and a stray `>`. Recovery must NOT fire (opener-local span is balanced), so the
+  // whole body survives — no left/right/suffix token is lost to a false desync.
+  const honest = 'prefix <Panel mode={{ a: 1 }} title="SAFEOPEN20">ESCOPENLEFT20 [ compare > ESCOPENRIGHT20</Panel>ESCOPENSUF20';
+  for (const q of ['ESCOPENLEFT20', 'ESCOPENRIGHT20', 'ESCOPENSUF20']) assert.ok((await hits(honest, q)) > 0, `honest opener "${q}" 0-hit`);
+
+  // P1 #3 — code-span escape by consecutive-backslash PARITY. An EVEN backslash run before a backtick is
+  // a real span opener; a constrained generic just before it must survive (the span is verbatim, not a
+  // fence that exposes a fake closer). And a span removal must preserve boundaries so `</` + span +
+  // `$SplitPanel>` never concatenate into a probe-visible pseudo-closer that deletes the generic.
+  const even = 'text <$Panel extends EVENSLASHKEEP20> x \\\\`noise </$Panel>` more';
+  assert.ok((await hits(even, 'EVENSLASHKEEP20')) > 0, `even-slash: generic 0-hit`);
+  const split = 'g <$Panel extends SPLITGENKEEP20> then </`noise`$SplitPanel> tail';
+  assert.ok((await hits(split, 'SPLITGENKEEP20')) > 0, `split-closer: generic 0-hit`);
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

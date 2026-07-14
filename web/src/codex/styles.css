@@ -307,6 +307,9 @@ body {
   font-size: 12px;
 }
 .cx-main-head-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--cx-muted);
   font-size: 12px;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;

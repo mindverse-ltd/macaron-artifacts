@@ -12,6 +12,7 @@
 //   Row 6: [Permission chip] shift+tab to cycle    (permission)
 
 import { useEffect, useState } from 'react';
+import { ChevronRight, ChevronsRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ProviderPicker } from './ProviderPicker';
 import { api, type PublicSettings } from '../lib/api';
@@ -194,7 +195,7 @@ export function StatusBar({
 
       {currentTodo && (
         <div className="status-row status-todo">
-          <span className="status-todo-arrow">▸</span>
+          <span className="status-todo-arrow"><ChevronRight size={12} aria-hidden="true" /></span>
           <span className="status-todo-text">{currentTodo.text}</span>
           <span className="status-todo-progress">
             ({currentTodo.done}/{currentTodo.total})
@@ -203,7 +204,7 @@ export function StatusBar({
       )}
 
       <div className="status-row status-perm">
-        <span className="status-perm-arrow">▸▸</span>
+        <span className="status-perm-arrow"><ChevronsRight size={12} aria-hidden="true" /></span>
         <PermissionChip value={permissionMode} onChange={onPermissionChange} disabled={sending} />
         <span className="status-perm-hint">shift+tab to cycle</span>
       </div>

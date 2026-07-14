@@ -261,6 +261,7 @@ button { font: inherit; cursor: pointer; }
   font-size: 13px;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
+.fx-head .ghost { display: inline-flex; align-items: center; gap: 5px; }
 .ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-strong); }
 .ghost:disabled { opacity: 0.45; cursor: not-allowed; }
 .small { padding: 5px 10px; font-size: 12px; }
@@ -635,6 +636,9 @@ textarea:focus, select:focus, input:focus {
   position: absolute;
   top: 6px;
   right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -658,6 +662,9 @@ textarea:focus, select:focus, input:focus {
   position: absolute;
   top: 6px;
   right: 82px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -789,6 +796,9 @@ textarea:focus, select:focus, input:focus {
   padding: 2px 0;
   font-family: var(--font-mono);
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 .ti-expand:hover { color: var(--accent); }
 
@@ -4712,6 +4722,9 @@ textarea:focus, select:focus, input:focus {
 }
 .example-card-try {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 6px 12px;
   background: var(--accent);
   color: #fff;

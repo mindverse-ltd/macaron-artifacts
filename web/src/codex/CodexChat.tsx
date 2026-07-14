@@ -3,7 +3,8 @@
 // look. Every visual detail — background, borders, tool cards, code
 // blocks — is tuned to match the claude WebUI's palette (see styles.css).
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Sparkles, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -188,7 +189,7 @@ function Reasoning({ text }: { text: string }) {  const [open, setOpen] = useSta
   return (
     <div className="cx-reasoning">
       <div className="cx-reasoning-head" onClick={() => setOpen((v) => !v)}>
-        <span className="cx-reasoning-caret">{open ? '▾' : '▸'}</span>
+        <span className="cx-reasoning-caret">{open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</span>
         <span>Reasoning</span>
       </div>
       {open && <div className="cx-reasoning-body">{text}</div>}
@@ -196,13 +197,13 @@ function Reasoning({ text }: { text: string }) {  const [open, setOpen] = useSta
   );
 }
 
-function toolGlyph(name: string): string {
-  if (name === 'Bash') return '$';
-  if (name === 'Edit') return '△';
-  if (name === 'WebSearch') return '⌕';
-  if (name.startsWith('mcp:')) return '⬡';
-  if (name === 'TodoWrite') return '☰';
-  return '⚙';
+function toolGlyph(name: string): ReactNode {
+  if (name === 'Bash') return <Terminal size={14} aria-hidden="true" />;
+  if (name === 'Edit') return <Pencil size={14} aria-hidden="true" />;
+  if (name === 'WebSearch') return <Search size={14} aria-hidden="true" />;
+  if (name.startsWith('mcp:')) return <Hexagon size={14} aria-hidden="true" />;
+  if (name === 'TodoWrite') return <ListTodo size={14} aria-hidden="true" />;
+  return <Settings size={14} aria-hidden="true" />;
 }
 
 function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
@@ -240,7 +241,7 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   return (
     <div className="cx-genui">
       <div className="cx-genui-head">
-        <span className="cx-genui-glyph">◈</span>
+        <span className="cx-genui-glyph"><Sparkles size={14} aria-hidden="true" /></span>
         <span className="cx-genui-name">Rendered UI</span>
         {it.status === 'error' && <span className="cx-genui-status err">diagnostics failed</span>}
       </div>
@@ -258,11 +259,11 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
 }
 
 function PlanCard({ it }: { it: Extract<Item, { kind: 'plan' }> }) {
-  const glyph = (s: CodexPlanStatus) => (s === 'completed' ? '☑' : s === 'inProgress' ? '◐' : '☐');
+  const glyph = (s: CodexPlanStatus): ReactNode => (s === 'completed' ? <CheckSquare size={14} aria-hidden="true" /> : s === 'inProgress' ? <CircleDot size={14} aria-hidden="true" /> : <Square size={14} aria-hidden="true" />);
   return (
     <div className="cx-plan">
       <div className="cx-plan-head">
-        <span className="cx-plan-glyph">◇</span>
+        <span className="cx-plan-glyph"><Diamond size={14} aria-hidden="true" /></span>
         <span className="cx-plan-name">Plan</span>
       </div>
       {it.explanation && <div className="cx-plan-explanation">{it.explanation}</div>}
@@ -291,7 +292,7 @@ function ApprovalCard({ it, onDecide }: { it: Extract<Item, { kind: 'approval' }
   return (
     <div className={'cx-approval' + (resolved ? ' resolved' : '')}>
       <div className="cx-approval-head">
-        <span className="cx-approval-glyph">⚑</span>
+        <span className="cx-approval-glyph"><Flag size={14} aria-hidden="true" /></span>
         <span className="cx-approval-name">{title}</span>
         {resolved && <span className="cx-approval-status">{it.decision === 'stale' ? 'expired' : it.decision}</span>}
       </div>
@@ -623,7 +624,7 @@ export function CodexChat(props: CodexChatProps = {}) {
               {detail?.gitBranch && (
                 <>
                   <span className="cx-main-head-dot">·</span>
-                  <span className="cx-main-head-branch">⌥ {detail.gitBranch}</span>
+                  <span className="cx-main-head-branch"><GitBranch size={13} aria-hidden="true" /> {detail.gitBranch}</span>
                 </>
               )}
             </>

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { useNavigate } from 'react-router-dom';
 import { api, type SlashCommand } from '../lib/api';
 import type { Workspace } from '@macaron/shared';
+import { ArrowUp, X } from 'lucide-react';
 import { setPendingPrompt, type PendingImage } from '../lib/newSession';
 import { startNewSession } from '../lib/liveStore';
 import { SlashPalette } from '../components/SlashPalette';
@@ -290,7 +291,9 @@ export function Home() {
                     className="img-chip-x"
                     onClick={() => setImages((cur) => cur.filter((c) => c.id !== img.id))}
                     aria-label="Remove image"
-                  >×</button>
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -391,10 +394,7 @@ export function Home() {
               aria-label={sending ? 'Opening…' : 'Send'}
               title={sending ? 'Opening…' : 'Send (Enter)'}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 19V5" />
-                <path d="m5 12 7-7 7 7" />
-              </svg>
+              <ArrowUp size={14} strokeWidth={2.4} aria-hidden="true" />
             </button>
           </div>
         </form>

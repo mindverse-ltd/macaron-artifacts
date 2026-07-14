@@ -121,6 +121,18 @@ test('real structure() split chunks: escaped quotes, generic defaults, OOB entit
   const tpl = clean('type Box\\<T = `x`> keeps TPLNEEDLE');
   assert.ok(tpl.every((t) => /T = x> keeps TPLNEEDLE/.test(t)) && !tpl.some((t) => /<Box|]}>/.test(t)), `template default mangled: ${JSON.stringify(tpl)}`);
 
+  // Compound (multi-param) and constrained generics: a top-level `,` or an `extends`
+  // clause marks a TYPE PARAMETER LIST, so its `=` are default-type assignments, NOT
+  // JSX attributes — every needle must survive and stay searchable.
+  assert.deepEqual(clean('type Pair\\<T = string, U = "MULTIPARAMDEFAULTNEEDLE"> keeps MULTIPROSEKEEP'), ['type Pair<T = string, U = "MULTIPARAMDEFAULTNEEDLE"> keeps MULTIPROSEKEEP']);
+  assert.deepEqual(clean('type Box\\<T extends Foo = "CONSTRAINTDEFAULTNEEDLE"> keeps CONSTRAINTPROSEKEEP'), ['type Box<T extends Foo = "CONSTRAINTDEFAULTNEEDLE"> keeps CONSTRAINTPROSEKEEP']);
+
+  // A spread JSX attribute (`{...x}`) is unmistakably a component even without a
+  // `name=` — its split opener residue must be stripped, not left as searchable markup.
+  const spread = clean('<Panel {...SPREADATTRNEEDLE}>\n\n## H\n\nbodytext\n\n</Panel>');
+  assert.ok(!spread.some((t) => /SPREADATTRNEEDLE|<Panel|\.\.\./.test(t)), `spread opener residue leaked: ${JSON.stringify(spread)}`);
+  assert.ok(spread.includes('bodytext'), 'spread component body must survive');
+
   // An out-of-range numeric entity is not a real code point: String.fromCodePoint
   // would throw and abort the index build, so it must be kept as literal text.
   assert.deepEqual(clean('literal \\&#9999999999; KEEP'), ['literal &#9999999999; KEEP']);

@@ -8,6 +8,8 @@ import {
   subscribeCanvas,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
+import { useConfirm } from '../components/Confirm';
+import { useToast } from '../components/Toast';
 
 type WsData = CodexWorkspace & { sessions: CodexThread[] };
 
@@ -23,6 +25,8 @@ export function CodexSidebar() {
   const [status, setStatus] = useState<'connecting' | 'ok' | 'bad'>('connecting');
   const [providerLabel, setProviderLabel] = useState('');
   const [canvasBy, setCanvasBy] = useState<Record<string, string[]>>({});
+  const confirm = useConfirm();
+  const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const activeProject = /^\/w\/([^/]+)/.exec(location.pathname)?.[1] ? decodeURIComponent(/^\/w\/([^/]+)/.exec(location.pathname)![1]!) : '';
@@ -106,13 +110,24 @@ export function CodexSidebar() {
 
   const del = async (e: React.MouseEvent, sid: string) => {
     e.stopPropagation();
-    if (!confirm('Delete this thread? The rollout file under ~/.codex/sessions will be removed.')) return;
+    const ok = await confirm({
+      title: 'Delete thread?',
+      body: (
+        <>
+          The rollout file under <code>~/.codex/sessions</code> will be
+          removed. This can't be undone.
+        </>
+      ),
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await codexApi.deleteThread(sid);
       await load();
       if (activeSid === sid) navigate('/');
     } catch (err) {
-      alert(`delete failed: ${(err as Error).message}`);
+      toast(`Delete failed: ${(err as Error).message}`);
     }
   };
 

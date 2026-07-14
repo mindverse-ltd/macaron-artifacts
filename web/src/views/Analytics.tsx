@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import { api, fmtAgo, type AnalyticsResponse, type UsageBySession } from '../lib/api';
-import { buildHeatmap, levelFor, navCells, navTarget } from '../lib/heatmap';
+import { availableWeeks, buildHeatmap, levelFor, navCells, navTarget } from '../lib/heatmap';
 
 const WINDOWS: Array<{ id: string; label: string }> = [
   { id: '7d', label: '7d' },
@@ -35,11 +35,17 @@ type SortKey = keyof Pick<
 
 const SESSION_CAP = 100;
 
-// GitHub-style contribution grid over the active window, one cell per day
-// (columns = weeks, rows = weekday), shaded by that day's message count. The
-// grid geometry, month labels, and keyboard-nav math live in ../lib/heatmap
-// (pure + unit-tested); this component only wires them to DOM + state.
+// GitHub-style contribution grid: equal fixed-size squares, one per day
+// (columns = weeks, rows = weekday), shaded by that day's message count. Layout
+// is driven by the container's measured width — we render only as many whole
+// week-columns as fit at the fixed cell+gap size, showing the most-recent days,
+// so squares never stretch and no half-column is ever clipped or scrolled. The
+// bucketing and keyboard-nav math live in ../lib/heatmap (pure + unit-tested).
+const CELL = 13; // px — square side; matches the reference figure's dense grid
+const GAP = 4;
+
 function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: AnalyticsResponse['daily']; sinceDate: string; untilDate: string; window: string }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   // `active` drives the caption (hover OR focus). `rovingKey` is the single
   // tabbable cell — updated only by keyboard focus, never hover, so the mouse
@@ -48,8 +54,27 @@ function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: Analytic
   const [active, setActive] = useState<{ key: string; count: number } | null>(null);
   const [rovingKey, setRovingKey] = useState<string | null>(null);
   const focusedRef = useRef<{ key: string; count: number } | null>(null);
+  // How many whole columns the container currently fits. Measured, not guessed,
+  // so desktop and phone each show exactly as many full weeks as their width allows.
+  const [fitWeeks, setFitWeeks] = useState(0);
 
-  const grid = useMemo(() => buildHeatmap(daily, sinceDate, untilDate, window), [daily, sinceDate, untilDate, window]);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      // n columns take n*CELL + (n-1)*GAP; solve for the largest n that fits.
+      setFitWeeks(Math.max(1, Math.floor((w + GAP) / (CELL + GAP))));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const maxWeeks = useMemo(() => availableWeeks(daily, sinceDate, untilDate, window), [daily, sinceDate, untilDate, window]);
+  const weeks = Math.min(fitWeeks || maxWeeks, maxWeeks);
+  const grid = useMemo(() => buildHeatmap(daily, untilDate, weeks), [daily, untilDate, weeks]);
 
   const level = (count: number) => levelFor(count, grid.max);
 
@@ -73,53 +98,46 @@ function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: Analytic
   const tabKey = rovingKey ?? firstKey;
 
   return (
-    <div className="heatmap" style={{ '--weeks': grid.weeks.length } as React.CSSProperties}>
-      <div className="heatmap-scroll">
-        <div className="heatmap-months" aria-hidden="true">
-          {grid.months.map((m, i) => (
-            <span key={i} style={{ gridColumnStart: m.col + 1 }}>{m.label}</span>
-          ))}
-        </div>
-        <div
-          className="heatmap-grid"
-          role="grid"
-          aria-label="Daily message activity"
-          aria-rowcount={7}
-          aria-colcount={grid.weeks.length}
-          ref={gridRef}
-          onKeyDown={onKeyDown}
-          onMouseLeave={() => setActive(focusedRef.current)}
-        >
-          {/* Row-major for ARIA: one role=row per weekday, cells placed into the
-              shared column track by grid-column-start so they still read as weeks. */}
-          {[0, 1, 2, 3, 4, 5, 6].map((r) => (
-            <div key={r} className="heatmap-row" role="row" aria-rowindex={r + 1}>
-              {grid.weeks.map((week, wi) => {
-                const cell = week[r];
-                return cell ? (
-                  <div
-                    key={wi}
-                    className="heatmap-cell"
-                    style={{ gridColumnStart: wi + 1 }}
-                    data-level={level(cell.count)}
-                    data-key={cell.key}
-                    data-row={r}
-                    data-col={wi}
-                    role="gridcell"
-                    aria-colindex={wi + 1}
-                    tabIndex={cell.key === tabKey ? 0 : -1}
-                    aria-label={`${cell.key}: ${cell.count} message${cell.count === 1 ? '' : 's'}`}
-                    onMouseEnter={() => setActive({ key: cell.key, count: cell.count })}
-                    onFocus={() => { const a = { key: cell.key, count: cell.count }; focusedRef.current = a; setActive(a); setRovingKey(cell.key); }}
-                    onBlur={() => { focusedRef.current = null; }}
-                  />
-                ) : (
-                  <div key={wi} className="heatmap-cell heatmap-cell--empty" style={{ gridColumnStart: wi + 1 }} role="presentation" aria-hidden="true" />
-                );
-              })}
-            </div>
-          ))}
-        </div>
+    <div className="heatmap" ref={wrapRef} style={{ '--cell': `${CELL}px`, '--gap': `${GAP}px`, '--weeks': grid.weeks.length } as React.CSSProperties}>
+      <div
+        className="heatmap-grid"
+        role="grid"
+        aria-label="Daily message activity"
+        aria-rowcount={7}
+        aria-colcount={grid.weeks.length}
+        ref={gridRef}
+        onKeyDown={onKeyDown}
+        onMouseLeave={() => setActive(focusedRef.current)}
+      >
+        {/* Row-major for ARIA: one role=row per weekday, cells placed into the
+            shared column track by grid-column-start so they still read as weeks. */}
+        {[0, 1, 2, 3, 4, 5, 6].map((r) => (
+          <div key={r} className="heatmap-row" role="row" aria-rowindex={r + 1}>
+            {grid.weeks.map((week, wi) => {
+              const cell = week[r];
+              return cell ? (
+                <div
+                  key={wi}
+                  className="heatmap-cell"
+                  style={{ gridColumnStart: wi + 1 }}
+                  data-level={level(cell.count)}
+                  data-key={cell.key}
+                  data-row={r}
+                  data-col={wi}
+                  role="gridcell"
+                  aria-colindex={wi + 1}
+                  tabIndex={cell.key === tabKey ? 0 : -1}
+                  aria-label={`${cell.key}: ${cell.count} message${cell.count === 1 ? '' : 's'}`}
+                  onMouseEnter={() => setActive({ key: cell.key, count: cell.count })}
+                  onFocus={() => { const a = { key: cell.key, count: cell.count }; focusedRef.current = a; setActive(a); setRovingKey(cell.key); }}
+                  onBlur={() => { focusedRef.current = null; }}
+                />
+              ) : (
+                <div key={wi} className="heatmap-cell heatmap-cell--empty" style={{ gridColumnStart: wi + 1 }} role="presentation" aria-hidden="true" />
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div className="heatmap-footer">
         <div className="heatmap-detail" aria-live="polite">{captionText}</div>

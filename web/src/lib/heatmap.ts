@@ -1,9 +1,7 @@
 // Pure heatmap geometry — extracted from the Analytics view so the calendar
-// bucketing, month-label placement, and keyboard-target math can be unit-tested
-// without a DOM. The React component consumes `buildHeatmap` and the two nav
-// resolvers below; everything here is deterministic and side-effect free.
-
-export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// bucketing and keyboard-target math can be unit-tested without a DOM. The
+// React component measures its container width, derives how many whole week
+// columns fit, and passes that count in; everything here is deterministic.
 
 // A calendar day is a plain YYYY-MM-DD string. We iterate days via UTC-noon
 // millis so DST shifts never skip or double a day, and never convert to the
@@ -14,56 +12,47 @@ export const dayToUTC = (key: string) => { const [y, m, d] = key.split('-').map(
 export const utcToDay = (ms: number) => { const d = new Date(ms); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; };
 export const DAY = 86400000;
 
-export type HeatCell = { key: string; count: number; inRange: boolean } | null;
-export type MonthLabel = { col: number; label: string };
-export type HeatGrid = { weeks: HeatCell[][]; months: MonthLabel[]; max: number };
+export type HeatCell = { key: string; count: number } | null;
+export type HeatGrid = { weeks: HeatCell[][]; max: number };
 
-// Build the weeks × weekday grid for the active window. `daily` is the analytics
-// payload (date → messageCount); `sinceDate`/`untilDate` are the server-local
-// calendar-day bounds; `window` selects the sizing rule.
-export function buildHeatmap(
-  daily: Array<{ date: string; messageCount: number }>,
-  sinceDate: string,
-  untilDate: string,
-  window: string,
-): HeatGrid {
+// How many week-columns the active window spans (a leading partial week counts
+// as one), so the layout never asks for more columns of data than exist.
+export function availableWeeks(daily: Array<{ date: string }>, sinceDate: string, untilDate: string, window: string): number {
+  if (!daily.length) return 1;
+  const startMs = window === 'all' ? dayToUTC(daily[0]!.date) : dayToUTC(sinceDate);
+  const endMs = dayToUTC(untilDate);
+  if (endMs < startMs) return 1;
+  // Back both ends to their Sunday, then count the weeks between inclusive.
+  const gridStart = startMs - new Date(startMs).getUTCDay() * DAY;
+  const lastSunday = endMs - new Date(endMs).getUTCDay() * DAY;
+  return Math.max(1, Math.round((lastSunday - gridStart) / (7 * DAY)) + 1);
+}
+
+// Build the most-recent `weeks` columns (weekday rows Sun→Sat) ending at the
+// week that contains untilDate. Days after untilDate (the tail of the current
+// week) are null placeholders; every other slot is a real day whose count comes
+// from `daily`, defaulting to 0 so empty days still render as light squares.
+export function buildHeatmap(daily: Array<{ date: string; messageCount: number }>, untilDate: string, weeks: number): HeatGrid {
   const byDay = new Map(daily.map((d) => [d.date, d.messageCount]));
   const endMs = dayToUTC(untilDate);
-  // Fixed windows (7d/30d/90d) start at sinceDate so leading zero-days still
-  // render; 'all' (sinceDate = epoch) would span back to 1970, so clamp to
-  // the first active day instead.
-  const startMs = window === 'all' ? dayToUTC(daily.length ? daily[0]!.date : untilDate) : dayToUTC(sinceDate);
+  const lastSunday = endMs - new Date(endMs).getUTCDay() * DAY;
+  const n = Math.max(1, weeks);
+  const gridStart = lastSunday - (n - 1) * 7 * DAY;
 
-  // Back up to the Sunday of the start week (getUTCDay: 0 = Sunday).
-  const gridStartMs = startMs - new Date(startMs).getUTCDay() * DAY;
-
-  const weeks: HeatCell[][] = [];
-  const months: MonthLabel[] = [];
+  const out: HeatCell[][] = [];
   let max = 0;
-  let prevLabelMonth = -1;
-  for (let ms = gridStartMs, col = 0; ms <= endMs; col++) {
+  for (let ms = gridStart, c = 0; c < n; c++) {
     const week: HeatCell[] = [];
-    let weekFirstMonth = -1;
     for (let row = 0; row < 7; row++, ms += DAY) {
-      const inRange = ms >= startMs && ms <= endMs;
+      if (ms > endMs) { week.push(null); continue; } // future day → placeholder
       const key = utcToDay(ms);
-      if (!inRange) { week.push(null); continue; }
       const count = byDay.get(key) ?? 0;
       if (count > max) max = count;
-      if (weekFirstMonth < 0) weekFirstMonth = new Date(ms).getUTCMonth();
-      week.push({ key, count, inRange });
+      week.push({ key, count });
     }
-    // Label a column by the month of its first in-range day, whenever that month
-    // differs from the last one labelled. A week straddling a month boundary shows
-    // its earlier month here and the new month lands on the next column, so neither
-    // the leading partial month nor the incoming month is ever overwritten/lost.
-    if (weekFirstMonth >= 0 && weekFirstMonth !== prevLabelMonth) {
-      months.push({ col, label: MONTHS[weekFirstMonth]! });
-      prevLabelMonth = weekFirstMonth;
-    }
-    weeks.push(week);
+    out.push(week);
   }
-  return { weeks, months, max };
+  return { weeks: out, max };
 }
 
 // The 5-level shade bucket for a day's count, given the window's busiest day.

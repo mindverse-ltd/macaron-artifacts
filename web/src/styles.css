@@ -4159,54 +4159,36 @@ textarea:focus, select:focus, input:focus {
 }
 
 /* GitHub-style contribution heatmap. Columns are weeks, rows are weekdays;
-   cell shade steps through 5 accent tints keyed by that day's message count. */
-/* Both the month-label track and each weekday row share one column template
-   driven by --weeks (set inline from JS). The min in minmax must be an explicit
-   length (11px), NOT 0 and NOT the implicit min-content of plain 1fr: min-content
-   floors the months track at the nowrap label width (~18px) while the textless
-   cell track floors near 0, so the two tracks compute different widths and the
-   labels drift off their columns at long histories. An identical explicit 11px
-   floor on both tracks keeps them the same width at any --weeks (labels overflow
-   their column visually but never resize it), so columns stay aligned and whole.
-   Short ranges stretch past 11px to fill the panel (1fr); long ranges hold 11px
-   and the .heatmap-scroll wrapper scrolls — whole columns only, never a sliver. */
-.heatmap-months,
+   cell shade steps through 5 tints keyed by that day's message count. */
+/* Fixed-size squares, never stretched: the JS measures the container and sets
+   --weeks to how many whole CELL+GAP columns fit, so the grid is exactly that
+   wide and no half-column is ever clipped or scrolled. Both the JS geometry and
+   this template use the same --cell/--gap, so desktop and phone show whole,
+   equal squares. */
 .heatmap-row {
   display: grid;
-  grid-template-columns: repeat(var(--weeks, 1), minmax(11px, 1fr));
-  gap: 3px;
+  grid-template-columns: repeat(var(--weeks, 1), var(--cell, 13px));
+  gap: var(--gap, 4px);
 }
-.heatmap-months {
-  font-size: 10px;
-  color: var(--text-2);
-  margin-bottom: 5px;
-}
-.heatmap-months span { white-space: nowrap; } /* labels overflow their column onto the grid */
-.heatmap-grid { display: flex; flex-direction: column; gap: 3px; }
-/* Contrast without a fill+border combo: empty days (L0) are outline-only with a
-   transparent interior; active days (L1–L4) are fill-only with no border. Every
-   cell therefore carries exactly one visual expression, and each is ≥3:1 against
-   the panel (L0 outline / L4 fill measured; intermediate levels interpolate). */
+.heatmap-grid { display: flex; flex-direction: column; gap: var(--gap, 4px); }
+/* Every cell is a borderless solid square — empty days (L0) a light fill,
+   active days (L1–L4) progressively deeper. No level carries a border or ring,
+   matching the reference figure exactly. */
 .heatmap-cell {
-  width: 100%;
-  height: 11px;
-  border-radius: 2px;
-  background: transparent;
+  width: var(--cell, 13px);
+  height: var(--cell, 13px);
+  border-radius: 3px;
+  background: var(--surface-2);
 }
 .heatmap-cell[tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .heatmap-cell--empty { visibility: hidden; }
-/* Fills interpolate accent→surface-2, then darken toward --text by --hm-darken.
-   Light theme sits on a white panel where the raw tints only reach ~2.3:1, so
-   --hm-darken (18%) lifts every active level to ≥3:1; dark theme already clears
-   3:1 on its charcoal panel, so its --hm-darken is 0. Darkening keeps the design
-   fill-only — no border is added. Verified light L1–L4 = 3.14/3.54/4.09/4.72. */
-.heatmap { --hm-darken: 18%; }
-:root[data-theme='dark'] .heatmap { --hm-darken: 0%; }
-.heatmap-cell[data-level='0'] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 55%, transparent); }
-.heatmap-cell[data-level='1'] { background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) 66%, var(--surface-2))); }
-.heatmap-cell[data-level='2'] { background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) 76%, var(--surface-2))); }
-.heatmap-cell[data-level='3'] { background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) 88%, var(--surface-2))); }
-.heatmap-cell[data-level='4'] { background: color-mix(in srgb, var(--text) var(--hm-darken), var(--accent)); }
+/* Solid fills stepping from a light empty square toward full accent. Light and
+   dark themes share the ramp via color-mix against the theme's own surface. */
+.heatmap-cell[data-level='0'] { background: var(--surface-2); }
+.heatmap-cell[data-level='1'] { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+.heatmap-cell[data-level='2'] { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+.heatmap-cell[data-level='3'] { background: color-mix(in srgb, var(--accent) 78%, var(--surface-2)); }
+.heatmap-cell[data-level='4'] { background: var(--accent); }
 .heatmap-footer {
   display: flex;
   align-items: center;
@@ -4229,7 +4211,7 @@ textarea:focus, select:focus, input:focus {
   color: var(--text-2);
 }
 .heatmap-legend span { margin: 0 3px; }
-.heatmap-legend .heatmap-cell { width: 11px; } /* legend swatches are fixed, not grid-stretched */
+.heatmap-legend .heatmap-cell { width: 11px; height: 11px; } /* legend swatches are small fixed squares */
 
 /* Command palette (Cmd-K) — overlay convention mirrors .confirm-backdrop,
    but top-anchored like a spotlight search rather than centered. */

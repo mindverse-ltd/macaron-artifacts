@@ -110,7 +110,11 @@ function makeDefaults(): Settings {
     // Ship one seeded Macaron entry — users see it in the list, can add key,
     // switch to it, or delete it. Same UX as any other custom provider.
     customProviders: [seedMacaronProvider()],
-    defaultPermissionMode: 'default',
+    // WebUI defaults to fully unattended: every tool call auto-approves
+    // without a permission prompt. Users who want the safer per-tool ask
+    // flow can flip this in Settings, or cycle it per-session with
+    // Shift+Tab / the permission chip.
+    defaultPermissionMode: 'bypassPermissions',
     followupSuggestions: false,
   };
 }

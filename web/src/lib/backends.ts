@@ -24,7 +24,8 @@ export const LOCAL_BACKEND_ID = 'local';
 const BACKENDS_KEY = 'macaron_backends';
 const ACTIVE_KEY = 'macaron_active_backend';
 // The pre-multi-backend single global token. Read once during migration, then
-// left alone (we don't delete it, so downgrading to an older build still works).
+// deleted so a later clearToken() can't be undone by a re-migration (if the
+// backend list is ever reset, the stale legacy token must not resurrect).
 const LEGACY_TOKEN_KEY = 'macaron_auth_token';
 
 function localDefault(): Backend {
@@ -51,11 +52,16 @@ export function loadBackends(): Backend[] {
     return stored.some((b) => b.id === LOCAL_BACKEND_ID) ? stored : [localDefault(), ...stored];
   }
   // First run on a multi-backend build: fold any legacy single token into the
-  // local backend so a remembered share-link/tunnel token keeps working.
+  // local backend so a remembered share-link/tunnel token keeps working, then
+  // delete the legacy key so a later clearToken() stays cleared even if the
+  // backend list is reset (otherwise the stale token would re-migrate).
   const local = localDefault();
   let legacy = '';
   try { legacy = localStorage.getItem(LEGACY_TOKEN_KEY) || ''; } catch { /* ignore */ }
-  if (legacy) local.token = legacy;
+  if (legacy) {
+    local.token = legacy;
+    try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
+  }
   const seeded = [local];
   write(BACKENDS_KEY, seeded);
   return seeded;

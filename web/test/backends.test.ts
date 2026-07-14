@@ -41,6 +41,22 @@ test('legacy single token migrates onto the LOCAL backend', async () => {
   assert.equal(backends.getActiveBackend().token, 'legacy-abc');
   // The auth facade reads through to the active backend.
   assert.equal(auth.getToken(), 'legacy-abc');
+  // The legacy key is consumed (deleted) so it can't re-migrate later.
+  assert.equal(localStorage.getItem('macaron_auth_token'), null);
+});
+
+test('cleared token stays cleared even if the backend list is reset', async () => {
+  // Regression: migration must delete the legacy key, else clearToken() gets
+  // undone by a re-migration when the backend list is later dropped.
+  installLocalStorage({ macaron_auth_token: 'legacy-abc' });
+  const { backends, auth } = await freshModules();
+  auth.clearToken();
+  assert.equal(auth.getToken(), '');
+  // Simulate the backend list being wiped (e.g. a storage reset / new build):
+  localStorage.removeItem('macaron_backends');
+  // Re-seeding must NOT resurrect the legacy token.
+  assert.equal(backends.getActiveBackend().token, undefined);
+  assert.equal(auth.getToken(), '');
 });
 
 test('no legacy token → LOCAL backend has no token', async () => {

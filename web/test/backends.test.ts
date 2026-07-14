@@ -67,33 +67,45 @@ test('cleared token stays cleared even if the backend list is reset', async () =
   assert.equal(auth.getToken(), '');
 });
 
-test('failed persistence keeps the legacy key so the next load retries migration', async () => {
+test('failed migration is retried automatically once storage recovers', async () => {
   const ls = installLocalStorage({ macaron_auth_token: 'legacy-abc' });
   const { backends, auth } = await freshModules();
   ls.failWrites = true;
-  // Migration still surfaces the token in-memory this run, but must NOT delete
-  // the legacy key when the seeded list couldn't be persisted.
+  // Migration surfaces the token in-memory this run, but must NOT delete the
+  // legacy key while the seeded list can't be persisted.
   assert.equal(auth.getToken(), 'legacy-abc');
   assert.equal(localStorage.getItem('macaron_auth_token'), 'legacy-abc');
-  // Storage recovers, and a fresh page load (cache reset) re-reads storage → the
-  // migration completes and the legacy key is removed.
+  // Storage recovers: the next operation flushes the deferred migration in this
+  // same session — the seeded registry persists and the legacy key is removed,
+  // WITHOUT waiting for a reload.
   ls.failWrites = false;
+  backends.loadBackends();
+  assert.equal(localStorage.getItem('macaron_auth_token'), null);
+  const persisted = JSON.parse(localStorage.getItem('macaron_backends')!) as Array<{ token?: string }>;
+  assert.equal(persisted[0].token, 'legacy-abc');
+  // A fresh reload reads the migrated registry back; the old key does not re-migrate.
   backends.__resetForTests();
   assert.equal(backends.getActiveBackend().token, 'legacy-abc');
   assert.equal(localStorage.getItem('macaron_auth_token'), null);
 });
 
-test('explicit clear during a write failure still invalidates the legacy source', async () => {
-  // Regression (fail → clear → recover): if the registry write fails but the
-  // user explicitly clears the token, the legacy key must be dropped anyway, so
-  // a later successful load can't re-migrate and resurrect the cleared token.
+test('explicit clear during a write failure invalidates the legacy source on recovery', async () => {
+  // fail → clear → recover: a clear during a write-failure window takes effect
+  // in-memory immediately, and the legacy key is dropped automatically once
+  // storage recovers — WITHOUT the caller having to clear a second time.
   const ls = installLocalStorage({ macaron_auth_token: 'legacy-abc' });
   const { backends, auth } = await freshModules();
   ls.failWrites = true;           // registry can't persist...
   auth.clearToken();              // ...but the user explicitly clears
-  assert.equal(localStorage.getItem('macaron_auth_token'), null);
-  // Storage recovers and the page reloads: token stays cleared, not re-migrated.
+  // In-memory clear is authoritative even before the legacy key can be removed.
+  assert.equal(auth.getToken(), '');
+  assert.equal(backends.getActiveBackend().token, undefined);
+  // Storage recovers: the very next operation flushes the deferred removal —
+  // no second clearToken() needed.
   ls.failWrites = false;
+  backends.loadBackends();
+  assert.equal(localStorage.getItem('macaron_auth_token'), null);
+  // And a fresh reload after that stays cleared, not re-migrated.
   localStorage.removeItem('macaron_backends');
   backends.__resetForTests();
   assert.equal(backends.getActiveBackend().token, undefined);
@@ -118,8 +130,12 @@ test('persisted registry → fail writes → clear → recover: clear sticks imm
   assert.equal(backends.getActiveBackend().token, undefined);
 
   ls.failWrites = false;     // storage recovers
-  auth.clearToken();         // a subsequent clear now persists
-  backends.__resetForTests();  // simulate a reload: re-read from storage
+  // A plain read triggers the deferred flush — no second clearToken() required.
+  backends.loadBackends();
+  const persistedNow = JSON.parse(localStorage.getItem('macaron_backends')!) as Array<{ token?: string }>;
+  assert.equal(persistedNow.some((b) => b.token), false);
+  // A reload now reads the persisted cleared registry back, not the old token.
+  backends.__resetForTests();
   assert.equal(auth.getToken(), '');
 });
 

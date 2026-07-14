@@ -4182,21 +4182,24 @@ textarea:focus, select:focus, input:focus {
 }
 .heatmap-cell[tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .heatmap-cell--empty { visibility: hidden; }
-/* Solid fills, no border at any level. Each active tint interpolates accent→
-   surface-2, then darkens toward --text by --hm-darken so every ACTIVE level
-   (L1–L4) clears 3:1 against the panel: light needs 18% darkening (raw tints
-   only reach ~1.6–3.9:1 on white), dark already clears 3:1 on its charcoal
-   panel so its darken is 0. Verified L1–L4 = light 3.15/3.52/4.11/4.72,
-   dark 3.27/3.81/4.58/5.44. L0 is the empty-day square: like the reference it
-   is a light fill (~1.1:1) that reads as "no activity", not a data value — the
-   ≥3:1 guarantee is for the levels that encode a count. */
-.heatmap { --hm-darken: 18%; }
-:root[data-theme='dark'] .heatmap { --hm-darken: 0%; }
-.heatmap-cell[data-level='0'] { background: var(--surface-2); }
-.heatmap-cell[data-level='1'] { background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) 66%, var(--surface-2))); }
-.heatmap-cell[data-level='2'] { background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) 76%, var(--surface-2))); }
-.heatmap-cell[data-level='3'] { background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) 88%, var(--surface-2))); }
-.heatmap-cell[data-level='4'] { background: color-mix(in srgb, var(--text) var(--hm-darken), var(--accent)); }
+/* Solid fills, no border. Shade is CONTINUOUS: --hm-i (0..1) is a day's rank in
+   the selected window's distribution, so the scale auto-adapts to the data
+   instead of snapping to fixed levels. accent% ramps 16%→100% of accent mixed
+   into surface-2 — the lowest active day is a clearly light tint, the busiest is
+   full accent, every distinct value in between gets its own shade. The light-
+   theme darken toward --text scales WITH intensity (0 at the light end, up to
+   16% at the dark end) so low days stay genuinely light rather than being pushed
+   dark by a flat offset, while the darkest days still gain panel contrast. Dark
+   theme needs no darken — its charcoal panel already separates the tints.
+   data-active=0 (empty in-window day or pre-window pad) is the inert background
+   square that reads as "no activity", never a data value. */
+.heatmap-cell[data-active='0'] { background: var(--surface-2); }
+.heatmap-cell[data-active='1'] {
+  --hm-p: calc(16% + var(--hm-i, 0) * 84%);
+  --hm-darken: calc(var(--hm-i, 0) * 16%);
+  background: color-mix(in srgb, var(--text) var(--hm-darken), color-mix(in srgb, var(--accent) var(--hm-p), var(--surface-2)));
+}
+:root[data-theme='dark'] .heatmap-cell[data-active='1'] { --hm-darken: 0%; }
 .heatmap-footer {
   display: flex;
   align-items: center;

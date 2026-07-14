@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import { api, fmtAgo, type AnalyticsResponse, type UsageBySession } from '../lib/api';
-import { availableWeeks, buildHeatmap, isDay, levelFor, navCells, navTarget } from '../lib/heatmap';
+import { availableWeeks, buildHeatmap, isDay, intensityFor, navCells, navTarget } from '../lib/heatmap';
 
 const WINDOWS: Array<{ id: string; label: string }> = [
   { id: '7d', label: '7d' },
@@ -84,7 +84,10 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
   const effectiveSince = window === 'all' ? (daily.length ? daily[0]!.date : untilDate) : sinceDate;
   const grid = useMemo(() => buildHeatmap(daily, effectiveSince, untilDate, weeks), [daily, effectiveSince, untilDate, weeks]);
 
-  const level = (count: number) => levelFor(count, grid.thresholds);
+  // A day's shade = its rank-based intensity in the window's distribution, mapped
+  // to the accent at that fraction. Continuous, so the scale auto-adapts to the
+  // selected window instead of snapping to fixed bands — 0 stays background.
+  const intensity = (count: number) => intensityFor(count, grid.ramp);
 
   // Keep keyboard state coherent across any resize (both directions). When the
   // visible columns change, the roving key, the real DOM focus, and the caption
@@ -159,8 +162,8 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
                 <div
                   key={cell.key}
                   className="heatmap-cell"
-                  style={{ gridColumnStart: wi + 1 }}
-                  data-level={level(cell.count)}
+                  style={{ gridColumnStart: wi + 1, '--hm-i': intensity(cell.count) } as React.CSSProperties}
+                  data-active={cell.count > 0 ? 1 : 0}
                   data-key={cell.key}
                   data-row={r}
                   data-col={wi}
@@ -173,10 +176,10 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
                   onBlur={() => { focusedRef.current = null; }}
                 />
               );
-              // Pre-window pad → a visible-but-inert L0 square (fills the column,
-              // never focuses, never enters the ARIA date range). Future day → a
-              // hidden slot that only reserves grid space.
-              if (cell) return <div key={`pad-${r}-${wi}`} className="heatmap-cell" style={{ gridColumnStart: wi + 1 }} data-level={0} role="presentation" aria-hidden="true" />;
+              // Pre-window pad → a visible-but-inert background square (fills the
+              // column, never focuses, never enters the ARIA date range). Future
+              // day → a hidden slot that only reserves grid space.
+              if (cell) return <div key={`pad-${r}-${wi}`} className="heatmap-cell" style={{ gridColumnStart: wi + 1 }} data-active={0} role="presentation" aria-hidden="true" />;
               return <div key={`empty-${r}-${wi}`} className="heatmap-cell heatmap-cell--empty" style={{ gridColumnStart: wi + 1 }} role="presentation" aria-hidden="true" />;
             })}
           </div>
@@ -186,7 +189,8 @@ export function UsageHeatmap({ daily, sinceDate, untilDate, window }: { daily: A
         <div className="heatmap-detail" aria-live="polite">{captionText}</div>
         <div className="heatmap-legend">
           <span>Less</span>
-          {[0, 1, 2, 3, 4].map((l) => <div key={l} className="heatmap-cell" data-level={l} aria-hidden="true" />)}
+          <div className="heatmap-cell" data-active={0} aria-hidden="true" />
+          {[0.25, 0.5, 0.75, 1].map((i) => <div key={i} className="heatmap-cell" data-active={1} style={{ '--hm-i': i } as React.CSSProperties} aria-hidden="true" />)}
           <span>More</span>
         </div>
       </div>

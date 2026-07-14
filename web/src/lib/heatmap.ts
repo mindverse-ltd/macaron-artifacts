@@ -18,11 +18,13 @@ export const DAY = 86400000;
 // range, and never counts as a data value. `null` is a hidden slot for days
 // AFTER untilDate (future) in the trailing week.
 export type HeatCell = { key: string; count: number } | { pad: true } | null;
-// `thresholds` are the 3 count cut-points (25/50/75th percentile of the active
-// days' counts) that split L1–L4. Ranking by quantile — not a linear fraction of
-// the single busiest day — keeps one outlier day from crushing every other day
-// into L1, so the ramp actually expresses each day's relative workload.
-export type HeatGrid = { weeks: HeatCell[][]; thresholds: [number, number, number] };
+// `ramp` is the sorted list of DISTINCT active-day counts in the selected window.
+// A day's shade comes from where its count ranks in this list (its ECDF position),
+// not from a fixed set of cut-points — so the colour scale stretches to whatever
+// the window's distribution actually is. Ranking by distinct value spreads the
+// days evenly across the full light→dark band regardless of scale or outliers,
+// which is what gives every day a visibly distinct shade.
+export type HeatGrid = { weeks: HeatCell[][]; ramp: number[] };
 
 // How many week-columns the active window spans (a leading partial week counts
 // as one), so the layout never asks for more columns of data than exist.
@@ -71,36 +73,36 @@ export function buildHeatmap(daily: Array<{ date: string; messageCount: number }
     }
     out.push(week);
   }
-  // Thresholds come from the ENTIRE selected window, not just the rendered
+  // The ramp is built from the ENTIRE selected window, not just the rendered
   // columns — otherwise narrowing the container (fewer weeks) would drop early
   // days out of the sample and recolor the survivors. Resize must only crop
   // columns, never re-shade them, so the ramp is a stable property of the window.
   const active: number[] = [];
   for (const d of daily) if (d.messageCount > 0 && d.date >= sinceDate && d.date <= untilDate) active.push(d.messageCount);
-  return { weeks: out, thresholds: quantileThresholds(active) };
+  return { weeks: out, ramp: rampOf(active) };
 }
 
-// The 3 count cut-points splitting active days into 4 equal-population bands
-// (quartiles). Sorting the active-day counts and cutting at the 25/50/75%
-// positions makes each band hold ~a quarter of the days regardless of scale, so
-// a single spiky day can't collapse the ramp. Indices ride on (n-1) so the top
-// cut sits strictly below the max — since levelFor compares with `>`, a top cut
-// equal to the max would strand the busiest day in L3; this keeps it in L4.
-// Empty input → all-zero cuts (the caller renders everything as L0 anyway).
-export function quantileThresholds(activeCounts: number[]): [number, number, number] {
-  const s = [...activeCounts].sort((a, b) => a - b);
-  const n = s.length;
-  if (n === 0) return [0, 0, 0];
-  const at = (k: number) => s[Math.floor(((n - 1) * k) / 4)]!;
-  return [at(1), at(2), at(3)];
+// The sorted DISTINCT active-day counts — the lookup table `intensityFor` ranks
+// a day against. Distinct (not raw) so N identical days don't dominate the ECDF
+// and flatten the scale; sorted ascending so a binary-search rank is monotone.
+export function rampOf(activeCounts: number[]): number[] {
+  return [...new Set(activeCounts)].sort((a, b) => a - b);
 }
 
-// The 5-level shade bucket for a day's count against the window's quantile cuts.
-// 0 for no activity; otherwise L1 + how many cut-points the count strictly
-// exceeds (capped at 4). Stable: equal counts always map to the same level.
-export function levelFor(count: number, thresholds: [number, number, number]): number {
-  if (count <= 0) return 0;
-  return Math.min(4, 1 + thresholds.reduce((acc, t) => acc + (count > t ? 1 : 0), 0));
+// A day's colour intensity in (0,1], from where its count ranks among the
+// window's distinct active counts (its ECDF position). 0 for no activity (the
+// caller paints it as the inert background). The busiest day maps to exactly 1
+// (full accent); a lone active day (ramp length 1) also maps to 1. Because the
+// intensity is continuous and driven by rank, the scale auto-stretches to the
+// window's real distribution — low days stay visibly light, high days go dark,
+// and every distinct value gets its own shade instead of snapping to 4 bands.
+export function intensityFor(count: number, ramp: number[]): number {
+  if (count <= 0 || ramp.length === 0) return 0;
+  if (ramp.length === 1) return 1;
+  // rank = how many distinct counts are <= this one (1..len); normalise to (0,1].
+  let rank = 0;
+  for (const v of ramp) { if (v <= count) rank++; else break; }
+  return rank / ramp.length;
 }
 
 // Flattened, date-sorted list of the in-range cells with their (row, col)

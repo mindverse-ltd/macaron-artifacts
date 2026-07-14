@@ -2,14 +2,19 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 
 // Minimal localStorage shim so the browser-facing modules run under node --test.
-// Returns a handle whose `failWrites` flag makes setItem throw (private mode /
-// quota), so migration-persistence failures are testable.
-function installLocalStorage(seed: Record<string, string> = {}): { failWrites: boolean } {
+// `failWrites` = private mode (every setItem throws). `quotaFull` = a full quota
+// where only writes that GROW a key throw — shrinking/clearing still persists,
+// which is exactly what a per-backend token clear does.
+function installLocalStorage(seed: Record<string, string> = {}): { failWrites: boolean; quotaFull: boolean } {
   const store = new Map<string, string>(Object.entries(seed));
-  const ctl = { failWrites: false };
+  const ctl = { failWrites: false, quotaFull: false };
   (globalThis as unknown as { localStorage: Storage }).localStorage = {
     getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-    setItem: (k: string, v: string) => { if (ctl.failWrites) throw new Error('QuotaExceeded'); store.set(k, String(v)); },
+    setItem: (k: string, v: string) => {
+      if (ctl.failWrites) throw new Error('SecurityError');
+      if (ctl.quotaFull && String(v).length > (store.get(k)?.length ?? 0)) throw new Error('QuotaExceeded');
+      store.set(k, String(v));
+    },
     removeItem: (k: string) => { store.delete(k); },
     clear: () => store.clear(),
     key: (i: number) => [...store.keys()][i] ?? null,
@@ -112,47 +117,46 @@ test('explicit clear during a write failure invalidates the legacy source on rec
   assert.equal(auth.getToken(), '');
 });
 
-test('persisted registry → fail writes → clear → recover: clear sticks immediately and persists', async () => {
-  // The token lives in an already-persisted registry (no legacy key involved).
-  // A clear during a write-failure window must take effect for the rest of the
-  // session (in-memory authoritative), and once storage recovers the cleared
-  // state must persist across a reload rather than reading back the old token.
+test('per-backend clear persists under a full quota (shrinking write succeeds)', async () => {
+  // A token clear only ever shrinks the registry, so it persists even when the
+  // quota is full — no need to delete the whole registry. Reload reads it back.
   const persisted = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'persisted-tok' }]);
   const ls = installLocalStorage({ macaron_backends: persisted });
   const { backends, auth } = await freshModules();
   assert.equal(auth.getToken(), 'persisted-tok');
 
-  ls.failWrites = true;      // storage goes read-only (setItem throws)...
-  auth.clearToken();         // ...user (or a 401) clears the token
-  // Immediately effective this session despite the failed setItem — NOT read back
-  // from the still-stale persisted registry.
+  ls.quotaFull = true;       // quota is full: growing writes fail, shrinking ones don't
+  auth.clearToken();         // clearing shrinks the registry → persists
   assert.equal(auth.getToken(), '');
-  assert.equal(backends.getActiveBackend().token, undefined);
-  // Persistence fallback: since the cleared cache holds no token, the stale
-  // registry is removed right away (removeItem works even when setItem is failing),
-  // so the cleared state is durable even without waiting for storage to recover.
-  assert.equal(localStorage.getItem('macaron_backends'), null);
-
-  ls.failWrites = false;     // storage recovers
-  // A reload reads no registry back and re-seeds a clean LOCAL — old token gone.
+  const persistedNow = JSON.parse(localStorage.getItem('macaron_backends')!) as Array<{ token?: string }>;
+  assert.equal(persistedNow.some((b) => b.token), false);
+  // A reload (even under the still-full quota) reads the cleared registry back.
   backends.__resetForTests();
   assert.equal(auth.getToken(), '');
   assert.equal(backends.getActiveBackend().token, undefined);
 });
 
-test('clear during write failure survives a direct reload without a prior loadBackends()', async () => {
-  // Persistence-fallback gap: after clearing during a failed write, the caller
-  // may reload immediately (no further loadBackends() to flush). The stale
-  // registry must already be gone, so the reload can't read the old token back.
-  const persisted = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'persisted-tok' }]);
+test('private-mode clear is authoritative in-session and persists once storage recovers', async () => {
+  // Full private mode (every setItem throws): the clear can't persist, but the
+  // in-memory cache is authoritative for the session, and flush() persists it as
+  // soon as storage recovers — WITHOUT deleting other backends' config.
+  const persisted = JSON.stringify([
+    { id: 'local', label: 'Local', baseUrl: '', token: 'persisted-tok' },
+    { id: 'remote', label: 'Box', baseUrl: 'https://box.example.com' }, // tokenless REMOTE config
+  ]);
   const ls = installLocalStorage({ macaron_backends: persisted });
   const { backends, auth } = await freshModules();
   ls.failWrites = true;
   auth.clearToken();
-  // Straight to reload — nothing else called in between.
-  backends.__resetForTests();
   assert.equal(auth.getToken(), '');
   assert.equal(backends.getActiveBackend().token, undefined);
+
+  ls.failWrites = false;     // storage recovers
+  backends.loadBackends();   // deferred flush persists the cleared registry
+  const persistedNow = JSON.parse(localStorage.getItem('macaron_backends')!) as Backend[];
+  assert.equal(persistedNow.find((b) => b.id === 'local')?.token, undefined);
+  // The tokenless REMOTE config must survive — never dropped as throwaway state.
+  assert.equal(persistedNow.find((b) => b.id === 'remote')?.baseUrl, 'https://box.example.com');
 });
 
 test('registry persisted but legacy removal failed: reload reconciles, reset does not re-migrate', async () => {
@@ -166,6 +170,52 @@ test('registry persisted but legacy removal failed: reload reconciles, reset doe
   assert.equal(backends.getActiveBackend().token, 'migrated-tok');
   assert.equal(localStorage.getItem('macaron_auth_token'), null);
   // Even if the registry is later wiped, there's nothing left to re-migrate.
+  localStorage.removeItem('macaron_backends');
+  backends.__resetForTests();
+  assert.equal(backends.getActiveBackend().token, undefined);
+});
+
+test('clearing one backend token leaves the other backends and their tokens intact', async () => {
+  const persisted = JSON.stringify([
+    { id: 'local', label: 'Local', baseUrl: '', token: 'local-tok' },
+    { id: 'remote', label: 'Box', baseUrl: 'https://box.example.com', token: 'remote-tok' },
+  ]);
+  installLocalStorage({ macaron_backends: persisted, macaron_active_backend: 'remote' });
+  const { backends, auth } = await freshModules();
+  assert.equal(auth.getToken(), 'remote-tok');   // active = remote
+  auth.clearToken();                             // clears ONLY remote
+  const list = backends.loadBackends();
+  assert.equal(list.find((b) => b.id === 'remote')?.token, undefined);
+  assert.equal(list.find((b) => b.id === 'local')?.token, 'local-tok'); // untouched
+});
+
+test('a tokenless REMOTE backend is preserved through a LOCAL clear', async () => {
+  const persisted = JSON.stringify([
+    { id: 'local', label: 'Local', baseUrl: '', token: 'local-tok' },
+    { id: 'remote', label: 'Box', baseUrl: 'https://box.example.com' }, // no token, real config
+  ]);
+  installLocalStorage({ macaron_backends: persisted });
+  const { backends, auth } = await freshModules();
+  auth.clearToken();                             // active defaults to local
+  const list = backends.loadBackends();
+  assert.equal(list.length, 2);
+  const remote = list.find((b) => b.id === 'remote');
+  assert.equal(remote?.baseUrl, 'https://box.example.com');
+  assert.equal(remote?.token, undefined);
+});
+
+test('stored registry missing LOCAL absorbs the un-migrated legacy token, not drops it', async () => {
+  // A stored list without LOCAL + a still-present legacy key means migration never
+  // ran. Rebuilding LOCAL must fold the legacy token in, or the sole credential is lost.
+  const stored = JSON.stringify([{ id: 'remote', label: 'Box', baseUrl: 'https://box.example.com' }]);
+  installLocalStorage({ macaron_backends: stored, macaron_auth_token: 'legacy-abc' });
+  const { backends } = await freshModules();
+  const list = backends.loadBackends();
+  const local = list.find((b) => b.id === backends.LOCAL_BACKEND_ID);
+  assert.equal(local?.token, 'legacy-abc');      // absorbed, not dropped
+  assert.equal(list.find((b) => b.id === 'remote')?.baseUrl, 'https://box.example.com');
+  // Reconstructed list persisted and legacy consumed; a reset can't re-migrate.
+  assert.equal(localStorage.getItem('macaron_auth_token'), null);
   localStorage.removeItem('macaron_backends');
   backends.__resetForTests();
   assert.equal(backends.getActiveBackend().token, undefined);

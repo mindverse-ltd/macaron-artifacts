@@ -55,23 +55,17 @@ let cache: Backend[] | null = null;
 let dirty = false;
 let pendingLegacyRemoval = false;
 
-// Retry any deferred persistence. Order matters: persist the registry first, and
-// only drop the legacy key once the (cleared / migrated) registry is safely
-// written — otherwise a crash between the two would lose the token entirely.
+// Retry any deferred persistence. Clearing a token only ever shrinks the registry,
+// so its write succeeds under quota pressure; a write that still fails means storage
+// is frozen (private mode), and the in-memory cache stays authoritative for the
+// session. We never delete the whole registry as a fallback — that would drop
+// tokenless REMOTE backends (their label/baseUrl are real config, not throwaway
+// state). Order matters: persist the registry first, and only drop the legacy key
+// once it's safely written, so a crash between the two can't lose the token.
 function flush(): void {
   if (dirty && cache) {
-    if (write(BACKENDS_KEY, cache)) {
-      dirty = false;
-    } else if (!cache.some((b) => b.token)) {
-      // Persistence fallback: the write failed but the cache holds no token, so it
-      // is equivalent to the clean LOCAL backend a reload would re-seed. Drop any
-      // stale persisted registry (removeItem can succeed under quota pressure where
-      // setItem can't) so a reload before storage recovers can't read a stale token
-      // back — even if the caller never calls loadBackends() again first.
-      try { localStorage.removeItem(BACKENDS_KEY); dirty = false; } catch { return; }
-    } else {
-      return; // a token-bearing write we couldn't persist — keep retrying, keep legacy
-    }
+    if (write(BACKENDS_KEY, cache)) dirty = false;
+    else return; // storage still unavailable — keep the legacy key too
   }
   if (!dirty && pendingLegacyRemoval) {
     try { localStorage.removeItem(LEGACY_TOKEN_KEY); pendingLegacyRemoval = false; } catch { /* retry next time */ }
@@ -85,11 +79,24 @@ export function loadBackends(): Backend[] {
   if (cache) { flush(); return cache; }
   const stored = read<Backend[]>(BACKENDS_KEY);
   if (stored && Array.isArray(stored) && stored.length > 0) {
-    cache = stored.some((b) => b.id === LOCAL_BACKEND_ID) ? stored : [localDefault(), ...stored];
-    // A persisted registry means migration already happened; any leftover legacy
-    // key is stale (a previous removal must have failed). Reconcile it here so a
-    // later registry reset can't re-migrate and resurrect the old token.
-    try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
+    if (stored.some((b) => b.id === LOCAL_BACKEND_ID)) {
+      cache = stored;
+      // A LOCAL-bearing registry means migration already happened; any leftover
+      // legacy key is stale (a previous removal must have failed). Reconcile it
+      // here — retried every load — so a later reset can't re-migrate the old token.
+      try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* retry next load */ }
+      return cache;
+    }
+    // Stored backends exist but LOCAL is missing: rebuild it. If a legacy token is
+    // still present it was never migrated (no LOCAL ever held it), so absorb it
+    // now — otherwise rebuilding a tokenless LOCAL would drop the sole credential.
+    const local = localDefault();
+    let legacy = '';
+    try { legacy = localStorage.getItem(LEGACY_TOKEN_KEY) || ''; } catch { /* ignore */ }
+    if (legacy) { local.token = legacy; pendingLegacyRemoval = true; }
+    cache = [local, ...stored];
+    dirty = true; // persist the reconstructed (LOCAL-containing) list
+    flush();
     return cache;
   }
   // First run on a multi-backend build: fold any legacy single token into the

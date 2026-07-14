@@ -50,7 +50,7 @@ Macaron Artifacts is a local WebUI for driving agent sessions from the browser. 
 </Files>
 
 - **shared** — `types.ts` holds the REST + domain types, `sse.ts` the streaming contract.
-- **server** — `index.ts` is the Fastify bootstrap, `config.ts` the ports / hosts / derived paths. Under `src/lib`, `claude-runner.ts` drives the Claude Agent SDK loop, `codex-app-server.ts` is the Codex app-server client, `session-store.ts` reads `~/.claude` transcripts and `codex-store.ts` reads `~/.codex` rollouts. `src/routes` mounts the `/api/*` slices (sessions, relay, codex, …).
+- **server** — `index.ts` is the Fastify bootstrap, `config.ts` the ports / hosts / derived paths. Under `src/lib`, `claude-runner.ts` drives the Claude Agent SDK loop, `codex-app-server.ts` is the Codex app-server client, `session-store.ts` reads `~/.claude` transcripts and `codex-store.ts` reads `~/.codex` rollouts. `src/routes` mounts the API slices — most under `/api/*` (sessions, codex, …), plus the provider relay at `/relay/*`.
 - **web** — `index.html` is the Claude SPA entry and `codex.html` the Codex one; `src/main.tsx` bootstraps the router + GenUI runtime, `src/macaron-vendor/` is the vendored GenUI renderer.
 - **bin / mcx** — `mcc.mjs` is the Claude launcher; the `mcx` member ships its own `bin/mcx.mjs` Codex launcher.
 

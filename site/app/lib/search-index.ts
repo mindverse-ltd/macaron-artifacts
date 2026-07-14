@@ -1,26 +1,38 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { toString } from 'mdast-util-to-string';
 import type { source } from './source';
 
 type Page = (typeof source)['$inferPage'];
 
-// structuredData carries the raw markdown/HTML-entity noise that fumadocs'
-// structure() pass leaves in place — inline code backticks, `**bold**`,
-// `[text](url)` links, and numeric entities like `&#x60;` (`) / `&#x2A;` (*).
-// Left as-is they surface verbatim in search result summaries (e.g. searching
-// "Server" showed `mcx&#x60;` and `&#x2A;*mcc*&#x2A;`). Strip them to plain text.
-export function sanitizeSearchText(input: string): string {
+const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+// Decode the numeric / named HTML entities fumadocs' structure() emits for
+// markdown punctuation (`&#x60;` → `, `&#x2A;` → *) BEFORE the markdown parse,
+// so a decoded `*mcc*` is re-read as emphasis instead of surfacing literally.
+function decodeEntities(input: string): string {
   return input
-    // Decode the numeric HTML entities structure() emits for markdown punctuation.
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    // [text](url) → text
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    // **bold** / __bold__ / *em* / _em_ → inner text
-    .replace(/(\*\*|__)(.*?)\1/g, '$2')
-    .replace(/(\*|_)(.*?)\1/g, '$2')
-    // strip stray inline-code backticks
+    .replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => NAMED_ENTITIES[name] ?? name);
+}
+
+// structuredData chunks carry raw markdown (inline-code backticks, **bold**,
+// [text](url) links) plus, for content nested in MDX flow components, serialized
+// tag residue like `</Step>` / `<Tabs items={…}>`. The previous regex stack
+// destroyed technical identifiers — a generic `_…_` emphasis rule stripped the
+// underscores out of `MACARON_CODEX_TRANSPORT`, `permission_request`, etc., so
+// those names became unsearchable. Parse the chunk into an mdast tree instead:
+// CommonMark never treats intraword `_` as emphasis, so identifiers survive, and
+// toString() drops the markdown syntax. A final tag-strip removes JSX/HTML tags
+// (which matches on `<`/`>`, never `_`, so identifiers stay intact).
+export function sanitizeSearchText(input: string): string {
+  const text = toString(fromMarkdown(decodeEntities(input)));
+  return text
+    .replace(/<\/?[A-Za-z][^>]*>/g, ' ')
+    // Drop stray backticks the AST left as literal text (a lone/unpaired `,
+    // e.g. from a decoded `&#x60;`). Only backticks — never `_` or word chars —
+    // so identifiers are untouched.
     .replace(/`+/g, '')
-    // collapse whitespace the removals may have left behind
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

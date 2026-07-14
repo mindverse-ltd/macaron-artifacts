@@ -3,11 +3,11 @@ title: Server
 description: The Fastify server — bootstrap, auth, the Claude Agent SDK loop, the provider relay, and the SSE stream.
 ---
 
-The server is a single Fastify app (`server/src/index.ts`). It owns the agent runtimes, exposes a REST + SSE API under `/api/*`, relays provider traffic for the Claude CLI, and serves the SPA. Everything runs from one process, bound to loopback by default.
+The server is a single Fastify app (`server/src/index.ts`). It owns the agent runtimes, exposes a REST + SSE API (most routes under `/api/*`, with the provider relay mounted separately at `/relay/*`), relays provider traffic for the Claude CLI, and serves the SPA. Everything runs from one process, bound to loopback by default.
 
 ## Configuration
 
-All tunables live in `server/src/config.ts` and read from the environment, so the launchers and `start.sh` can steer behaviour without touching code.
+The core tunables (port, host, auth token, default model) live in `server/src/config.ts` and read from the environment, so the launchers and `start.sh` can steer behaviour without touching code. A handful of others are read directly where they're used rather than centralized here — e.g. `MACARON_LOG_LEVEL`, `MACARON_ENGINE`, and `MACARON_CODEX_TRANSPORT`.
 
 | name | source | default | meaning |
 | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ A logger with a custom request serializer that **redacts `?token=` out of every 
 <Step>
 ### Register routes
 
-Every `register*Routes` call mounts a slice of the `/api/*` surface — sessions, settings, relay, codex, git, search, agents, terminal, and more. All under one encapsulated plugin scope.
+Every `register*Routes` call mounts a slice of the API — sessions, settings, codex, git, search, agents, terminal, and more — mostly under `/api/*`. The provider relay is the exception: it lives at `/relay/anthropic/...` (see below), not `/api/*`. All under one encapsulated plugin scope.
 </Step>
 <Step>
 ### Serve the SPA
@@ -46,7 +46,7 @@ If `web/dist` exists, `@fastify/static` serves assets with `index: false` so the
 <Step>
 ### Warm caches and listen
 
-Settings, worktrees, permission rules, codex config, labels, schedules, and share caches warm before `app.listen`. After binding, it pre-warms the GenUI type-check and builds the search index in the background so the first real turn never pays those costs.
+Settings, worktrees, permission rules, codex config, labels, schedules, and share caches warm before `app.listen`. After binding, it schedules the GenUI type-check warm-up and the search-index build on `setImmediate` — best-effort, so those costs are usually paid before the first turn, but a request arriving immediately after bind can still race the warm-up.
 </Step>
 </Steps>
 

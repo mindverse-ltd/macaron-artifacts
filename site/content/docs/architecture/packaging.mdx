@@ -80,7 +80,7 @@ It uses **pnpm via corepack** (ships with Node 22+), installs with `--frozen-loc
 <Step>
 ### Launch on the right port
 
-The engine (`claude` / `codex`) picks the default port (`7878` / `7979`), any prior process on that port is killed, and the server boots. Every failure prints an actionable `[macaron] fix: …` line to stderr so the launching agent can self-repair and retry.
+The engine (`claude` / `codex`) picks the default port (`7878` / `7979`); if `lsof` is available, any prior process on that port is killed first, then the server boots. Most setup failures (missing Node 22, a broken install) print an actionable `[macaron] fix: …` line to stderr so the launching agent can self-repair and retry — though not every path does (e.g. the post-launch health-check probe just times out).
 </Step>
 </Steps>
 

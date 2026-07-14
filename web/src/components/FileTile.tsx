@@ -33,7 +33,7 @@ function basenameOf(path: string): string {
 export function FileTile({
   project,
   path,
-  focused: _focused,
+  focused,
   refreshKey,
 }: {
   project: string;
@@ -46,7 +46,7 @@ export function FileTile({
   const [original, setOriginal] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<'preview' | 'edit'>('preview');
+  const [mode, setMode] = useState<'preview' | 'split' | 'edit'>('preview');
   const [saving, setSaving] = useState(false);
   const dirty = content !== original;
 
@@ -92,12 +92,12 @@ export function FileTile({
     }
   }, [project, path, content, dirty, saving, toast]);
 
-  // Cmd/Ctrl+S — only when this tile has focus. Simple hook: bind while
-  // in edit mode and dirty.
+  // Cmd/Ctrl+S — only the focused tile handles it. Split mode is editable,
+  // so it shares the same save shortcut as the full editor.
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
-    if (mode !== 'edit') return;
+    if (!focused || mode === 'preview') return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -106,7 +106,7 @@ export function FileTile({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode]);
+  }, [focused, mode]);
 
   const tooBig = content.length > MAX_INLINE_PREVIEW_BYTES;
 
@@ -139,6 +139,18 @@ export function FileTile({
     return <pre className="ft-preview code">{content}</pre>;
   }, [isImage, isBinary, isMarkdown, error, loading, tooBig, content, project, path]);
 
+  const editorNode = error ? (
+    <div className="ft-placeholder err">Can't read: {error}</div>
+  ) : (
+    <Suspense fallback={<div className="ft-placeholder">Loading editor…</div>}>
+      <CodeEditor
+        path={path}
+        value={content}
+        onChange={setContent}
+      />
+    </Suspense>
+  );
+
   return (
     <div className="ft-root">
       {/* Redundant tile-header replaced by a compact floating action strip
@@ -157,6 +169,17 @@ export function FileTile({
               >
                 Preview
               </button>
+              {isMarkdown && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === 'split'}
+                  className={'ft-mode-btn' + (mode === 'split' ? ' active' : '')}
+                  onClick={() => setMode('split')}
+                >
+                  Split
+                </button>
+              )}
               <button
                 type="button"
                 role="tab"
@@ -168,7 +191,7 @@ export function FileTile({
                 {dirty && <span className="ft-dirty" title="Unsaved changes">●</span>}
               </button>
             </div>
-            {mode === 'edit' && (
+            {mode !== 'preview' && (
               <button
                 type="button"
                 className="ft-save"
@@ -183,18 +206,13 @@ export function FileTile({
         )}
         {mode === 'preview' && previewNode}
         {mode === 'edit' && (
-          <>
-            {error && <div className="ft-placeholder err">Can't read: {error}</div>}
-            {!error && (
-              <Suspense fallback={<div className="ft-placeholder">Loading editor…</div>}>
-                <CodeEditor
-                  path={path}
-                  value={content}
-                  onChange={setContent}
-                />
-              </Suspense>
-            )}
-          </>
+          <div className="ft-editor-pane">{editorNode}</div>
+        )}
+        {mode === 'split' && (
+          <div className="ft-split">
+            <div className="ft-editor-pane">{editorNode}</div>
+            {previewNode}
+          </div>
         )}
       </div>
     </div>

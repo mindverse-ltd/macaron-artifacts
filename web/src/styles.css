@@ -5110,6 +5110,25 @@ textarea:focus, select:focus, input:focus {
   /* Anchor for .ft-actions (absolute inside this body). */
   position: relative;
 }
+.ft-editor-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.ft-split {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.ft-split > .ft-editor-pane,
+.ft-split > .ft-preview {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+.ft-split > .ft-preview { border-left: 1px solid var(--border); }
 .ft-placeholder {
   padding: 24px;
   color: var(--muted);

@@ -76,6 +76,7 @@ export function Workspace() {
       .then((d) => {
         setWorkspace(d.workspace);
         setSessions(d.sessions);
+        setError('');
       })
       .catch((e) => setError((e as Error).message));
   }, [project]);

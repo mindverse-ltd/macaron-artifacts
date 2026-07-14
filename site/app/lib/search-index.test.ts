@@ -52,6 +52,46 @@ test('sanitizeSearchText strips markup but preserves identifiers', () => {
   assert.equal(sanitizeSearchText('returns `<T>(value)` => value'), 'returns <T>(value) => value');
 });
 
+// EVE round 5 — the adversarial cases must run through the SAME path production
+// does: raw MDX → structure() → sanitize. Fumadocs splits a flow component around
+// any nested heading, so the sanitizer sees standalone opening/closing RESIDUE
+// chunks (`\<Tabs items=\{[…]}>`, a lone `</Tabs>`, a `<>`/`</>` fragment boundary)
+// that are not valid MDX on their own — exactly what a hand-fed complete
+// `<X>…</X>` string never exercises. Each raw sample below is chosen so structure()
+// emits such a residue; the guarantee is that no needle-adjacent markup survives.
+test('real structure() split chunks: residue never leaks, prose survives', () => {
+  const clean = (raw: string) => structure(raw).contents.map((c) => sanitizeSearchText(c.content));
+
+  // A template literal in a `<Tabs items={…}>` attribute, split off as its own
+  // opening-tag chunk by the nested heading. The old CommonMark fallback dropped
+  // the backticks before the scanner ran, so `LEAKNEEDLE, c]}>` leaked.
+  const tabs = clean('<Tabs items={[`a } > LEAKNEEDLE`, `c`]}>\n\n## Sub heading\n\nbodytext\n\n</Tabs>');
+  assert.ok(!tabs.some((t) => /LEAKNEEDLE|]}>|<Tabs/.test(t)), `tabs residue leaked: ${JSON.stringify(tabs)}`);
+  assert.ok(tabs.includes('bodytext'), 'tabs body text must survive');
+
+  // A fragment `<>`/`</>` boundary split around a heading — the opener/closer are
+  // pure markup and must not surface, but the body between them stays.
+  const frag = clean('<>\n\n## Inner\n\nvisiblebody\n\n</>');
+  assert.ok(!frag.some((t) => /<>|<\/>|<\/?[A-Za-z]/.test(t)), `fragment markup leaked: ${JSON.stringify(frag)}`);
+  assert.ok(frag.includes('visiblebody'), 'fragment body must survive');
+
+  // A NUMERIC quote entity inside a JSX attribute (`&#34;` / `&#x22;`). Decoding it
+  // pre-scan (as the old code did for all numeric entities) ended the attribute
+  // early and leaked `B">numericneedle`; it must stay encoded until after the tag.
+  for (const ent of ['&#34;', '&#x22;']) {
+    const callout = clean(`<Callout title="A ${ent} > B">numericneedle</Callout>`);
+    assert.ok(!callout.some((t) => /B">|<Callout|&#/.test(t)), `numeric quote leaked (${ent}): ${JSON.stringify(callout)}`);
+    assert.ok(callout.includes('numericneedle'), `callout body must survive (${ent})`);
+  }
+
+  // structure() escapes prose punctuation it must protect: `\<T>` (a generic) and
+  // `\{name\}` are escaped LITERALS, not components. The old global
+  // unescapeJsxPunctuation turned `\<T>` into a tag and deleted it — the visible
+  // text must survive with the `<`/`{` intact.
+  assert.deepEqual(clean('returns \\<T>(value) => value'), ['returns <T>(value) => value']);
+  assert.deepEqual(clean('literal \\{name\\}'), ['literal {name}']);
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {
@@ -137,7 +177,11 @@ const BUILT_INDEX = path.resolve(DOCS_DIR, '../../build/client/api/search');
 
 test('built /api/search: real Orama client honours the contract', async (t) => {
   if (!existsSync(BUILT_INDEX)) {
-    t.skip('run `pnpm build` first — no build/client/api/search to load');
+    // Under the repo build→test chain (`pnpm verify`, which builds first) a missing
+    // artifact is a HARD failure — that is the route-wiring regression gate. A bare
+    // `pnpm test` with no prior build still skips, so local unit runs stay cheap.
+    if (process.env.REQUIRE_BUILT_INDEX) assert.fail('REQUIRE_BUILT_INDEX set but build/client/api/search is missing — `/api/search` route or its buildIndex wiring did not emit the static index');
+    t.skip('run `pnpm build` (or `pnpm verify`) first — no build/client/api/search to load');
     return;
   }
   const exported = readFileSync(BUILT_INDEX, 'utf8');

@@ -9,20 +9,25 @@ type Page = (typeof source)['$inferPage'];
 
 const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
-// Decode the NUMERIC entities fumadocs' structure() emits for markdown
-// punctuation (`&#x60;` → `, `&#x2A;` → *) BEFORE the parse, so a decoded `*mcc*`
-// is re-read as emphasis instead of surfacing literally. Named entities are left
-// alone here: decoding `&quot;` / `&lt;` up front would corrupt JSX attribute
-// quoting (`<Callout title="A &quot; > B">`); they're decoded post-parse instead,
-// where they're just content characters.
-function decodeNumericEntities(input: string): string {
-  return input
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
+// structure() encodes the two markdown-punctuation characters it needs to protect
+// as NUMERIC entities: backtick (`&#x60;`) and asterisk (`&#x2A;`). Decode ONLY
+// those two BEFORE the parse, so a decoded `*mcc*` is re-read as emphasis instead
+// of surfacing literally. Every other entity — crucially a quote (`&#34;` / `&#x22;`
+// / `&quot;`) that lives inside a JSX attribute — is left encoded here: decoding it
+// up front would end an attribute string early and leak the tag's tail (`B">…`).
+// The survivors are decoded post-parse (decodeContentEntities), as plain content.
+function decodeMarkdownPunctEntities(input: string): string {
+  return input.replace(/&#x0*(60|2[aA]);|&#0*(96|42);/g, (m) => (/60|96/.test(m) ? '`' : '*'));
 }
 
-function decodeNamedEntities(input: string): string {
-  return input.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => NAMED_ENTITIES[name] ?? name);
+// Decode the entities that are just content once tags are gone: named ones plus
+// any leftover numeric. Runs AFTER the tag scanner and parse, so a decoded `<`/`>`
+// is a searchable character, never re-interpreted as markup.
+function decodeContentEntities(input: string): string {
+  return input
+    .replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => NAMED_ENTITIES[name] ?? name)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }
 
 // Node types whose *own value* is markup, never searchable prose: raw HTML, MDX
@@ -41,89 +46,110 @@ function nodeText(node: Nodes): string {
   return 'value' in node ? node.value : '';
 }
 
-// structure() serializes a component tag it can't render with markdown escapes —
-// `<Tabs items={…}>` comes out as `\<Tabs items=\{…}>`. Under a real MDX parse
-// that `\<` is an *escaped literal* `<`, so the tag survives as plain text. Undo
-// the escaping on the JSX punctuation set so the tag parses (or, if the chunk is
-// a mid-element fragment, is caught by the confirmed-tag fallback below).
-function unescapeJsxPunctuation(input: string): string {
-  return input.replace(/\\([<>{}[\]])/g, '$1');
-}
-
-// Fallback for chunks that aren't valid standalone MDX (a lone `</Step>`, an
-// unclosed `<Tabs items={…}>` fragment structure() split off, a bare `<T>` in
-// prose that the MDX parser rejects). EVE's requirement: confirm a COMPLETE,
-// well-formed tag before deleting anything — never delete on a bare `<` that has
-// no closing `>`. So only strip a run that is a real tag: `<`, optional `/`, a
-// tag name, then quote/brace/template-aware attributes, then a `>` at brace
-// depth 0. An unterminated or non-tag `<` (`a<b && c>d`, `alpha<beta`) is kept
-// verbatim, so compact comparisons and TypeScript generics stay searchable.
-function stripConfirmedTags(text: string): string {
-  const isName = (c: string | undefined) => !!c && /[A-Za-z0-9._-]/.test(c);
-  const isAttrStart = (c: string | undefined) => !!c && /[A-Za-z_{>/]/.test(c);
+// structure() serializes a component tag it can't render into a chunk of plain
+// text, and — because Fumadocs splits a flow component around any nested heading —
+// often into a STANDALONE opening/closing residue that is not valid MDX on its own
+// (`\<Tabs items=\{[…]}>`, a lone `</Tabs>`, a `<>` / `</>` fragment boundary). The
+// MDX parser throws on those, so they must be removed here, BEFORE the parse, by a
+// scanner that deletes ONLY a confirmed component residue and never a searchable
+// `<` in prose. The distinction structure() hands us:
+//   - A real component tag is escaped (`\<Tabs …>`) only when it carries markdown-
+//     significant punctuation, but is ALWAYS one of: a closing tag (`</Name>`), a
+//     fragment boundary (`<>` / `</>`), a self-closing tag (`<Name … />`), or an
+//     opening tag with attributes. A bare `<T>` / `<version>` placeholder in prose
+//     has none of those and is kept verbatim.
+//   - A `` `<T>` `` inside a code span, or an `a<b` comparison, is never a tag.
+// The scan is code-span, quote, template-literal, brace and entity aware, so a `>`
+// hiding inside an attribute string / `{…}` expression / `` `…` `` template can't
+// end a tag early, and an encoded quote (`&#34;`) inside an attribute is opaque.
+function stripComponentResidue(text: string): string {
+  const isNameChar = (c: string | undefined) => !!c && /[A-Za-z0-9._-]/.test(c);
   let out = '';
   let i = 0;
   while (i < text.length) {
-    const opensTag = text[i] === '<' && (text[i + 1] === '/' ? /[A-Za-z]/.test(text[i + 2] ?? '') : /[A-Za-z]/.test(text[i + 1] ?? ''));
-    if (!opensTag) { out += text[i++]; continue; }
-    let j = i + 1;
-    if (text[j] === '/') j++;
-    while (isName(text[j])) j++;
-    // After the tag name the next non-space must continue a tag (an attribute,
-    // `>`, or a self-closing `/`). `<b && c>` fails here → kept as prose.
-    let k = j;
-    while (text[k] === ' ' || text[k] === '\t') k++;
-    if (!isAttrStart(text[k])) { out += text[i++]; continue; }
-    let quote = '';
-    let brace = 0;
-    let closed = false;
-    while (j < text.length) {
-      const ch = text[j];
-      if (quote) { if (ch === quote) quote = ''; } else if (ch === '"' || ch === "'" || ch === '`') quote = ch;
-      else if (ch === '{') brace++;
-      else if (ch === '}' && brace > 0) brace--;
-      else if (ch === '>' && brace === 0) { j++; closed = true; break; }
-      j++;
+    const c = text[i];
+    // A code span is verbatim: copy `…` runs (matching the opening fence length)
+    // untouched so a `<version>` or `<T>` generic inside code is never scanned.
+    if (c === '`') {
+      let f = 0; while (text[i + f] === '`') f++;
+      const fence = text.slice(i, i + f);
+      const end = text.indexOf(fence, i + f);
+      const stop = end === -1 ? text.length : end + f;
+      out += text.slice(i, stop); i = stop; continue;
     }
-    if (!closed) { out += text[i++]; continue; } // unterminated → keep literal `<`
-    out += ' ';
-    i = j;
+    // Fragment boundaries `<>` / `</>` (possibly escaped `\<>`): pure markup, drop.
+    const frag = /^\\?<\/?>/.exec(text.slice(i));
+    if (frag) { out += ' '; i += frag[0].length; continue; }
+    // A tag opener: `<` or escaped `\<`, then optional `/`, then a JSX name start.
+    const esc = c === '\\' && text[i + 1] === '<';
+    const lt = esc ? i + 1 : i;
+    const opensTag = text[lt] === '<' && (text[lt + 1] === '/' ? /[A-Za-z]/.test(text[lt + 2] ?? '') : /[A-Za-z]/.test(text[lt + 1] ?? ''));
+    if (!opensTag) { out += c; i++; continue; }
+    const closing = text[lt + 1] === '/';
+    let j = lt + 1;
+    if (closing) j++;
+    while (isNameChar(text[j])) j++;
+    // Scan to the terminating `>` at brace depth 0, tracking whether we ever saw an
+    // attribute (`name=` or a `{…}` expression) or a self-closing `/`. A `>` inside
+    // a quote / template / brace does not close the tag. An entity-encoded quote
+    // (`&#34;`) inside a literal-quoted attribute stays encoded (we never decode it
+    // pre-scan), so it is opaque content the literal-quote state machine skips over.
+    let quote = '', brace = 0, closed = false, hasAttr = closing, selfClose = false;
+    let k = j;
+    while (k < text.length) {
+      const ch = text[k];
+      if (quote) { if (ch === quote) quote = ''; k++; continue; }
+      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; hasAttr = true; }
+      else if (ch === '{') { brace++; hasAttr = true; }
+      else if (ch === '}' && brace > 0) brace--;
+      else if (ch === '=' && !brace) hasAttr = true;
+      else if (ch === '/' && !brace && text[k + 1] === '>') selfClose = true;
+      else if (ch === '>' && !brace) { k++; closed = true; break; }
+      k++;
+    }
+    // Delete only a COMPLETE residue that is unambiguously a component: closed, and
+    // either a closing tag, self-closing, or an opener that carried attributes. A
+    // bare `<Name>` / `<version>` opener with no attributes is a prose placeholder —
+    // keep the literal `<` and move on one char.
+    if (closed && (closing || selfClose || hasAttr)) { out += ' '; i = k; continue; }
+    out += c; i++;
   }
   return out;
 }
 
 // structuredData chunks carry raw markdown (inline-code backticks, **bold**,
 // [text](url) links) plus, for content nested in MDX flow components, serialized
-// tag residue like `</Step>` / `<Tabs items={…}>`. The previous regex stack
-// destroyed technical identifiers — a generic `_…_` emphasis rule stripped the
-// underscores out of `MACARON_CODEX_TRANSPORT`, `permission_request`, etc.
+// tag residue like `</Step>` / `\<Tabs items=\{…}>` / `<>`. The previous regex
+// stack destroyed technical identifiers — a generic `_…_` emphasis rule stripped
+// the underscores out of `MACARON_CODEX_TRANSPORT`, `permission_request`, etc.
 //
-// Parse the chunk into a real MDX AST (micromark-extension-mdxjs) and read text
-// off the nodes, so classification happens in the grammar rather than by guessing
-// on flattened text:
-//  - CommonMark never treats intraword `_` as emphasis → identifiers survive.
-//  - A JSX element (`<Callout title="A > B">inner</Callout>`, `<Tabs items={[…]}>`)
-//    is one node: its tag/attrs/expressions contribute no text (a `>` inside an
-//    attribute or `{…}` can't leak), while its body children stay searchable.
-//  - `{/* … */}` comments and ESM lines are expression/esm nodes → dropped whole.
-//  - A code-span generic (`` `<T>` ``) or a compact comparison (`alpha<beta`) is
-//    plain text/inlineCode → preserved verbatim.
-// A chunk that structure() split mid-element (a lone `</Step>`, a bare `<T>` in
-// prose) is not valid MDX and throws; the fallback CommonMark parse + confirmed-
-// tag scanner handles those without ever cutting on an unterminated `<`.
+// Pipeline:
+//  1. decodeMarkdownPunctEntities — decode ONLY structure()'s `&#x60;`/`&#x2A;`
+//     (backtick/asterisk) so `*mcc*` re-reads as emphasis; leave attribute-quote
+//     entities encoded so they can't end a JSX attribute early.
+//  2. stripComponentResidue — remove standalone component residue (closing tags,
+//     fragments, attributed/self-closing openers) that would otherwise throw the
+//     MDX parser or leak, WITHOUT touching a prose `<T>` / `a<b` / code-span tag.
+//  3. Parse the cleaned chunk into a real MDX AST and read text off the nodes, so
+//     classification happens in the grammar, not by guessing on flattened text:
+//       - CommonMark never treats intraword `_` as emphasis → identifiers survive.
+//       - A `{/* … */}` comment / ESM line is an expression/esm node → dropped.
+//       - A code-span generic (`` `<T>` ``) or compact comparison (`alpha<beta`)
+//         is inlineCode/text → preserved verbatim.
+//  4. Any chunk still not valid MDX (residual escapes, odd fragments) falls back to
+//     a CommonMark parse; step 2 already removed the component markup, so nothing
+//     tag-shaped remains to mis-handle.
 export function sanitizeSearchText(input: string): string {
-  // HTML comments aren't valid MDX (MDX uses `{/* */}`), and a CommonMark html
-  // block swallows the rest of the line — strip them up front so trailing prose
-  // survives. Unambiguous delimiters, so no quote/brace bookkeeping needed.
-  const decoded = unescapeJsxPunctuation(decodeNumericEntities(input)).replace(/<!--[\s\S]*?-->/g, ' ');
+  // HTML comments aren't valid MDX (MDX uses `{/* */}`) and a CommonMark html block
+  // swallows the rest of the line — strip them up front so trailing prose survives.
+  const cleaned = stripComponentResidue(decodeMarkdownPunctEntities(input).replace(/<!--[\s\S]*?-->/g, ' '));
   let text: string;
   try {
-    text = nodeText(fromMarkdown(decoded, { extensions: [mdxjs()], mdastExtensions: [mdxFromMarkdown()] }));
+    text = nodeText(fromMarkdown(cleaned, { extensions: [mdxjs()], mdastExtensions: [mdxFromMarkdown()] }));
   } catch {
-    const commonmark = toString(fromMarkdown(decoded), { includeHtml: false }).replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
-    text = stripConfirmedTags(commonmark);
+    text = toString(fromMarkdown(cleaned), { includeHtml: false }).replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
   }
-  return decodeNamedEntities(text)
+  return decodeContentEntities(text)
     // Drop stray backticks the AST left as literal text (a lone/unpaired `,
     // e.g. from a decoded `&#x60;`). Only backticks — never `_` or word chars —
     // so identifiers are untouched.

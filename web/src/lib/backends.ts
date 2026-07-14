@@ -60,8 +60,18 @@ let pendingLegacyRemoval = false;
 // written — otherwise a crash between the two would lose the token entirely.
 function flush(): void {
   if (dirty && cache) {
-    if (write(BACKENDS_KEY, cache)) dirty = false;
-    else return; // storage still unavailable — keep the legacy key too
+    if (write(BACKENDS_KEY, cache)) {
+      dirty = false;
+    } else if (!cache.some((b) => b.token)) {
+      // Persistence fallback: the write failed but the cache holds no token, so it
+      // is equivalent to the clean LOCAL backend a reload would re-seed. Drop any
+      // stale persisted registry (removeItem can succeed under quota pressure where
+      // setItem can't) so a reload before storage recovers can't read a stale token
+      // back — even if the caller never calls loadBackends() again first.
+      try { localStorage.removeItem(BACKENDS_KEY); dirty = false; } catch { return; }
+    } else {
+      return; // a token-bearing write we couldn't persist — keep retrying, keep legacy
+    }
   }
   if (!dirty && pendingLegacyRemoval) {
     try { localStorage.removeItem(LEGACY_TOKEN_KEY); pendingLegacyRemoval = false; } catch { /* retry next time */ }
@@ -76,6 +86,10 @@ export function loadBackends(): Backend[] {
   const stored = read<Backend[]>(BACKENDS_KEY);
   if (stored && Array.isArray(stored) && stored.length > 0) {
     cache = stored.some((b) => b.id === LOCAL_BACKEND_ID) ? stored : [localDefault(), ...stored];
+    // A persisted registry means migration already happened; any leftover legacy
+    // key is stale (a previous removal must have failed). Reconcile it here so a
+    // later registry reset can't re-migrate and resurrect the old token.
+    try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
     return cache;
   }
   // First run on a multi-backend build: fold any legacy single token into the

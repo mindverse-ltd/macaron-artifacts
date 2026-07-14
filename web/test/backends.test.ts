@@ -122,21 +122,53 @@ test('persisted registry → fail writes → clear → recover: clear sticks imm
   const { backends, auth } = await freshModules();
   assert.equal(auth.getToken(), 'persisted-tok');
 
-  ls.failWrites = true;      // storage goes read-only...
+  ls.failWrites = true;      // storage goes read-only (setItem throws)...
   auth.clearToken();         // ...user (or a 401) clears the token
-  // Immediately effective this session despite the failed write — NOT read back
+  // Immediately effective this session despite the failed setItem — NOT read back
   // from the still-stale persisted registry.
   assert.equal(auth.getToken(), '');
   assert.equal(backends.getActiveBackend().token, undefined);
+  // Persistence fallback: since the cleared cache holds no token, the stale
+  // registry is removed right away (removeItem works even when setItem is failing),
+  // so the cleared state is durable even without waiting for storage to recover.
+  assert.equal(localStorage.getItem('macaron_backends'), null);
 
   ls.failWrites = false;     // storage recovers
-  // A plain read triggers the deferred flush — no second clearToken() required.
-  backends.loadBackends();
-  const persistedNow = JSON.parse(localStorage.getItem('macaron_backends')!) as Array<{ token?: string }>;
-  assert.equal(persistedNow.some((b) => b.token), false);
-  // A reload now reads the persisted cleared registry back, not the old token.
+  // A reload reads no registry back and re-seeds a clean LOCAL — old token gone.
   backends.__resetForTests();
   assert.equal(auth.getToken(), '');
+  assert.equal(backends.getActiveBackend().token, undefined);
+});
+
+test('clear during write failure survives a direct reload without a prior loadBackends()', async () => {
+  // Persistence-fallback gap: after clearing during a failed write, the caller
+  // may reload immediately (no further loadBackends() to flush). The stale
+  // registry must already be gone, so the reload can't read the old token back.
+  const persisted = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'persisted-tok' }]);
+  const ls = installLocalStorage({ macaron_backends: persisted });
+  const { backends, auth } = await freshModules();
+  ls.failWrites = true;
+  auth.clearToken();
+  // Straight to reload — nothing else called in between.
+  backends.__resetForTests();
+  assert.equal(auth.getToken(), '');
+  assert.equal(backends.getActiveBackend().token, undefined);
+});
+
+test('registry persisted but legacy removal failed: reload reconciles, reset does not re-migrate', async () => {
+  // The registry write succeeds while the legacy-key removal fails, leaving a
+  // stale legacy key behind. Loading the persisted registry must reconcile it
+  // (delete the leftover), so a later registry reset can't re-migrate the token.
+  const migrated = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'migrated-tok' }]);
+  installLocalStorage({ macaron_backends: migrated, macaron_auth_token: 'legacy-abc' });
+  const { backends } = await freshModules();
+  // First load reads the persisted registry and reconciles the stale legacy key.
+  assert.equal(backends.getActiveBackend().token, 'migrated-tok');
+  assert.equal(localStorage.getItem('macaron_auth_token'), null);
+  // Even if the registry is later wiped, there's nothing left to re-migrate.
+  localStorage.removeItem('macaron_backends');
+  backends.__resetForTests();
+  assert.equal(backends.getActiveBackend().token, undefined);
 });
 
 test('no legacy token → LOCAL backend has no token', async () => {

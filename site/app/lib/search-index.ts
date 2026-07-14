@@ -134,41 +134,47 @@ function scanTag(text: string, i: number): Tag | null {
 // confirmed component tags (both the opener and its matched closer).
 export function pairResidues(chunks: string[]): Set<string> {
   const paired = new Set<string>();
-  const stack: { name: string; key: string }[] = [];
+  // Two stacks decide the real hierarchy on the COMPLETE chunk stream. `global` pairs a FLOW
+  // component's opener with its closer ACROSS chunks; `local` (rebuilt per chunk) pairs an INLINE
+  // component within one chunk. The distinction is structure()'s own serialization: it emits a flow
+  // opener as a chunk that ENDS at the opener's `>` (heading/body/closer become later chunks), whereas
+  // an in-body TS generic (`factory()\<$Panel extends GEN>()`, `a\<$Panel>b`) and a self-contained
+  // inline element (`\<$Panel>x\</$Panel>`) both sit MID-chunk with more text after the `>`. So a
+  // closer pops the nearest same-name LOCAL opener first (real inline nesting), then the GLOBAL one
+  // (flow). An unclosed leftover opener joins `global` ONLY if its `>` ended its chunk — the flow
+  // signature; a mid-chunk leftover is an in-body generic and is dropped from pairing entirely, so a
+  // later flow closer can never reach past it to mispair (EVE's outer→generic→inline→outer-closer
+  // case) and a cross-chunk flow JSX opener is still paired by its real later-chunk closer (never
+  // mistaken for a generic just because THIS chunk holds no closer). Code-span aware throughout.
+  const global: { name: string; key: string }[] = [];
   chunks.forEach((text, ci) => {
+    const local: { name: string; key: string; endsChunk: boolean }[] = [];
     let i = 0;
     while (i < text.length) {
       if (text[i] === '`') { const cs = codeSpanEnd(text, i); if (cs !== -1) { i = cs; continue; } }
       const tag = scanTag(text, i);
       if (!tag) { i++; continue; }
-      // Only a STANDALONE residue opener enters the pairing stack. structure() emits a flow
-      // component's opener/closer residue as its own chunk (leading `\` aside), whereas a `\<Name …>`
-      // GLUED to preceding code in the same text run is a TS construct structure() escaped as prose —
-      // a type-argument (`factory()\<Name>()`), a constrained generic (`\<Name extends …>`), a
-      // comparison (`a\<Name`) or a nested first-param (`\<Name\<U>>`). Pushing such a same-named
-      // in-body generic lets the outer `</Name>` pop IT instead of the real opener, deleting the
-      // generic and leaking the outer markup.
-      // A glued escaped opener is an IN-BODY GENERIC — never
-      // stacked — when its own tag body parses as valid TypeScript AND either (a) it carries a NESTED
-      // `<` type-argument (`$Panel<U>`), an unambiguous generic tell a JSX opener's name can never hold,
-      // so it is exempt even when a later same-name closer exists; or (b) it has NO matching same-name
-      // closer LATER in this chunk (code-span-aware). The closer probe distinguishes the two otherwise-
-      // ambiguous shapes: a real inline component (`prefix\<$Panel extends X>body\</$Panel>suffix`, whose
-      // `extends`-shaped prop parses as TS) DOES have a later closer → NOT exempt → stacks and its own
-      // closer pops it. A generic that PRECEDES a real same-name inline (`\<$G>() then \<$G>x\</$G>`) also
-      // has a later closer → stacks, and positional nearest-pop hands that closer to the INNER real
-      // opener, leaving the leading generic unpaired (kept). Hierarchy + real syntax decide it, not body
-      // shape alone. A CLOSING tag is never a generic, so it must always pair (else a glued `\</$Panel>` never pops).
-      const glued = text.slice(0, tag.esc ? tag.lt - 1 : tag.lt).trim() !== '';
-      const openerBody = text.slice(tag.lt + 1, tag.closed ? tag.end - 1 : tag.end).replace(/\/\s*$/, '');
-      const nestedArg = /^\S+</.test(deEscape(openerBody).trim());
-      const inBodyGeneric = glued && tag.esc && !tag.closing && isTsGeneric(openerBody) && (nestedArg || !hasCloserLater(text, tag.closed ? tag.end : tag.nameEnd, tag.name));
-      if (!tag.selfClose && !inBodyGeneric) {
-        if (tag.closing) { for (let s = stack.length - 1; s >= 0; s--) if (stack[s].name === tag.name) { paired.add(stack[s].key); paired.add(`${ci}:${tag.lt}`); stack.length = s; break; } }
-        else stack.push({ name: tag.name, key: `${ci}:${tag.lt}` });
+      if (!tag.selfClose) {
+        if (tag.closing) {
+          let popped = false;
+          for (let s = local.length - 1; s >= 0; s--) if (local[s].name === tag.name) { paired.add(local[s].key); paired.add(`${ci}:${tag.lt}`); local.length = s; popped = true; break; }
+          if (!popped) for (let s = global.length - 1; s >= 0; s--) if (global[s].name === tag.name) { paired.add(global[s].key); paired.add(`${ci}:${tag.lt}`); global.length = s; break; }
+        } else {
+          // A leftover opener is FLOW (joins `global` for a later-chunk closer) when it is a standalone
+          // residue: its `>` ends the chunk (clean flow opener), OR it is a chunk-start opener whose
+          // lossy attribute DESYNCED scanTag into stopping at a fake early `>` (bracket-unbalanced
+          // consumed span, trailing residue but nothing real precedes it). A chunk-start CLEAN opener
+          // with real trailing code (`\<$Panel extends GEN>() …`) is an in-body generic, not flow — so
+          // desync, not mere position, gates the `!glued` case. A GLUED mid-chunk leftover is likewise an
+          // in-body generic — dropped from pairing so no later closer mispairs across it.
+          const glued = text.slice(0, tag.esc ? tag.lt - 1 : tag.lt).trim() !== '';
+          const flow = !tag.closed || text.slice(tag.end).trim() === '' || (!glued && bracketDesync(text.slice(tag.nameEnd, tag.end)));
+          local.push({ name: tag.name, key: `${ci}:${tag.lt}`, endsChunk: flow });
+        }
       }
       i = tag.closed ? tag.end : tag.nameEnd;
     }
+    for (const o of local) if (o.endsChunk) global.push({ name: o.name, key: o.key });
   });
   return paired;
 }
@@ -224,12 +230,17 @@ function stripComponentResidue(text: string, chunkIndex: number, paired: Set<str
     //       opener's span is balanced (`mode=\{\{ a }} title="x">`) even when the body carries a stray `[`.
     //   (b) the span rebalanced by luck (`]}` closes `\[\{` in order) but scanTag stopped at a FAKE `>`,
     //       leaving the attribute's REAL structural close glued to the true tag end as `]}>` / `}]>` /
-    //       `]]>` / `}}>` residue before the closer. structure() never emits a bare double-close-then-`>`
-    //       in honest body (body opens are escaped `\[`, a lone body `]` is never doubled onto `>`), so
-    //       this signature is unambiguous leaked opener serialization, not visible prose.
+    //       `]]>` / `}}>` residue before the closer. structure() never emits a DOUBLE bare close-then-`>`
+    //       in honest body: body opens are escaped `\[` / `\{`, and their closes are bare and single, so
+    //       an honest `arr\[i]>0` yields a lone `]>` (never `]}>`). Only a leaked attribute's real
+    //       structural close (`\{\["…"]}` → `]}`) doubles onto the tag `>`, so a run of TWO closes
+    //       immediately before a `>` (optionally across whitespace: `]}   >`) is unambiguous leaked
+    //       opener serialization. This IS an after-`k` read, but a TARGETED double-close signature, not a
+    //       whole-body balance scan — a single body `]>` / `>` can never match it (EVE's `arr[i]>0`).
     // On a confirmed-lossy opener, re-anchor to the LAST `>` before the closer and strip directly (the
     // mangled residue is ungrammatical, so grammar classification below would wrongly KEEP it as prose).
-    if (glued && esc && !closing && !selfClose && closerAfter !== -1 && (!closed || bracketDesync(text.slice(tag.nameEnd, k)))) {
+    const attrLeak = /[\]}]{2}\s*>/.test(text.slice(k, tag.nameEnd + closerAfter));
+    if (glued && esc && !closing && !selfClose && closerAfter !== -1 && (!closed || bracketDesync(text.slice(tag.nameEnd, k)) || attrLeak)) {
       const gt = text.lastIndexOf('>', tag.nameEnd + closerAfter);
       if (gt > tag.nameEnd) { out += ' '; i = gt + 1; continue; }
     }
@@ -357,25 +368,6 @@ function codeSpanEnd(text: string, i: number): number {
 function rawCloserRe(name: string): RegExp {
   const body = [...name].map((c) => '\\\\?' + c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
   return new RegExp(`</${body}\\s*>`);
-}
-
-// Does a matching `</Name>` closer appear later in this chunk, OUTSIDE any code span? This is the
-// hierarchy signal that decides whether a glued TS-parsable opener is an in-body generic (no closer
-// of its own → exempt from the pairing stack) or a real inline component / a generic preceding a real
-// same-name inline (has a later closer → stacks, so positional nearest-pop resolves it correctly).
-// The code-span skip matters: a `` `</Name>` `` inside prose is literal text, not a real closer.
-function hasCloserLater(text: string, from: number, name: string): boolean {
-  const re = rawCloserRe(name);
-  for (let j = from; j < text.length; ) {
-    if (text[j] === '`') { const cs = codeSpanEnd(text, j); if (cs !== -1) { j = cs; continue; } }
-    const m = re.exec(text.slice(j));
-    if (!m) return false;
-    const at = j + m.index;
-    let spanned = false; // the found closer might sit inside a code span between j and at
-    for (let s = j; s < at; ) { if (text[s] === '`') { const cs = codeSpanEnd(text, s); if (cs > at) { spanned = true; j = cs; break; } if (cs !== -1) { s = cs; continue; } } s++; }
-    if (!spanned) return true;
-  }
-  return false;
 }
 
 // Is the OPENER'S OWN attribute span (what scanTag consumed between the tag name and its landing

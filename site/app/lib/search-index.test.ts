@@ -516,15 +516,12 @@ test('real structure() round-17: glued custom-name pairing, glued inline bracket
     assert.ok(attr.some((t) => t.includes(`bd${tag}`) && /prefix/.test(t) && /suffix/.test(t)), `glued-attr ${name}: body/suffix lost: ${JSON.stringify(attr)}`);
   }
 
-  // P1 #2 — glued inline lossy opener with EVE's bracket matrix. Closes-heavy sets (`}]`, `}}`, `]]`)
-  // must not leak the attribute residue as fake suffix; opens-heavy sets (`{ [`, `[ {`, `{{`, `[[`)
-  // must not swallow the body/suffix. All keep the in-chunk body + suffix, drop the needle. The `]}`
-  // case is excluded on purpose: a dropped quote-backslash there rebalances the OPENER-LOCAL consumed
-  // span exactly (`items=\{\["a " ]} `), so it is indistinguishable from an honest opener without
-  // scanning the visible body — which EVE's round-21 review forbids (a body `arr[i]>0` false-fires the
-  // `]>` signature and deletes real prose). Preserving honest prose wins over recovering this contrived
-  // dropped-quote-string; the residue stays but the body/suffix are intact (asserted below).
-  for (const b of ['}]', '}}', ']]']) {
+  // P1 #2 — glued inline lossy opener with EVE's bracket matrix. Closes-heavy sets (`}]`, `]}`, `}}`,
+  // `]]`) must not leak the attribute residue as fake suffix; opens-heavy sets (`{ [`, `[ {`, `{{`,
+  // `[[`) must not swallow the body/suffix. All keep the in-chunk body + suffix, drop the needle. The
+  // `]}` case (dropped quote rebalances the consumed span) is recovered by the targeted double-close
+  // signature `]}>` — distinct from an honest single body `]>`, so it strips without touching prose.
+  for (const b of ['}]', ']}', '}}', ']]']) {
     const needle = `GLUE${b.replace(/}/g, 'C').replace(/]/g, 'S')}`;
     const r = clean(`prefix<Panel items={["a \\" ${b} > ${needle}", "c"]}>BODYX</Panel>SUFFIXX`);
     assert.ok(!r.some((t) => new RegExp(`${needle}|items=|<Panel`).test(t)), `bracket ${b} leaked: ${JSON.stringify(r)}`);
@@ -573,14 +570,13 @@ test('real structure() round-18: desync-gated anchor, custom-name × bracket mat
   const cs = clean('prefix<Panel>`x > y`594 KEEP594</Panel>SUF594');
   assert.ok(cs.some((t) => /KEEP594/.test(t) && /SUF594/.test(t)) && !cs.some((t) => /<Panel>/.test(t)), `codespan-body lost: ${JSON.stringify(cs)}`);
 
-  // P1 #2 — custom name × bracket pollution, must not leak (closes-heavy) or swallow (opens-heavy).
-  // Exercises the escape-tolerant closer search that plain `</Name>` missed. `]}` is excluded here for
-  // the same reason as round-17: its dropped-quote residue rebalances the opener-local span exactly, so
-  // recovering it would require a body scan that EVE's round-21 review forbids (it deletes honest prose).
+  // P1 #2 — custom name × bracket pollution, both directions, must not leak (closes-heavy) or swallow
+  // (opens-heavy). Exercises the escape-tolerant closer search that plain `</Name>` missed. Both `}]`
+  // and the span-rebalancing `]}` are covered — the latter by the targeted `]}>` double-close signature.
   for (const name of ['$Panel', '_Panel', '𐐀Panel', 'ns.Qualified'] as const) {
     const tag = name.replace('.', '');
     const opener = `<${name}`;
-    for (const b of ['}]']) {
+    for (const b of ['}]', ']}']) {
       const r = clean(`prefix<${name} items={["a \\" ${b} > L${tag}ATTR", "c"]}>B${tag}VIS</${name}>S${tag}SUF`).join(' ');
       assert.ok(!r.includes(`L${tag}ATTR`) && !r.includes('items=') && !r.includes(opener), `${name} ${b} leaked: ${JSON.stringify(r)}`);
       assert.ok(r.includes(`B${tag}VIS`) && r.includes(`S${tag}SUF`), `${name} ${b} body/suffix lost: ${JSON.stringify(r)}`);
@@ -700,6 +696,52 @@ test('real structure() round-21: hierarchy-decided generics, opener-local recove
   assert.ok((await hits(even, 'EVENSLASHKEEP21')) > 0, `even-slash: generic 0-hit`);
   const split = 'g <$Panel extends SPLITGENKEEP21> then </`noise`$SplitPanel> tail';
   assert.ok((await hits(split, 'SPLITGENKEEP21')) > 0, `split-closer: generic 0-hit`);
+});
+
+// EVE round 22 — the full-chunk-sequence hierarchy the per-chunk `hasCloserLater` proxy missed. Pairing
+// now runs a two-level stack (local per-chunk inline, global cross-chunk flow) over the whole ordered
+// chunk stream. These drive the real structure() → buildIndex() → Orama chain with EVE's exact reals.
+test('real structure() round-22: outer/generic/inline hierarchy, cross-chunk flow, balanced-lossy contract', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r22', data: { title: '/r22', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // P1 #1 — a REAL enclosing same-name flow component (`<$Panel …>…</$Panel>`) whose body holds an
+  // in-body generic AND a real same-name inline. The inner inline closer pops the inline; the OUTER
+  // closer must pop the OUTER opener (cross-chunk), never the mid-body generic. Both chunk-start and
+  // glued generic positions, across all five generic roles — 10 cases, every generic needle must index.
+  const forms = {
+    bare: '<$Panel>',
+    constrained: '<$Panel extends GEN22C>',
+    default: '<$Panel = GEN22D>',
+    compound: '<$Panel, U extends GEN22P>',
+    comparison: 'val <$Panel extends GEN22M>',
+  } as const;
+  for (const [role, decl] of Object.entries(forms)) {
+    const needle = decl.match(/GEN22[A-Z]/)?.[0];
+    for (const [pos, body] of [['chunkstart', `${decl}() then <$Panel>INLINE22${role}</$Panel>`], ['glued', `factory()${decl}() then <$Panel>INLINE22${role}</$Panel>`]] as const) {
+      const raw = `<$Panel title="OUTER22">\n\n## H22\n\n${body}\n\n</$Panel>`;
+      if (needle) assert.ok((await hits(raw, needle)) > 0, `${role}/${pos}: generic "${needle}" 0-hit (outer closer mispaired)`);
+      assert.ok((await hits(raw, `INLINE22${role}`)) > 0, `${role}/${pos}: inline body 0-hit`);
+      assert.equal(await hits(raw, 'OUTER22'), 0, `${role}/${pos}: outer opener attribute leaked`);
+    }
+  }
+
+  // P1 #2 — a real flow JSX component whose body carries a heading, so structure() splits it into
+  // opener / body / closer chunks. The glued opener sees no closer in ITS chunk but IS paired by its
+  // real later-chunk closer (global stack) — never mistaken for a generic. Its attribute must not index.
+  const cross = 'prefix <$Panel extends CROSSATTR22>\n\n## Head22\n\nbody22\n\n</$Panel>';
+  assert.equal(await hits(cross, 'CROSSATTR22'), 0, 'cross-chunk flow opener attribute leaked (misjudged as generic)');
+  assert.ok((await hits(cross, 'body22')) > 0, 'cross-chunk flow body lost');
+
+  // P1 #3 — the restored balanced-lossy `]}` contract: a dropped quote-backslash rebalances the
+  // opener-local consumed span, but the leaked attribute's real close doubles onto the tag `>` as `]}>`.
+  // The attribute needle must NOT index (markup out), while body/suffix are preserved.
+  const lucky = 'prefix<Panel items={["a \\" ]} > LUCKYATTR22", "c"]}>LUCKYBODY22</Panel>LUCKYSUF22';
+  assert.equal(await hits(lucky, 'LUCKYATTR22'), 0, 'balanced-lossy ]} attribute leaked into Orama');
+  assert.ok((await hits(lucky, 'LUCKYBODY22')) > 0 && (await hits(lucky, 'LUCKYSUF22')) > 0, 'balanced-lossy body/suffix lost');
 });
 
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');

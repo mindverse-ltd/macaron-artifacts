@@ -77,8 +77,18 @@ function readTombstone(): { ok: boolean; value: string } {
   catch { return { ok: false, value: '' }; }
 }
 
+// Write our retirement tombstone, but NEVER clobber a DIFFERENT value another tab already wrote
+// there (write-side CAS mirroring the read-side check in dropTombstoneIfMatches). The tombstone is
+// a single slot: if tab-2 retired Y after us, overwriting it with our X would drop Y's protection
+// and let Y resurrect. When the slot already holds someone else's value, treat our write as SETTLED
+// (return true so pendingTombstoneWrite stops retrying) — we can't protect both in one slot, and
+// not clobbering the other tab's live tombstone is the invariant that must hold.
 function writeTombstone(value: string): boolean {
-  try { localStorage.setItem(LEGACY_TOMBSTONE_KEY, value); return true; } catch { return false; }
+  try {
+    const cur = localStorage.getItem(LEGACY_TOMBSTONE_KEY);
+    if (cur && cur !== value) return true; // another tab's tombstone — don't clobber
+    localStorage.setItem(LEGACY_TOMBSTONE_KEY, value); return true;
+  } catch { return false; }
 }
 
 // The persisted shape of the registry. The default LOCAL backend is synthetic —
@@ -169,7 +179,22 @@ let pendingMutations: Array<{ id: string; token: string | undefined; idResolved:
 // whole-list `dirty` flush — which would re-write the entire cached snapshot and roll back a
 // concurrent cross-tab rename/add — these are replayed by re-hydrating the FRESHEST raw and
 // re-applying only the one (id → token) change each names, so cross-tab edits survive.
-let pendingIntents: Array<{ id: string; token: string | undefined }> = [];
+// `expected` (when set) is a compare-and-swap guard from a 401 clear: apply ONLY while the
+// backend still holds that value, so a token refreshed / re-created before recovery isn't wiped
+// by a stale 401. A newer intent for the same id supersedes an older one (see queueIntent), so
+// replay order can't resurrect a value a later clear removed.
+type TokenIntent = { id: string; token: string | undefined; expected?: string };
+let pendingIntents: TokenIntent[] = [];
+
+// Queue a single-backend intent, coalescing by id: drop any older intent for the SAME backend so
+// only the newest (id → token) survives. Without this, an older failed write kept in the queue can
+// replay AFTER a newer same-id clear/replace once storage recovers, reviving a superseded token.
+// A CAS-guarded clear (expected set) does NOT coalesce away a plain set — it targets one specific
+// value — but a later plain set/clear for the id still supersedes everything before it.
+function queueIntent(intent: TokenIntent): void {
+  if (intent.expected === undefined) pendingIntents = pendingIntents.filter((i) => i.id !== intent.id);
+  pendingIntents.push(intent);
+}
 
 // Retire a legacy value: mark it dead so it's never re-absorbed, and schedule the
 // key for removal. Also persist a durable tombstone so the retirement survives a
@@ -237,14 +262,27 @@ function flush(): void {
   // intent whose target vanished (backend deleted meanwhile) is DROPPED — never redirected onto
   // LOCAL. A successful write updates lastSeenRaw so the next intent reads our own result back.
   if (pendingIntents.length > 0) {
-    const still: Array<{ id: string; token: string | undefined }> = [];
+    const still: TokenIntent[] = [];
     for (const intent of pendingIntents) {
       const { ok, raw } = readRegistryRaw();
       if (!ok) { still.push(intent); continue; } // storage frozen — retry the rest later too
-      const applied = applyTokenExact(parseRegistry(raw), intent.id, intent.token);
+      const fresh = parseRegistry(raw);
+      // CAS-guarded clear (from a 401): only apply while the backend STILL holds the value the
+      // failing request used. If it was refreshed / the backend re-created with a new token before
+      // recovery, DROP the stale clear — never wipe a fresh credential.
+      if (intent.expected !== undefined) {
+        const target = fresh.find((b) => b.id === intent.id);
+        if (!target || (target.token || '') !== intent.expected) continue; // refreshed / gone — drop
+      }
+      const applied = applyTokenExact(fresh, intent.id, intent.token);
       if (!applied) continue; // target gone — drop, do not fall back to LOCAL
       const stored = toStored(applied);
-      if (write(BACKENDS_KEY, stored)) { cache = applied; lastSeenRaw = JSON.stringify(stored); }
+      // Persist, and adopt the raw-derived view into `cache` ONLY when the cache is reconciled
+      // (it already IS the storage view). An UNRECONCILED merged cache (blind mutations just
+      // merged onto raw) is authoritative in-session and carries OTHER resolved mutations this one
+      // intent doesn't — overwriting it with a single-intent view would drop them. There, replay
+      // only persists; the merged cache stays. lastSeenRaw always tracks what we wrote.
+      if (write(BACKENDS_KEY, stored)) { lastSeenRaw = JSON.stringify(stored); if (cacheReconciled) cache = applied; }
       else still.push(intent); // storage still frozen — retry next time
     }
     pendingIntents = still;
@@ -293,6 +331,19 @@ function flush(): void {
 // leave the token in place. An empty value clears LOCAL; a changed value updates it.
 function revalidateLegacy(): void {
   if (!legacyBackedLocalToken || !cache) return;
+  // Another tab may have retired this exact value by writing a tombstone (its legacy-key removal
+  // then failed / hasn't run). The legacy key can still hold the value, so readLegacyRaw alone
+  // wouldn't notice — but a tombstone naming OUR backing value means it's dead: clear LOCAL and
+  // stop treating the key as live so we don't keep authenticating with a retired token.
+  const tomb = readTombstone();
+  if (tomb.ok && tomb.value === legacyBackedLocalToken) {
+    retiredLegacyToken = legacyBackedLocalToken;
+    cache = cache.map((b) => (b.id === LOCAL_BACKEND_ID && b.token === legacyBackedLocalToken ? { ...b, token: undefined } : b));
+    legacyBackedLocalToken = undefined;
+    pendingLegacyRemoval = true;
+    dirty = true;
+    return;
+  }
   const { ok, value } = readLegacyRaw();
   if (!ok) return;                              // SecurityError — not a delete
   if (value === legacyBackedLocalToken) return; // unchanged
@@ -402,7 +453,7 @@ export function loadBackends(): Backend[] {
     // cache is NOT reconciled, so the whole-list write is skipped — record the resolved changes as
     // single-backend intents so they still persist and aren't lost when the next load re-hydrates.
     cacheReconciled = stillDeferred.length === 0;
-    if (!cacheReconciled) pendingIntents.push(...resolvedIntents);
+    if (!cacheReconciled) for (const r of resolvedIntents) queueIntent(r);
     flush();
     return cache;
   }
@@ -465,9 +516,15 @@ let lastActiveId: string | undefined;
 // successfully (or LOCAL if we never did) — a best guess, NOT confirmation. Callers
 // taking a DESTRUCTIVE action keyed on the id (retiring the legacy token, clearing) must
 // gate on `ok`: an unreadable active key is unknown, not "definitely this id".
+// A TRANSIENT first-read throw (private-mode flake) must not misroute a persisted active=REMOTE
+// session to a guessed LOCAL, so retry a couple times before giving up — a genuinely frozen store
+// still throws every attempt and falls back safely, while a one-shot flake recovers the real id.
 function readActiveId(): { ok: boolean; value: string } {
-  try { const v = localStorage.getItem(ACTIVE_KEY) || LOCAL_BACKEND_ID; lastActiveId = v; return { ok: true, value: v }; }
-  catch { return { ok: false, value: lastActiveId || LOCAL_BACKEND_ID }; }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { const v = localStorage.getItem(ACTIVE_KEY) || LOCAL_BACKEND_ID; lastActiveId = v; return { ok: true, value: v }; }
+    catch { /* retry — may be a transient read flake */ }
+  }
+  return { ok: false, value: lastActiveId || LOCAL_BACKEND_ID };
 }
 
 export function setActiveBackendId(id: string): void {
@@ -488,16 +545,30 @@ export function getActiveBackend(): Backend {
 // resulting list (already cached + flushed).
 function persistTokenIntent(id: string, token: string | undefined): Backend[] {
   const { ok, raw } = readRegistryRaw();
-  const base = ok ? hydrate(raw) : (cache ?? [localDefault()]);
+  // Our OWN raw read threw (warm cache, storage momentarily unreadable): we can't build a fresh
+  // base, and we must NOT hand the stale cache to saveBackends — if its recheck read then recovers,
+  // it would mark the stale snapshot reconciled and whole-list-write it, rolling back a concurrent
+  // cross-tab rename/add. Apply blind in-session and queue a BY-BACKEND intent so flush persists
+  // just this one change against the freshest raw once storage settles.
+  if (!ok) {
+    const next = applyToken(cache ?? [localDefault()], id, token);
+    cache = next;
+    queueIntent({ id, token });
+    flush();
+    return next;
+  }
+  const base = hydrate(raw);
   const next = applyToken(base, id, token);
   saveBackends(next);
   // If the persistence write failed (still dirty), remember this as a SINGLE-backend intent so
   // flush() replays it against the freshest raw — not by re-writing the whole stale snapshot,
-  // which would roll back a concurrent cross-tab rename/add. This holds whether the failure was
-  // write-only (ok read) OR read+write both failing (a warm cache whose raw was unreadable): in
-  // both cases the recovery path must be by-backend. Clear `dirty` so flush's whole-list branch
-  // is skipped and only the intent replay (which reads the freshest raw per-op) persists it.
-  if (dirty) { pendingIntents.push({ id, token }); dirty = false; }
+  // which would roll back a concurrent cross-tab rename/add. Clear `dirty` so flush's whole-list
+  // branch is skipped and only the intent replay (which reads the freshest raw per-op) persists it.
+  // If the persistence write SUCCEEDED, this newer value supersedes any older queued intent for the
+  // same backend — drop them so a stale replay can't overwrite what we just wrote. If it FAILED,
+  // queue it (queueIntent itself coalesces older same-id plain intents).
+  if (dirty) { queueIntent({ id, token }); dirty = false; }
+  else pendingIntents = pendingIntents.filter((i) => i.id !== id);
   return next;
 }
 
@@ -512,17 +583,25 @@ export function setActiveBackendToken(token: string): void {
   setBackendToken(active.value, token, active.ok);
 }
 
-// Clear a SPECIFIC backend's token by id, but ONLY if it still holds `expectedToken` — the
-// value captured in the failing request's snapshot. Returns true iff it actually cleared, so the
-// 401 handler only re-gates the UI when THIS request's credential was the current one. The match
-// and the clear are one synchronous step (no await between), so a token refreshed on this backend
-// can't slip in mid-clear; if the current token no longer equals the snapshot (refreshed) or the
-// backend was deleted mid-flight, this is a no-op — never a LOCAL fallback, never a broadcast.
+// Clear a SPECIFIC backend's token by id, but ONLY if it still holds `expectedToken` — the value
+// captured in the failing request's snapshot. Returns true iff it actually cleared, so the 401
+// handler only re-gates the UI when THIS request's credential was the current one. The whole thing
+// is ONE atomic compare-and-swap against a single load: match and clear read the same snapshot with
+// no intervening re-load, so a token refreshed on this backend can't slip in between the match and
+// the write. The clear is applied EXACTLY to `id` (never a LOCAL fallback), and if the write fails
+// the queued intent carries `expectedToken`, so a refresh/re-create before storage recovers still
+// isn't wiped by this stale 401. A vanished or refreshed target is a no-op → false, no broadcast.
 export function clearBackendTokenIfMatches(id: string, expectedToken: string): boolean {
   const list = loadBackends();
   const target = list.find((b) => b.id === id);
   if (!target || (target.token || '') !== expectedToken) return false; // refreshed, or backend gone
-  setBackendToken(id, '', true); // id is explicit and authoritative — never re-resolve it
+  // Clearing LOCAL's token must also retire the legacy source so a reload can't re-migrate it.
+  if (id === LOCAL_BACKEND_ID) retireLegacy(legacyBackedLocalToken || readLegacy());
+  const cleared = applyTokenExact(list, id, undefined)!; // id present (target found above)
+  saveBackends(cleared);
+  // Persist by-backend so a concurrent cross-tab edit survives; if the write failed, queue a
+  // CAS-guarded intent so recovery only re-clears while the value is still the stale one.
+  if (dirty) { queueIntent({ id, token: undefined, expected: expectedToken }); dirty = false; }
   return true;
 }
 

@@ -9,7 +9,7 @@
 // token, so same-origin local usage behaves exactly as it did with the old
 // single global token.
 
-import { getActiveBackend, setActiveBackendToken, clearBackendTokenIfMatches } from './backends';
+import { getActiveBackend, getActiveBackendId, setActiveBackendToken, clearBackendTokenIfMatches } from './backends';
 import type { Backend } from './backends';
 
 // Derive the request URL / auth header from a SINGLE backend snapshot. authedFetch
@@ -62,9 +62,11 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
     // Clear the token THIS request actually used — bound by id AND value from the snapshot.
     // Binding the value means a token refreshed on this backend mid-flight survives a stale
     // 401, and a backend deleted mid-flight clears nothing (no id fallback onto LOCAL). Only
-    // re-gate the UI when we ACTUALLY cleared the current credential: a no-op clear (already
-    // refreshed / backend gone) must not lock a still-valid active backend behind the login gate.
-    if (clearBackendTokenIfMatches(backend.id, backend.token || '')) {
+    // re-gate the UI when we ACTUALLY cleared the current credential AND that backend is STILL
+    // the active one: a no-op clear (already refreshed / backend gone) must not lock a valid
+    // backend behind the login gate, and a stale 401 for backend A after the user switched to a
+    // valid B must clear A silently — never gate B (whose token is fine) behind A's failure.
+    if (clearBackendTokenIfMatches(backend.id, backend.token || '') && getActiveBackendId() === backend.id) {
       window.dispatchEvent(new Event('macaron:auth-required'));
     }
   }

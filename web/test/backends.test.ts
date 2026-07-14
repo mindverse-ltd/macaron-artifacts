@@ -1062,3 +1062,174 @@ test('EVE-e: a 401 for a backend DELETED mid-flight must not fall back to cleari
   // REAL invariant: LOCAL's unrelated token was NOT wiped by the missing-id fallback.
   assert.equal(backends.loadBackends().find((b) => b.id === 'local')?.token, 'local-tok');
 });
+
+// ── EVE exact-head combinatorial regressions (PR #146 review of 118e238) ──────────────
+// Six tracked tests reproducing the four blockers EVE flagged at exact head 118e238.
+
+test('EVE#1: a 401 clear whose write fails must not wipe a token re-created before storage recovers', async () => {
+  // Blocker 1: the failed clear's intent must carry the EXPECTED value (CAS). Without it, the queued
+  // clear replays unconditionally once storage recovers and wipes a token refreshed in the meantime.
+  installLocalStorage();
+  const { backends, auth } = await freshModules();
+  backends.saveBackends([{ id: 'a', label: 'A', baseUrl: 'https://a.test', token: 'old-tok' }]);
+  backends.setActiveBackendId('a');
+  const realSet = localStorage.setItem.bind(localStorage);
+  const ctl = { failWrites: false };
+  (localStorage as unknown as { setItem: (k: string, v: string) => void }).setItem = (k: string, v: string) => {
+    if (ctl.failWrites && k === 'macaron_backends') throw new Error('SecurityError');
+    realSet(k, v);
+  };
+  const realFetch = globalThis.fetch;
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () => { ctl.failWrites = true; return { status: 401 } as Response; }) as typeof fetch;
+  (globalThis as unknown as { window: { dispatchEvent(e: unknown): boolean } }).window = { dispatchEvent: () => true };
+  await auth.authedFetch('/api/x');                     // snapshot token 'old-tok'; clear write FAILS → queued CAS intent
+  ctl.failWrites = false;
+  // Another tab re-creates the token (writes storage directly — does NOT go through our queue, so it
+  // can't coalesce the stale clear away). Only the intent's EXPECTED-value CAS can protect it.
+  realSet('macaron_backends', JSON.stringify([{ id: 'a', label: 'A', baseUrl: 'https://a.test', token: 'fresh-tok' }]));
+  backends.loadBackends();                              // flush replays the queued clear
+  (localStorage as unknown as { setItem: (k: string, v: string) => void }).setItem = realSet;
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = realFetch;
+  // REAL invariant: the CAS-guarded clear saw 'fresh-tok' !== 'old-tok' and dropped — fresh survived.
+  assert.equal(backends.loadBackends().find((b) => b.id === 'a')?.token, 'fresh-tok');
+});
+
+test('EVE#1: a stale 401 for backend A must not gate a valid active backend B', async () => {
+  // Blocker 1: clearing A returns true, but the global auth-required broadcast must fire ONLY when the
+  // cleared backend is still active. After switching to a valid B, A's 401 must clear A silently.
+  installLocalStorage();
+  const { backends, auth } = await freshModules();
+  backends.saveBackends([
+    { id: 'a', label: 'A', baseUrl: 'https://a.test', token: 'a-tok' },
+    { id: 'b', label: 'B', baseUrl: 'https://b.test', token: 'b-tok' },
+  ]);
+  backends.setActiveBackendId('a');
+  let gated = false;
+  (globalThis as unknown as { window: { dispatchEvent(e: unknown): boolean } }).window = { dispatchEvent: () => { gated = true; return true; } };
+  const realFetch = globalThis.fetch;
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () => {
+    backends.setActiveBackendId('b');                  // user switches to valid B mid-flight
+    return { status: 401 } as Response;                // A's request 401s
+  }) as typeof fetch;
+  await auth.authedFetch('/api/x');                     // snapshot backend = A
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = realFetch;
+  // REAL invariant: A's token cleared, but B (now active, still valid) NOT gated behind the login wall.
+  assert.equal(backends.loadBackends().find((b) => b.id === 'a')?.token, undefined);
+  assert.equal(backends.loadBackends().find((b) => b.id === 'b')?.token, 'b-tok');
+  assert.equal(gated, false);
+});
+
+test('EVE#2: a deferred tombstone write must not clobber another tab’s newer tombstone Y', async () => {
+  // Blocker 3 (write-side CAS): this tab retires X and its tombstone write is DEFERRED (pendingTombstoneWrite).
+  // On the retry, its legacy-key read throws so removeLegacyKey can't settle and falls to re-writing the
+  // tombstone. Meanwhile another tab retired a DIFFERENT value Y, writing tombstone=Y. The old unconditional
+  // writeTombstone clobbered Y with X — resurrecting Y. The write-side CAS now refuses to overwrite Y.
+  const ls = installLocalStorage({ macaron_auth_token: 'X' });
+  const { backends, auth } = await freshModules();
+  ls.quotaFull = true;                                  // LOCAL stays legacy-backed (X can't migrate into the registry)
+  assert.equal(backends.loadBackends().find((b) => b.id === 'local')?.token, 'X');
+  // Retire X, but BOTH the tombstone write AND the legacy-key removal fail — retirement is fully deferred
+  // (pendingTombstoneWrite + pendingLegacyRemoval), leaving X still in the legacy key.
+  const realSet = localStorage.setItem.bind(localStorage);
+  const realRemove = localStorage.removeItem.bind(localStorage);
+  const ctl = { freeze: false, legacyThrows: false };
+  (localStorage as unknown as { setItem: (k: string, v: string) => void }).setItem = (k: string, v: string) => { if (ctl.freeze) throw new Error('SecurityError'); realSet(k, v); };
+  (localStorage as unknown as { removeItem: (k: string) => void }).removeItem = (k: string) => { if (ctl.freeze) throw new Error('SecurityError'); realRemove(k); };
+  ctl.freeze = true;
+  auth.clearToken();                                    // retire X → tombstone write + legacy removal both deferred
+  ctl.freeze = false;
+  ls.quotaFull = false;
+  // Another tab retired a DIFFERENT value Y and wrote ITS tombstone into the single slot.
+  localStorage.setItem('macaron_auth_token_retired', 'Y');
+  // On our deferred retry, the legacy-key read THROWS so removeLegacyKey returns false and we reach the
+  // tombstone re-write branch — the exact path where the old unconditional writeTombstone clobbered Y.
+  const realGet = localStorage.getItem.bind(localStorage);
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = (k: string) => {
+    if (k === 'macaron_auth_token' && ctl.legacyThrows) throw new Error('SecurityError');
+    return realGet(k);
+  };
+  ctl.legacyThrows = true;
+  backends.loadBackends();                              // deferred retry runs; tombstone re-write must not clobber Y
+  ctl.legacyThrows = false;
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = realGet;
+  // REAL invariant: Y's tombstone survives — our deferred X write did not overwrite it.
+  assert.equal(localStorage.getItem('macaron_auth_token_retired'), 'Y');
+});
+
+test('EVE#3: a transient ACTIVE_KEY read failure must not misroute a persisted REMOTE active to LOCAL', async () => {
+  // Blocker 4 (cold/transient read): getActiveBackend read the active-id ONCE; a single throw on
+  // ACTIVE_KEY (private-mode hiccup) fell back to a guessed LOCAL, misrouting a persisted active=REMOTE
+  // to the local origin — a request A meant for REMOTE would carry LOCAL's credential. readActiveId now
+  // retries a few times before falling back, so a transient throw resolves to the real persisted value.
+  const persisted = JSON.stringify([{ id: 'remote', label: 'Box', baseUrl: 'https://box.example.com', token: 'r0' }]);
+  installLocalStorage({ macaron_backends: persisted, macaron_active_backend: 'remote' });
+  const { backends } = await freshModules();
+  backends.__resetForTests();                            // cold: nothing resolved yet
+  const realGet = localStorage.getItem.bind(localStorage);
+  let throws = 1;                                        // first ACTIVE_KEY read throws once, then recovers
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = (k: string) => {
+    if (k === 'macaron_active_backend' && throws > 0) { throws--; throw new Error('SecurityError'); }
+    return realGet(k);
+  };
+  const active = backends.getActiveBackend();           // must retry past the transient throw
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = realGet;
+  // REAL invariant: routed to the persisted REMOTE, not a guessed LOCAL.
+  assert.equal(active.id, 'remote');
+  assert.equal(active.baseUrl, 'https://box.example.com');
+});
+
+test('EVE#3: a legacy-backed LOCAL must observe another tab’s tombstone retiring that value', async () => {
+  // Blocker 3: revalidateLegacy compared only the legacy KEY. Another tab can retire the value by
+  // writing a tombstone while its legacy-key removal fails — this tab must stop trusting the token.
+  const persisted = JSON.stringify([{ id: 'remote', label: 'Box', baseUrl: 'https://box.example.com', token: 'r0' }]);
+  const ls = installLocalStorage({ macaron_backends: persisted, macaron_auth_token: 'legacy-abc', macaron_active_backend: 'remote' });
+  ls.quotaFull = true;
+  const { backends } = await freshModules();
+  assert.equal(backends.loadBackends().find((b) => b.id === 'local')?.token, 'legacy-abc');
+  // Another tab retires 'legacy-abc' via a tombstone, but its legacy-key removal FAILED (key lingers).
+  ls.quotaFull = false;                                 // the other tab isn't quota-bound
+  localStorage.setItem('macaron_auth_token_retired', 'legacy-abc');
+  backends.loadBackends();                              // revalidateLegacy must observe the tombstone
+  // REAL invariant: LOCAL no longer authenticates with the tombstoned value.
+  assert.equal(backends.loadBackends().find((b) => b.id === 'local')?.token, undefined);
+});
+
+test('EVE#4: a warm write that fails then recovers must not roll back a concurrent cross-tab rename', async () => {
+  // Blocker 4: a warm token write whose read+write both fail leaves a dirty snapshot; if another tab
+  // renames/adds a backend and storage recovers, a whole-table rewrite rolls it back. The by-backend
+  // intent replay must touch only its own backend, preserving the cross-tab edit.
+  installLocalStorage();
+  const { backends, auth } = await freshModules();
+  const OLD = JSON.stringify([
+    { id: 'a', label: 'A', baseUrl: 'https://a.test', token: 'tok-a' },
+  ]);
+  const NEW = JSON.stringify([
+    { id: 'a', label: 'A-renamed', baseUrl: 'https://a.test', token: 'tok-a' },
+    { id: 'b', label: 'B', baseUrl: 'https://b.test', token: 'tok-b' },
+  ]);
+  localStorage.setItem('macaron_backends', OLD);
+  backends.loadBackends();                              // warm, reconciled on OLD
+  backends.setActiveBackendId('a');
+  const realGet = localStorage.getItem.bind(localStorage);
+  const realSet = localStorage.setItem.bind(localStorage);
+  // Emulate EVE's exact ordering by registry-read index: setBackendToken's loadBackends reads OLD
+  // (#1), then a cross-tab update lands, then persistTokenIntent's own read THROWS (#2), then
+  // saveBackends' recheck recovers to NEW (#3+). Old code marked the stale OLD cache reconciled at
+  // #3 and whole-list-wrote it, rolling back the cross-tab rename/add.
+  let regReads = 0;
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = (k: string) => {
+    if (k !== 'macaron_backends') return realGet(k);
+    regReads++;
+    if (regReads === 1) return OLD;                    // load sees OLD
+    if (regReads === 2) { realSet('macaron_backends', NEW); throw new Error('SecurityError'); } // cross-tab update; persist read throws
+    return realGet(k);                                 // recheck + flush see NEW
+  };
+  auth.setToken('tok-a2');
+  (localStorage as unknown as { getItem: (k: string) => string | null }).getItem = realGet;
+  backends.loadBackends();                              // settle any queued by-backend intent
+  const stored = JSON.parse(localStorage.getItem('macaron_backends')!) as Backend[];
+  // REAL invariant: our token landed AND the cross-tab rename/add survived.
+  assert.equal(stored.find((b) => b.id === 'a')?.token, 'tok-a2');
+  assert.equal(stored.find((b) => b.id === 'a')?.label, 'A-renamed');
+  assert.ok(stored.find((b) => b.id === 'b'), 'cross-tab new backend survived');
+});

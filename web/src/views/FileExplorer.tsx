@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, ChevronDown, ChevronRight, Circle, File, Folder } from 'lucide-react';
 import { api, type FileEntry } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
@@ -51,8 +52,8 @@ function TreeNode({
         onClick={toggle}
         title={entry.path}
       >
-        <span className="fx-caret">{isDir ? (open ? '▾' : '▸') : ''}</span>
-        <span className="fx-icon">{isDir ? '📁' : '📄'}</span>
+        <span className="fx-caret">{isDir ? (open ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />) : ''}</span>
+        <span className="fx-icon">{isDir ? <Folder size={14} aria-hidden="true" /> : <File size={14} aria-hidden="true" />}</span>
         <span className="fx-name">{entry.name}</span>
       </button>
       {isDir && open && (
@@ -164,10 +165,10 @@ export function FileExplorer() {
     <section className="fx">
       <header className="fx-head">
         <Link className="ghost small" to={`/w/${encodeURIComponent(project)}`}>
-          ← Workspace
+          <ArrowLeft size={14} aria-hidden="true" /> Workspace
         </Link>
         <span className="fx-path">{openPath || 'Files'}</span>
-        {dirty && <span className="fx-dirty" title="Unsaved changes">●</span>}
+        {dirty && <span className="fx-dirty" title="Unsaved changes"><Circle size={8} fill="currentColor" aria-hidden="true" /></span>}
         <div className="fx-head-actions">
           <button className="ghost small" disabled={!dirty || saving} onClick={save}>
             {saving ? 'Saving…' : 'Save'}

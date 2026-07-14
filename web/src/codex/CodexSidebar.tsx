@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight, Check, Circle, Plus, X, Settings } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { codexApi, type CodexThread, type CodexWorkspace } from './api';
 import {
@@ -142,7 +143,7 @@ export function CodexSidebar() {
       </Link>
 
       <button className="cx-sb-new" onClick={() => navigate('/')}>
-        <span>＋</span>
+        <Plus size={14} aria-hidden="true" />
         <span>New thread</span>
       </button>
 
@@ -164,7 +165,7 @@ export function CodexSidebar() {
                   navigate(`/w/${encodeURIComponent(w.project)}`);
                 }}
               >
-                <span className="cx-sb-ws-arrow">{isExpanded ? '▾' : '▸'}</span>
+                <span className="cx-sb-ws-arrow">{isExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</span>
                 <span className="cx-sb-ws-name">{name}</span>
                 <span className="cx-sb-ws-count">{w.sessionCount}</span>
               </div>
@@ -200,12 +201,12 @@ export function CodexSidebar() {
                             }
                           }}
                           title={pinned ? 'Remove from canvas' : 'Add to canvas'}
-                        >{pinned ? '✓' : '+'}</button>
+                        >{pinned ? <Check size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}</button>
                         <button
                           className="cx-sb-thread-del"
                           onClick={(e) => del(e, s.sessionId)}
                           title="Delete"
-                        >×</button>
+                        ><X size={14} aria-hidden="true" /></button>
                       </div>
                     );
                   })}
@@ -222,12 +223,13 @@ export function CodexSidebar() {
       <div className="cx-sb-grow" />
 
       <Link className="cx-sb-settings" to="/settings">
-        <span>⚙</span>
+        <span><Settings size={16} aria-hidden="true" /></span>
         <span>Settings</span>
       </Link>
 
       <footer className="cx-sb-foot">
         <div className={'cx-sb-status cx-sb-status-' + status}>
+          <Circle className="cx-sb-status-dot" size={8} fill="currentColor" strokeWidth={0} aria-hidden="true" />
           {status === 'ok' ? providerLabel || 'online' : status === 'bad' ? 'config missing' : 'connecting…'}
         </div>
       </footer>

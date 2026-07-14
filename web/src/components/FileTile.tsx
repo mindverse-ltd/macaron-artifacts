@@ -141,10 +141,12 @@ export function FileTile({
 
   return (
     <div className="ft-root">
-      <div className="ft-toolbar">
-        <div className="ft-path" title={path}>{path}</div>
-        <div className="ft-toolbar-actions">
-          {!isImage && !isBinary && (
+      {/* Redundant tile-header replaced by a compact floating action strip
+          in the body's top-right corner — the outer SortableTile chrome
+          already shows the filename, so we don't repeat the path here. */}
+      <div className="ft-body">
+        {!isImage && !isBinary && (
+          <div className="ft-actions">
             <div className="ft-mode-toggle" role="tablist">
               <button
                 type="button"
@@ -166,21 +168,19 @@ export function FileTile({
                 {dirty && <span className="ft-dirty" title="Unsaved changes">●</span>}
               </button>
             </div>
-          )}
-          {mode === 'edit' && (
-            <button
-              type="button"
-              className="ft-save"
-              disabled={!dirty || saving}
-              onClick={save}
-              title={dirty ? 'Save (⌘S)' : 'Saved'}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="ft-body">
+            {mode === 'edit' && (
+              <button
+                type="button"
+                className="ft-save"
+                disabled={!dirty || saving}
+                onClick={save}
+                title={dirty ? 'Save (⌘S)' : 'Saved'}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
+          </div>
+        )}
         {mode === 'preview' && previewNode}
         {mode === 'edit' && (
           <>

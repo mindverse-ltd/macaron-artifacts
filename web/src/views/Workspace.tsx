@@ -29,6 +29,7 @@ import { Session } from './Session';
 import { peekPendingCwd, peekPendingPrompt } from '../lib/newSession';
 import { subscribeSystemEvents } from '../lib/systemEvents';
 import { GitPanel } from '../components/GitPanel';
+import { useConfirm } from '../components/Confirm';
 import { Terminal } from '../components/Terminal';
 import { isTerminalSid, killTerminal } from '../lib/terminal';
 import { isFileSid, filePath } from '../lib/fileTile';
@@ -424,6 +425,7 @@ function SortableTile({
   // Flipped by Session while a turn is streaming — drives the flowing-light
   // border animation so a running tile stands out on a busy canvas.
   const [isRunning, setIsRunning] = useState(false);
+  const confirm = useConfirm();
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const setRef = useCallback(
     (n: HTMLDivElement | null) => {
@@ -528,11 +530,21 @@ function SortableTile({
           <button
             className="ws-tile-action ws-tile-delete"
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              if (confirm(`Delete session ${tile.sid.slice(0, 8)}? This removes the jsonl on disk.`)) {
-                onDelete();
-              }
+              const ok = await confirm({
+                title: 'Delete session?',
+                body: (
+                  <>
+                    Session <code>{tile.sid.slice(0, 8)}</code> will be removed
+                    from the canvas and its jsonl file will be deleted on disk.
+                    This can't be undone.
+                  </>
+                ),
+                confirmLabel: 'Delete',
+                destructive: true,
+              });
+              if (ok) onDelete();
             }}
             title="Delete session (removes jsonl on disk)"
             aria-label="Delete session"

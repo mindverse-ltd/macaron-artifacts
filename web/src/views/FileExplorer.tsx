@@ -10,6 +10,7 @@ import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { api, type FileEntry } from '../lib/api';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/Confirm';
 
 // Pick a CodeMirror language by file extension; unknown types get plain text.
 function langFor(name: string): Extension[] {
@@ -100,6 +101,7 @@ function TreeNode({
 export function FileExplorer() {
   const { project = '' } = useParams();
   const toast = useToast();
+  const confirm = useConfirm();
   const [roots, setRoots] = useState<FileEntry[] | null>(null);
   const [rootError, setRootError] = useState('');
 
@@ -120,9 +122,17 @@ export function FileExplorer() {
   }, [project]);
 
   const openFile = useCallback(
-    (path: string) => {
+    async (path: string) => {
       if (path === openPath) return;
-      if (dirty && !window.confirm('Discard unsaved changes?')) return;
+      if (dirty) {
+        const ok = await confirm({
+          title: 'Discard unsaved changes?',
+          body: 'You have edits in the current file that haven\'t been saved. Opening a new file will drop them.',
+          confirmLabel: 'Discard',
+          destructive: true,
+        });
+        if (!ok) return;
+      }
       setOpenPath(path);
       setLoadingFile(true);
       setOpenError('');
@@ -139,7 +149,7 @@ export function FileExplorer() {
         })
         .finally(() => setLoadingFile(false));
     },
-    [project, openPath, dirty],
+    [project, openPath, dirty, confirm],
   );
 
   const save = useCallback(() => {

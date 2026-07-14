@@ -13,7 +13,10 @@ import { newFileSid } from './fileTile';
 export type TileGeom = { sid: string; colSpan: number; rowSpan: number };
 
 export const CANVAS_COLS = 12;
-export const DEFAULT_COL_SPAN = 6;   // half-width by default
+// New tiles fill the canvas end-to-end by default; users resize down when
+// they want two tiles side-by-side. Persisted layouts keep their per-tile
+// colSpan from localStorage, so this only affects freshly added tiles.
+export const DEFAULT_COL_SPAN = 12;
 export const DEFAULT_ROW_SPAN = 10;  // ~480px tall by default
 export const MIN_COL_SPAN = 3;
 export const MAX_COL_SPAN = 12;

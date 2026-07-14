@@ -10,6 +10,8 @@ import { CodexChat } from './CodexChat';
 import { CodexSettings } from './CodexSettings';
 import { CodexWorkspace } from './CodexWorkspace';
 import { AuthGate } from '../components/AuthGate';
+import { ToastProvider } from '../components/Toast';
+import { ConfirmProvider } from '../components/Confirm';
 import { consumeTokenFromUrl } from '../lib/auth';
 import { registerServiceWorker } from '../lib/pwa';
 import './styles.css';
@@ -34,7 +36,11 @@ const router = createHashRouter([
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthGate>
-      <RouterProvider router={router} />
+      <ToastProvider>
+        <ConfirmProvider>
+          <RouterProvider router={router} />
+        </ConfirmProvider>
+      </ToastProvider>
     </AuthGate>
   </React.StrictMode>,
 );

@@ -10,6 +10,7 @@ import { html } from '@codemirror/lang-html';
 import { css as cssLang } from '@codemirror/lang-css';
 import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
+import { useTheme } from '../lib/theme';
 
 function langFor(name: string): Extension[] {
   const ext = name.toLowerCase().split('.').pop() || '';
@@ -34,12 +35,15 @@ export default function CodeEditor({
   value: string;
   onChange: (v: string) => void;
 }) {
+  // Follow the app-wide theme: dark → oneDark; light → 'light' (built-in
+  // CodeMirror light preset via the `theme` prop's string form).
+  const { resolved } = useTheme();
   return (
     <CodeMirror
       value={value}
       onChange={onChange}
       extensions={langFor(path)}
-      theme={oneDark}
+      theme={resolved === 'dark' ? oneDark : 'light'}
       height="100%"
       style={{ height: '100%' }}
       basicSetup={{ lineNumbers: true, highlightActiveLine: true }}

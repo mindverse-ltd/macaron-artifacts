@@ -783,6 +783,43 @@ test('real structure() round-23: whole-chunk/compact generics, intro/nested flow
   assert.ok((await hits(single, 'singlebody23')) > 0 && (await hits(single, 'prefix')) > 0, 'single-close body/prefix lost');
 });
 
+// EVE round 24 — the flow-vs-generic decision is now BIDIRECTIONAL (a same-name generic INSIDE an open
+// same-name flow is in-body content, never flow), and the cross-chunk opener strip boundary comes from the
+// opener's OWN scan (never the whole chunk's `lastIndexOf('>')`, which ate honest intro containing a `>`).
+// Each case drives the real structure() → buildIndex() → Orama chain with EVE's exact round-23 reals.
+test('real structure() round-24: bidirectional generic classification, opener-local strip boundary', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r24', data: { title: '/r24', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // P1 #1 — a generic-shaped FLOW opener (`prefix<$Panel extends FLOWATTR23>INTROKEEP23`) with NO same-name
+  // flow already open must pair by its real later closer: its opener markup drops but the intro survives.
+  const flowattr = 'prefix<$Panel extends FLOWATTR23>INTROKEEP23\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(flowattr, 'INTROKEEP23')) > 0 && (await hits(flowattr, 'prefix')) > 0, 'generic-shaped flow intro lost');
+  assert.equal(await hits(flowattr, 'Panel'), 0, 'generic-shaped flow opener markup leaked');
+
+  // P1 #2 — the SAME classifier, reversed: a same-name generic (`type Box<$Panel extends IDENTGEN23>`) or a
+  // chunk-start unclosed compact generic (`<$Panel remains STARTCOMPACT23`) INSIDE an open same-name flow is
+  // in-body technical prose — the outer closer must not pair it off, so the needle survives.
+  const identgen = '<$Panel attr="x">\n\n## H\n\nHere type Box<$Panel extends IDENTGEN23> is technical prose.\n\n</$Panel>';
+  assert.ok((await hits(identgen, 'IDENTGEN23')) > 0, 'same-name in-body generic wrongly deleted by outer closer');
+  const startcompact = '<$Panel attr="x">\n\n## H\n\n<$Panel remains STARTCOMPACT23\n\n</$Panel>';
+  assert.ok((await hits(startcompact, 'STARTCOMPACT23')) > 0, 'chunk-start unclosed in-body generic wrongly stripped');
+
+  // P1 #3 — the cross-chunk opener strip boundary must come from the opener's own scan, NOT the whole chunk's
+  // `lastIndexOf('>')`. A paired opener whose visible intro carries an honest comparison (`arr[i]>0`) or a
+  // code span (`` `arr[i]}>0` ``) keeps that intro; a single-close LOSSY opener still strips, needle out.
+  const cmp = '<$Panel>LEFT arr[i]>0 RIGHT\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(cmp, 'LEFT')) > 0 && (await hits(cmp, 'RIGHT')) > 0, 'paired-opener comparison intro lost to lastIndexOf strip');
+  const codespan = '<$Panel>LEFT `arr[i]}>0` RIGHT\n\n## H\n\nbody\n\n</$Panel>';
+  assert.ok((await hits(codespan, 'LEFT')) > 0 && (await hits(codespan, 'arr')) > 0 && (await hits(codespan, 'RIGHT')) > 0, 'paired-opener code-span intro lost to lastIndexOf strip');
+  const single = 'prefix<$Panel value={fn("a \\" } > SINGLELEAK24", x)}>\n\n## H\n\nsinglebody24\n\n</$Panel>';
+  assert.equal(await hits(single, 'SINGLELEAK24'), 0, 'single-close lossy attribute leaked into Orama');
+  assert.ok((await hits(single, 'singlebody24')) > 0 && (await hits(single, 'prefix')) > 0, 'single-close body/prefix lost');
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

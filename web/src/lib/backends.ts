@@ -43,13 +43,21 @@ function write(key: string, value: unknown): boolean {
   try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; /* private mode / quota */ }
 }
 
+// In-memory authoritative copy of the backend list. localStorage writes can fail
+// (private mode / quota), so we can't re-read the list from storage every call —
+// a failed clearToken() would keep reading back the stale persisted token. This
+// cache is the source of truth for the session; storage is best-effort mirror.
+let cache: Backend[] | null = null;
+
 // Load the backend list, seeding + migrating on first run. Always returns at
 // least the built-in LOCAL backend, and guarantees LOCAL is present even if a
 // stored list somehow dropped it.
 export function loadBackends(): Backend[] {
+  if (cache) return cache;
   const stored = read<Backend[]>(BACKENDS_KEY);
   if (stored && Array.isArray(stored) && stored.length > 0) {
-    return stored.some((b) => b.id === LOCAL_BACKEND_ID) ? stored : [localDefault(), ...stored];
+    cache = stored.some((b) => b.id === LOCAL_BACKEND_ID) ? stored : [localDefault(), ...stored];
+    return cache;
   }
   // First run on a multi-backend build: fold any legacy single token into the
   // local backend so a remembered share-link/tunnel token keeps working. Only
@@ -65,11 +73,22 @@ export function loadBackends(): Backend[] {
   if (write(BACKENDS_KEY, seeded) && legacy) {
     try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
   }
-  return seeded;
+  cache = seeded;
+  return cache;
 }
 
+// Update the in-memory source of truth first, then best-effort mirror to
+// storage. The cache update is what makes an explicit / 401 clear stick even
+// when the write fails.
 export function saveBackends(list: Backend[]): void {
+  cache = list;
   write(BACKENDS_KEY, list);
+}
+
+// Test-only: drop the in-memory cache so the next loadBackends() re-reads
+// storage, simulating a fresh page load / new session. Never called in prod.
+export function __resetForTests(): void {
+  cache = null;
 }
 
 export function getActiveBackendId(): string {

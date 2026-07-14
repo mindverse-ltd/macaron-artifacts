@@ -18,11 +18,14 @@ function installLocalStorage(seed: Record<string, string> = {}): { failWrites: b
   return ctl;
 }
 
-// Fresh module state per test: node caches ESM, so bust the query string.
+// auth.ts imports backends.ts internally, so both must resolve to the SAME
+// module instance for the in-memory cache to be shared (as it is in the browser).
+// Import without a query string and reset the cache per test instead of busting
+// the ESM cache — that reset simulates a fresh page load.
 async function freshModules() {
-  const suffix = `?t=${test.name}-${Math.random()}`;
-  const backends = await import('../src/lib/backends.ts' + suffix);
-  const auth = await import('../src/lib/auth.ts' + suffix);
+  const backends = await import('../src/lib/backends.ts');
+  const auth = await import('../src/lib/auth.ts');
+  backends.__resetForTests();
   return { backends, auth };
 }
 
@@ -56,8 +59,9 @@ test('cleared token stays cleared even if the backend list is reset', async () =
   const { backends, auth } = await freshModules();
   auth.clearToken();
   assert.equal(auth.getToken(), '');
-  // Simulate the backend list being wiped (e.g. a storage reset / new build):
+  // Simulate the backend list being wiped AND the page reloaded (cache dropped):
   localStorage.removeItem('macaron_backends');
+  backends.__resetForTests();
   // Re-seeding must NOT resurrect the legacy token.
   assert.equal(backends.getActiveBackend().token, undefined);
   assert.equal(auth.getToken(), '');
@@ -71,8 +75,10 @@ test('failed persistence keeps the legacy key so the next load retries migration
   // the legacy key when the seeded list couldn't be persisted.
   assert.equal(auth.getToken(), 'legacy-abc');
   assert.equal(localStorage.getItem('macaron_auth_token'), 'legacy-abc');
-  // Storage recovers → the next load completes the migration and removes the key.
+  // Storage recovers, and a fresh page load (cache reset) re-reads storage → the
+  // migration completes and the legacy key is removed.
   ls.failWrites = false;
+  backends.__resetForTests();
   assert.equal(backends.getActiveBackend().token, 'legacy-abc');
   assert.equal(localStorage.getItem('macaron_auth_token'), null);
 });
@@ -86,10 +92,34 @@ test('explicit clear during a write failure still invalidates the legacy source'
   ls.failWrites = true;           // registry can't persist...
   auth.clearToken();              // ...but the user explicitly clears
   assert.equal(localStorage.getItem('macaron_auth_token'), null);
-  // Storage recovers and the backend list is re-seeded: token stays cleared.
+  // Storage recovers and the page reloads: token stays cleared, not re-migrated.
   ls.failWrites = false;
   localStorage.removeItem('macaron_backends');
+  backends.__resetForTests();
   assert.equal(backends.getActiveBackend().token, undefined);
+  assert.equal(auth.getToken(), '');
+});
+
+test('persisted registry → fail writes → clear → recover: clear sticks immediately and persists', async () => {
+  // The token lives in an already-persisted registry (no legacy key involved).
+  // A clear during a write-failure window must take effect for the rest of the
+  // session (in-memory authoritative), and once storage recovers the cleared
+  // state must persist across a reload rather than reading back the old token.
+  const persisted = JSON.stringify([{ id: 'local', label: 'Local', baseUrl: '', token: 'persisted-tok' }]);
+  const ls = installLocalStorage({ macaron_backends: persisted });
+  const { backends, auth } = await freshModules();
+  assert.equal(auth.getToken(), 'persisted-tok');
+
+  ls.failWrites = true;      // storage goes read-only...
+  auth.clearToken();         // ...user (or a 401) clears the token
+  // Immediately effective this session despite the failed write — NOT read back
+  // from the still-stale persisted registry.
+  assert.equal(auth.getToken(), '');
+  assert.equal(backends.getActiveBackend().token, undefined);
+
+  ls.failWrites = false;     // storage recovers
+  auth.clearToken();         // a subsequent clear now persists
+  backends.__resetForTests();  // simulate a reload: re-read from storage
   assert.equal(auth.getToken(), '');
 });
 

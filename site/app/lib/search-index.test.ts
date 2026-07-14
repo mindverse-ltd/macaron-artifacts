@@ -133,6 +133,25 @@ test('real structure() split chunks: escaped quotes, generic defaults, OOB entit
   assert.ok(!spread.some((t) => /SPREADATTRNEEDLE|<Panel|\.\.\./.test(t)), `spread opener residue leaked: ${JSON.stringify(spread)}`);
   assert.ok(spread.includes('bodytext'), 'spread component body must survive');
 
+  // A spread attribute with whitespace inside the braces (`{ ...x }`) is still a
+  // spread — the residue must be stripped, not left searchable.
+  const spreadWs = clean('<Panel { ...SPREADSPACENEEDLE }>\n\n## H\n\nspacebody\n\n</Panel>');
+  assert.ok(!spreadWs.some((t) => /SPREADSPACENEEDLE|<Panel|\.\.\./.test(t)), `whitespace-spread residue leaked: ${JSON.stringify(spreadWs)}`);
+  assert.ok(spreadWs.includes('spacebody'), 'whitespace-spread body must survive');
+
+  // A JSX prop literally NAMED `extends` must still strip as a component (its `={…}`
+  // is a real attribute), NOT be mistaken for a generic `extends` constraint.
+  const extendsProp = clean('<Panel extends={["EXTENDSATTRNEEDLE", "x"]}>\n\n## H\n\nextbody\n\n</Panel>');
+  assert.ok(!extendsProp.some((t) => /EXTENDSATTRNEEDLE|<Panel|extends=/.test(t)), `extends-prop opener leaked: ${JSON.stringify(extendsProp)}`);
+  assert.ok(extendsProp.includes('extbody'), 'extends-prop body must survive');
+
+  // TypeScript type-param modifiers (`const` / `out` / `in`) with a default type: the
+  // modifier sits between `<` and the param name, so the `=` is still a default, not a
+  // JSX attribute — the whole generic must survive verbatim and stay searchable.
+  assert.deepEqual(clean('function f\\<const T = "CONSTDEFAULTNEEDLE">() keeps CONSTPROSEKEEP'), ['function f<const T = "CONSTDEFAULTNEEDLE">() keeps CONSTPROSEKEEP']);
+  assert.deepEqual(clean('type Producer\\<out T = "OUTDEFAULTNEEDLE"> keeps OUTPROSEKEEP'), ['type Producer<out T = "OUTDEFAULTNEEDLE"> keeps OUTPROSEKEEP']);
+  assert.deepEqual(clean('type Consumer\\<in T = "INDEFAULTNEEDLE"> keeps INPROSEKEEP'), ['type Consumer<in T = "INDEFAULTNEEDLE"> keeps INPROSEKEEP']);
+
   // An out-of-range numeric entity is not a real code point: String.fromCodePoint
   // would throw and abort the index build, so it must be kept as literal text.
   assert.deepEqual(clean('literal \\&#9999999999; KEEP'), ['literal &#9999999999; KEEP']);

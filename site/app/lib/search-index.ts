@@ -104,7 +104,7 @@ function scanTag(text: string, i: number): Tag | null {
   let j = nameAt, nl: number;
   while ((nl = nameLen(NAME_CONT, text, j)) > 0) j += nl;
   const name = deEscape(text.slice(nameAt, j));
-  let quote = '', brace = 0, closed = false, selfClose = false, k = j;
+  let quote = '', brace = 0, closed = false, selfClose = false, k = j, prevSig = '';
   while (k < text.length) {
     const ch = text[k];
     if (quote) {
@@ -112,16 +112,28 @@ function scanTag(text: string, i: number): Tag | null {
       if (ch === quote) quote = '';
       k++; continue;
     }
+    // Inside a `{…}` expression, a `/` starts a comment or (when not a division operator) a regex
+    // literal whose body can hold literal `}` / `>` (`pattern=\{/\[}>]/}`). Skip those runs so their
+    // punctuation can't be mistaken for the expression/tag close — structure() preserves the `{…}`
+    // intact, so this stays deterministic. A `/` after an operand (ident / `)` / `]`) is division.
+    if (brace > 0 && ch === '/' && text[k + 1] === '*') { const e = text.indexOf('*/', k + 2); k = e === -1 ? text.length : e + 2; continue; }
+    if (brace > 0 && ch === '/' && text[k + 1] === '/') { const e = text.indexOf('\n', k + 2); k = e === -1 ? text.length : e; continue; }
+    if (brace > 0 && ch === '/' && !/[\w$)\]]/.test(prevSig)) {
+      let m = k + 1, cls = false;
+      for (; m < text.length; m++) { const r = text[m]; if (r === '\\') { m++; continue; } if (r === '[') cls = true; else if (r === ']') cls = false; else if (r === '/' && !cls) break; }
+      k = m + 1; prevSig = '/'; continue;
+    }
     if (ch === '\\' && /[<>{}[\]]/.test(text[k + 1] ?? '')) { // structure()'s markdown-escaped punctuation
       const p = text[k + 1];
       if (p === '{') brace++; else if (p === '}' && brace > 0) brace--;
-      k += 2; continue;
+      k += 2; prevSig = p; continue;
     }
     if (ch === '"' || ch === "'" || ch === '`') quote = ch;
     else if (ch === '{') brace++;
     else if (ch === '}' && brace > 0) brace--;
     else if (ch === '/' && !brace && text[k + 1] === '>') selfClose = true;
     else if (ch === '>' && !brace) { k++; closed = true; break; }
+    if (!/\s/.test(ch)) prevSig = ch;
     k++;
   }
   return { esc, lt, closing, name, nameEnd: j, end: k, selfClose, closed };
@@ -155,9 +167,19 @@ export function pairResidues(chunks: string[]): Set<string> {
       if (!tag) { i++; continue; }
       if (!tag.selfClose) {
         if (tag.closing) {
-          let popped = false;
-          for (let s = local.length - 1; s >= 0; s--) if (local[s].name === tag.name) { paired.add(local[s].key); paired.add(`${ci}:${tag.lt}`); local.length = s; popped = true; break; }
-          if (!popped) for (let s = global.length - 1; s >= 0; s--) if (global[s].name === tag.name) { paired.add(global[s].key); paired.add(`${ci}:${tag.lt}`); global.length = s; break; }
+          // A closer pops the nearest same-name opener, but PREFERS a DEFINITE one over a
+          // tentative generic-shaped opener: a definite flow is guaranteed to have a closer, a
+          // generic never is, so a lone closer belongs to the real flow even when a standalone
+          // technical generic sits nearer (EVE's `STANDALONEKEEP25`: the outer closer pops the
+          // definite outer, the generic stays unpaired → kept). With balanced closers this still
+          // resolves true nesting — the inner closer finds no definite nearer than the inner one.
+          const pop = (stack: { name: string; key: string; definite: boolean }[]) => {
+            let idx = -1;
+            for (let s = stack.length - 1; s >= 0; s--) if (stack[s].name === tag.name) { if (stack[s].definite) { idx = s; break; } if (idx === -1) idx = s; }
+            if (idx === -1) return false;
+            paired.add(stack[idx].key); paired.add(`${ci}:${tag.lt}`); stack.splice(idx, 1); return true;
+          };
+          pop(local) || pop(global);
         } else {
           // Classify a leftover opener as one of: DEFINITE flow (a real component — bare `\<$Panel>` or
           // attr'd `\<$Panel a="1">`), a TENTATIVE flow (a generic-SHAPED opener `\<$Panel extends X>` when
@@ -261,12 +283,32 @@ function stripComponentResidue(text: string, chunkIndex: number, paired: Set<str
       // span. A code span CAN hold a literal `]}>` (`` `arr[i]}>0` ``), so the scan SKIPS code spans —
       // a leaked attribute close is never inside one. Absent a double-close-glued-`>`, `k` is the real
       // tag end (clean opener) and the visible intro after it survives.
+      // ONLY an opener that actually carried attributes could have leaked a real attribute close
+      // past a FAKE early `>`. A BARE opener (`\<$Panel>`, nothing between the name and `>`) landed
+      // on its TRUE `>` at `k`, so its visible body may legitimately contain a `]}>` (an honest MDX
+      // expression `\{arr\[i]}>0`) — scanning past `k` there would eat honest intro. Gate the
+      // double-close hunt on the opener being attributed (its `nameEnd..>` span is non-empty).
+      const attributed = deEscape(text.slice(tag.nameEnd, closed ? k - 1 : k)).trim() !== '';
+      // A dropped string-quote backslash (`title="a \" > X"` → `title="a " > X"`) desyncs scanTag's
+      // quote state: it closes the string at the FAKE inner `"`, stops at the `>` inside, and leaks the
+      // attribute tail `X">` past `k` with the string's REAL close quote GLUED to the true tag `>`.
+      // A `">` / `'>` (quote glued to `>`) is the real tag end WHEN the running count of unescaped
+      // quotes from `nameEnd` to that quote is ODD — i.e. that quote closes a dangling string opened by
+      // the dropped-backslash desync. An honest intro's quotes are balanced, so the parity there is even
+      // at any glued `">` and this never fires. Counted incrementally so parity reflects position.
       let gc = -1;
-      for (let m = k; m < text.length; ) {
-        if (text[m] === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs; continue; } }
-        const mm = /^[)\]}]{2}\s*>/.exec(text.slice(m));
-        if (mm) { gc = m + mm[0].length; break; }
-        m++;
+      if (attributed) {
+        const quotes = deEscape(text.slice(tag.nameEnd, k)).match(/["']/g)?.length ?? 0;
+        let parity = quotes % 2; // quote parity already consumed inside the opener span
+        for (let m = k; m < text.length; ) {
+          if (text[m] === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs; continue; } }
+          const dbl = /^[)\]}]{2}\s*>/.exec(text.slice(m));
+          if (dbl) { gc = m + dbl[0].length; break; }
+          const ch = text[m];
+          if (ch === '\\') { m += 2; continue; }
+          if ((ch === '"' || ch === "'")) { if (parity === 0 && /^["']\s*>/.test(text.slice(m))) { gc = m + /^["']\s*>/.exec(text.slice(m))![0].length; break; } parity ^= 1; }
+          m++;
+        }
       }
       out += ' '; i = gc === -1 ? k : gc;
       continue;

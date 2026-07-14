@@ -864,6 +864,52 @@ test('real structure() round-25: real-hierarchy pairing, opener-local lossy boun
   assert.ok((await hits(commentAttr, 'LEFT25')) > 0 && (await hits(commentAttr, 'arr')) > 0 && (await hits(commentAttr, 'RIGHT25')) > 0, 'comment-attr opener misjudged lossy, intro eaten');
 });
 
+// EVE round 26 — the full chunk sequence decides an ambiguous same-name opener's role: a lone outer
+// closer prefers the DEFINITE flow over a nearer standalone technical generic (so the generic survives),
+// while balanced closers still pair a real generic-shaped NESTED flow. The lossy strip stays opener-local
+// and lexical-safe: a clean bare opener never runs the double-close hunt (its honest MDX-expression intro
+// `{arr[i]}>0` survives); a leaked string attribute (dropped `\"`) is cut at its dangling `">`; and a
+// regex `/[}>]/` or comment `/* } > */` inside an honest `{…}` attribute is lexed, not miscounted.
+test('real structure() round-26: hierarchy role, opener-local lossy boundary, lexical-safe scan', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r26', data: { title: '/r26', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // P1 #1 — a STANDALONE same-name technical generic inside a DEFINITE outer flow (one outer closer) is
+  // in-body prose: the lone closer pops the definite outer, the generic stays unpaired → kept. The exact
+  // reverse of the NESTED case below, which is byte-identical but has a SECOND closer.
+  const standalone = '<$Panel a="1">HEAD body\n\n## H\n\n<$Panel extends STANDALONEKEEP25>\n\n## H2\n\ntail\n\n</$Panel>';
+  assert.ok((await hits(standalone, 'STANDALONEKEEP25')) > 0, 'standalone in-body generic wrongly deleted by outer closer');
+  const nested = '<$Panel a="1">\n\ntop\n\n<$Panel extends INNERATTR25>\n\n## H\n\ninner\n\n</$Panel>\n\nmid\n\n</$Panel>';
+  assert.ok((await hits(nested, 'top')) > 0 && (await hits(nested, 'inner')) > 0 && (await hits(nested, 'mid')) > 0, 'nested-flow body lost');
+  assert.equal(await hits(nested, 'INNERATTR25'), 0, 'nested-flow inner opener attribute leaked');
+
+  // P1 #2 — a CLEAN bare opener whose visible intro carries an honest MDX expression (`{arr[i]}>0`, whose
+  // literal `]}>` a lossy scan would mistake for a leaked attribute close) keeps that intro intact.
+  const mdxExpr = 'pre<$Panel>LEFTEXPR25 {arr[i]}>0 RIGHTEXPR25\n\n## H\n\ntail\n\n</$Panel>';
+  assert.ok((await hits(mdxExpr, 'LEFTEXPR25')) > 0 && (await hits(mdxExpr, 'RIGHTEXPR25')) > 0, 'clean-opener MDX-expression intro eaten by double-close hunt');
+
+  // P1 #3 — a leaked STRING attribute (structure() dropped its `\"`, so scanTag desyncs and stops at a
+  // fake `>` inside the string) is cut at its dangling `">`, needle gone; an honest quoted/apostrophe
+  // intro after a balanced opener is NOT misfired (its quotes are balanced at every glued `">`).
+  const strAttr = '<$Panel title="a \\" > STRINGATTR25">LEFTSTR body\n\n## H\n\ntail\n\n</$Panel>';
+  assert.equal(await hits(strAttr, 'STRINGATTR25'), 0, 'leaked string attribute survived past its dangling close');
+  assert.ok((await hits(strAttr, 'LEFTSTR')) > 0, 'string-attr visible body lost');
+  const honestQuote = '<$Panel a="1">He said "hi there" LEFTQ arr[i]>0 RIGHTQ\n\n## H\n\ntail\n\n</$Panel>';
+  assert.ok((await hits(honestQuote, 'LEFTQ')) > 0 && (await hits(honestQuote, 'RIGHTQ')) > 0, 'honest quoted intro misfired the dangling-close cut');
+
+  // P1 #4 — a regex `/[}>]/` or comment `/* } > */` inside an honest `{…}` attribute holds literal
+  // `}` / `>` that scanTag must lex (not count), so the attribute markup drops and the body survives.
+  const regexAttr = 'pre<$Panel pattern={/[}>]REGEXATTR25/}>BODYREGEX intro\n\n## H\n\ntail\n\n</$Panel>';
+  assert.equal(await hits(regexAttr, 'REGEXATTR25'), 0, 'regex-attr markup leaked (brace/gt miscounted)');
+  assert.ok((await hits(regexAttr, 'BODYREGEX')) > 0, 'regex-attr body lost');
+  const commentAttr = 'pre<$Panel x={/* } > COMMENTATTR25 */ 1}>BODYCOMMENT intro\n\n## H\n\ntail\n\n</$Panel>';
+  assert.equal(await hits(commentAttr, 'COMMENTATTR25'), 0, 'comment-attr markup leaked (brace/gt miscounted)');
+  assert.ok((await hits(commentAttr, 'BODYCOMMENT')) > 0, 'comment-attr body lost');
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

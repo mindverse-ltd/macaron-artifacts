@@ -147,21 +147,22 @@ export function pairResidues(chunks: string[]): Set<string> {
       // a type-argument (`factory()\<Name>()`), a constrained generic (`\<Name extends …>`), a
       // comparison (`a\<Name`) or a nested first-param (`\<Name\<U>>`). Pushing such a same-named
       // in-body generic lets the outer `</Name>` pop IT instead of the real opener, deleting the
-      // generic and leaking the outer markup. A glued escaped opener is an IN-BODY GENERIC — never
-      // stacked — when its own tag body parses as valid TypeScript AND is UNAMBIGUOUSLY a generic:
-      // it carries a generic-only token a bare JSX opener can't (`extends`/`=`/`,`/whitespace-separated
-      // content or a nested `<`, e.g. `\<Name extends C>`, `\<Name = D>`, `\<Name, U>`, `\<Name && b`).
-      // This is a SYNTACTIC-ROLE test on the opener's OWN body only, so a following real same-name
-      // inline component's closer never drags a multi-token generic onto the stack (a non-nested
-      // generic + later real inline must both survive). A BARE `\<Name>` body (just the name, valid TS
-      // but shape-identical to a real inline opener `\<Panel>body\</Panel>`) is genuinely ambiguous, so
-      // it IS stacked and the positional stack resolves it by real nesting — a `</Name>` pops the
-      // NEAREST open `<Name>` (the real inline), leaving an unpaired bare generic that stays as prose.
-      // A real attributed component opener (`\<Panel title="x">`) is not valid TS, so it always stacks.
-      // A CLOSING tag is never a generic, so it must always pair (else a glued `\</$Panel>` never pops).
+      // generic and leaking the outer markup.
+      // A glued escaped opener is an IN-BODY GENERIC — never
+      // stacked — when its own tag body parses as valid TypeScript AND either (a) it carries a NESTED
+      // `<` type-argument (`$Panel<U>`), an unambiguous generic tell a JSX opener's name can never hold,
+      // so it is exempt even when a later same-name closer exists; or (b) it has NO matching same-name
+      // closer LATER in this chunk (code-span-aware). The closer probe distinguishes the two otherwise-
+      // ambiguous shapes: a real inline component (`prefix\<$Panel extends X>body\</$Panel>suffix`, whose
+      // `extends`-shaped prop parses as TS) DOES have a later closer → NOT exempt → stacks and its own
+      // closer pops it. A generic that PRECEDES a real same-name inline (`\<$G>() then \<$G>x\</$G>`) also
+      // has a later closer → stacks, and positional nearest-pop hands that closer to the INNER real
+      // opener, leaving the leading generic unpaired (kept). Hierarchy + real syntax decide it, not body
+      // shape alone. A CLOSING tag is never a generic, so it must always pair (else a glued `\</$Panel>` never pops).
       const glued = text.slice(0, tag.esc ? tag.lt - 1 : tag.lt).trim() !== '';
       const openerBody = text.slice(tag.lt + 1, tag.closed ? tag.end - 1 : tag.end).replace(/\/\s*$/, '');
-      const inBodyGeneric = glued && tag.esc && !tag.closing && /[\s,=<]/.test(deEscape(openerBody).trim()) && isTsGeneric(openerBody);
+      const nestedArg = /^\S+</.test(deEscape(openerBody).trim());
+      const inBodyGeneric = glued && tag.esc && !tag.closing && isTsGeneric(openerBody) && (nestedArg || !hasCloserLater(text, tag.closed ? tag.end : tag.nameEnd, tag.name));
       if (!tag.selfClose && !inBodyGeneric) {
         if (tag.closing) { for (let s = stack.length - 1; s >= 0; s--) if (stack[s].name === tag.name) { paired.add(stack[s].key); paired.add(`${ci}:${tag.lt}`); stack.length = s; break; } }
         else stack.push({ name: tag.name, key: `${ci}:${tag.lt}` });
@@ -228,8 +229,7 @@ function stripComponentResidue(text: string, chunkIndex: number, paired: Set<str
     //       this signature is unambiguous leaked opener serialization, not visible prose.
     // On a confirmed-lossy opener, re-anchor to the LAST `>` before the closer and strip directly (the
     // mangled residue is ungrammatical, so grammar classification below would wrongly KEEP it as prose).
-    const attrLeak = /[\]}]{1,2}>/.test(text.slice(k, tag.nameEnd + closerAfter));
-    if (glued && esc && !closing && !selfClose && closerAfter !== -1 && (!closed || bracketDesync(text.slice(tag.nameEnd, k)) || attrLeak)) {
+    if (glued && esc && !closing && !selfClose && closerAfter !== -1 && (!closed || bracketDesync(text.slice(tag.nameEnd, k)))) {
       const gt = text.lastIndexOf('>', tag.nameEnd + closerAfter);
       if (gt > tag.nameEnd) { out += ' '; i = gt + 1; continue; }
     }
@@ -357,6 +357,25 @@ function codeSpanEnd(text: string, i: number): number {
 function rawCloserRe(name: string): RegExp {
   const body = [...name].map((c) => '\\\\?' + c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
   return new RegExp(`</${body}\\s*>`);
+}
+
+// Does a matching `</Name>` closer appear later in this chunk, OUTSIDE any code span? This is the
+// hierarchy signal that decides whether a glued TS-parsable opener is an in-body generic (no closer
+// of its own → exempt from the pairing stack) or a real inline component / a generic preceding a real
+// same-name inline (has a later closer → stacks, so positional nearest-pop resolves it correctly).
+// The code-span skip matters: a `` `</Name>` `` inside prose is literal text, not a real closer.
+function hasCloserLater(text: string, from: number, name: string): boolean {
+  const re = rawCloserRe(name);
+  for (let j = from; j < text.length; ) {
+    if (text[j] === '`') { const cs = codeSpanEnd(text, j); if (cs !== -1) { j = cs; continue; } }
+    const m = re.exec(text.slice(j));
+    if (!m) return false;
+    const at = j + m.index;
+    let spanned = false; // the found closer might sit inside a code span between j and at
+    for (let s = j; s < at; ) { if (text[s] === '`') { const cs = codeSpanEnd(text, s); if (cs > at) { spanned = true; j = cs; break; } if (cs !== -1) { s = cs; continue; } } s++; }
+    if (!spanned) return true;
+  }
+  return false;
 }
 
 // Is the OPENER'S OWN attribute span (what scanTag consumed between the tag name and its landing

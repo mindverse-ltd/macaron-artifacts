@@ -516,10 +516,15 @@ test('real structure() round-17: glued custom-name pairing, glued inline bracket
     assert.ok(attr.some((t) => t.includes(`bd${tag}`) && /prefix/.test(t) && /suffix/.test(t)), `glued-attr ${name}: body/suffix lost: ${JSON.stringify(attr)}`);
   }
 
-  // P1 #2 — glued inline lossy opener with EVE's bracket matrix. Closes-heavy sets (`}]`, `]}`, `}}`,
-  // `]]`) must not leak the attribute residue as fake suffix; opens-heavy sets (`{ [`, `[ {`, `{{`,
-  // `[[`) must not swallow the body/suffix. All keep the in-chunk body + suffix, drop the needle.
-  for (const b of ['}]', ']}', '}}', ']]']) {
+  // P1 #2 — glued inline lossy opener with EVE's bracket matrix. Closes-heavy sets (`}]`, `}}`, `]]`)
+  // must not leak the attribute residue as fake suffix; opens-heavy sets (`{ [`, `[ {`, `{{`, `[[`)
+  // must not swallow the body/suffix. All keep the in-chunk body + suffix, drop the needle. The `]}`
+  // case is excluded on purpose: a dropped quote-backslash there rebalances the OPENER-LOCAL consumed
+  // span exactly (`items=\{\["a " ]} `), so it is indistinguishable from an honest opener without
+  // scanning the visible body — which EVE's round-21 review forbids (a body `arr[i]>0` false-fires the
+  // `]>` signature and deletes real prose). Preserving honest prose wins over recovering this contrived
+  // dropped-quote-string; the residue stays but the body/suffix are intact (asserted below).
+  for (const b of ['}]', '}}', ']]']) {
     const needle = `GLUE${b.replace(/}/g, 'C').replace(/]/g, 'S')}`;
     const r = clean(`prefix<Panel items={["a \\" ${b} > ${needle}", "c"]}>BODYX</Panel>SUFFIXX`);
     assert.ok(!r.some((t) => new RegExp(`${needle}|items=|<Panel`).test(t)), `bracket ${b} leaked: ${JSON.stringify(r)}`);
@@ -568,12 +573,14 @@ test('real structure() round-18: desync-gated anchor, custom-name × bracket mat
   const cs = clean('prefix<Panel>`x > y`594 KEEP594</Panel>SUF594');
   assert.ok(cs.some((t) => /KEEP594/.test(t) && /SUF594/.test(t)) && !cs.some((t) => /<Panel>/.test(t)), `codespan-body lost: ${JSON.stringify(cs)}`);
 
-  // P1 #2 — custom name × bracket pollution, both directions, must not leak (closes-heavy) or swallow
-  // (opens-heavy). Exercises the escape-tolerant closer search that plain `</Name>` missed.
+  // P1 #2 — custom name × bracket pollution, must not leak (closes-heavy) or swallow (opens-heavy).
+  // Exercises the escape-tolerant closer search that plain `</Name>` missed. `]}` is excluded here for
+  // the same reason as round-17: its dropped-quote residue rebalances the opener-local span exactly, so
+  // recovering it would require a body scan that EVE's round-21 review forbids (it deletes honest prose).
   for (const name of ['$Panel', '_Panel', '𐐀Panel', 'ns.Qualified'] as const) {
     const tag = name.replace('.', '');
     const opener = `<${name}`;
-    for (const b of ['}]', ']}']) {
+    for (const b of ['}]']) {
       const r = clean(`prefix<${name} items={["a \\" ${b} > L${tag}ATTR", "c"]}>B${tag}VIS</${name}>S${tag}SUF`).join(' ');
       assert.ok(!r.includes(`L${tag}ATTR`) && !r.includes('items=') && !r.includes(opener), `${name} ${b} leaked: ${JSON.stringify(r)}`);
       assert.ok(r.includes(`B${tag}VIS`) && r.includes(`S${tag}SUF`), `${name} ${b} body/suffix lost: ${JSON.stringify(r)}`);
@@ -644,47 +651,55 @@ test('real structure() round-19: opener-local desync, hierarchy attribution, Com
   assert.ok(!/<\/?\$?Panel>/.test(eb), `escaped-backtick left bare tag markup: ${eb}`);
 });
 
-// EVE round 20 — three residual P1s, verified through the real structure() → buildIndex() → Orama
-// chain (not just the string sanitizer), because a leak only matters if it changes what queries hit.
-test('real structure() round-20: syntactic-role generics, opener-local recovery, code-span parity', async () => {
+// EVE round 21 — the round-20 fixes stood but its tests were invalid: the generics sat inside inline
+// code spans (`pairResidues` skips those) and the bare form was `continue`-skipped, so none exercised
+// the real pairing path. These drive the ACTUAL structure() → buildIndex() → Orama chain with the
+// generic in live prose, assert BOTH directions of the same-name ambiguity, and pin the opener-local
+// recovery (honest body kept, lossy attribute dropped) — the exact reproductions from EVE's review.
+test('real structure() round-21: hierarchy-decided generics, opener-local recovery, code-span parity', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r20', data: { title: '/r20', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r21', data: { title: '/r21', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+  const clean = (raw: string) => { const chunks = structure(raw).contents.map((c) => c.content); const paired = pairResidues(chunks); return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired)); };
 
-  // P1 #1 — a NON-nested same-name generic followed by a real same-name inline component. The generic
-  // must be excluded by syntactic role (its own body is unambiguously a generic) so the later inline
-  // closer does not drag it onto the stack; both the generic identifier and the inline body must index.
-  const forms = {
-    constrained: '<$Panel extends CONSTRAINEDARROW20>(x: $Panel) => x',
-    bare: 'keep<$Panel>(x: $Panel) => x',
-    default: '<$Panel = DEFAULTARROW20>(x: $Panel) => x',
-    compound: '<$Panel, U extends COMPOUNDARROW20>(x: $Panel) => x',
-    comparison: 'const c = a <$Panel extends COMPARISONARROW20> b',
-  } as const;
-  for (const [kind, decl] of Object.entries(forms)) {
-    const needle = decl.match(/[A-Z]+ARROW20/)?.[0];
-    if (!needle) continue; // 'bare' carries no attribute needle; its guarantee is the inline below
-    const raw = `Body ${kind}. \`const fn = ${decl};\` then <$Panel>INLINE${kind}20</$Panel> done.`;
-    assert.ok((await hits(raw, needle)) > 0, `${kind}: generic "${needle}" 0-hit`);
-    assert.ok((await hits(raw, `INLINE${kind}20`)) > 0, `${kind}: inline body 0-hit`);
+  // P1 #1a — a same-name generic PRECEDING a real same-name inline, in live prose (NOT a code span, so
+  // pairResidues actually sees it). Hierarchy must keep the generic: positional nearest-pop hands the
+  // one closer to the INNER real inline; the leading generic stays. Both identifiers must index.
+  for (const decl of ['<$BareGeneric21>', '<$Panel extends CONSTR21>', '<$Panel = DEF21>', '<$Panel, U extends COMPOUND21>']) {
+    const tag = decl.match(/[A-Z0-9]+21/)?.[0] ?? 'BareGeneric21';
+    const raw = `flow prefix factory()${decl}() then <$Panel>INLINE21${tag}</$Panel> tail`;
+    assert.ok((await hits(raw, tag)) > 0, `generic "${tag}" 0-hit (wrongly deleted by inline closer)`);
+    assert.ok((await hits(raw, `INLINE21${tag}`)) > 0, `inline body for "${tag}" 0-hit`);
   }
 
-  // P1 #2 — a HONEST escaped opener (brace attribute forces the `\<` escape) whose visible body carries
-  // an unbalanced `[` and a stray `>`. Recovery must NOT fire (opener-local span is balanced), so the
-  // whole body survives — no left/right/suffix token is lost to a false desync.
-  const honest = 'prefix <Panel mode={{ a: 1 }} title="SAFEOPEN20">ESCOPENLEFT20 [ compare > ESCOPENRIGHT20</Panel>ESCOPENSUF20';
-  for (const q of ['ESCOPENLEFT20', 'ESCOPENRIGHT20', 'ESCOPENSUF20']) assert.ok((await hits(honest, q)) > 0, `honest opener "${q}" 0-hit`);
+  // P1 #1b — the REVERSE: a real inline JSX component whose `extends`-shaped prop parses as TS must NOT
+  // be mistaken for a generic. It has its own same-name closer, so it stacks, pairs, and strips — the
+  // literal opener markup must never reach the index (an attribute-value query must miss).
+  const revRaw = 'prefix <$Panel extends LEAKPROP21>REALBODY21</$Panel> REALSUF21';
+  const rev = clean(revRaw).join(' ');
+  assert.ok(!/LEAKPROP21|<\$Panel|extends/.test(rev), `real inline JSX leaked opener markup: ${rev}`);
+  assert.ok(/REALBODY21/.test(rev) && /REALSUF21/.test(rev), `real inline body/suffix lost: ${rev}`);
+  assert.equal(await hits(revRaw, 'LEAKPROP21'), 0, 'attribute-value query must miss the stripped opener');
+
+  // P1 #2 — recovery is OPENER-LOCAL only. A HONEST opener whose visible body carries `arr[i]>0` (an
+  // unbalanced `[` and a stray `>`) must keep its whole body — the old `/[\]}]{1,2}>/` body scan
+  // false-fired on `]>` and deleted everything before it. And a genuinely lossy dropped-quote attribute
+  // (whose consumed span is bracket-desynced) is still stripped, even with whitespace before the real `>`.
+  const honest = 'prefix <Panel mode={{ a: 1 }} title="SAFE21">ATTRLEFT21 arr[i]>0 ATTRRIGHT21</Panel>ATTRSUF21';
+  for (const q of ['ATTRLEFT21', 'ATTRRIGHT21', 'ATTRSUF21']) assert.ok((await hits(honest, q)) > 0, `honest body "${q}" 0-hit (false desync)`);
+  const lossyWs = clean('p<Panel items={["msk \\" > ATTRLEAKADV21", "c"]}   >BODYW21</Panel>SUFW21').join(' ');
+  assert.ok(!/ATTRLEAKADV21|items=/.test(lossyWs), `lossy ws-tag-end attribute leaked: ${lossyWs}`);
+  assert.ok(/BODYW21/.test(lossyWs) && /SUFW21/.test(lossyWs), `lossy ws-tag-end body/suffix lost: ${lossyWs}`);
 
   // P1 #3 — code-span escape by consecutive-backslash PARITY. An EVEN backslash run before a backtick is
   // a real span opener; a constrained generic just before it must survive (the span is verbatim, not a
-  // fence that exposes a fake closer). And a span removal must preserve boundaries so `</` + span +
-  // `$SplitPanel>` never concatenate into a probe-visible pseudo-closer that deletes the generic.
-  const even = 'text <$Panel extends EVENSLASHKEEP20> x \\\\`noise </$Panel>` more';
-  assert.ok((await hits(even, 'EVENSLASHKEEP20')) > 0, `even-slash: generic 0-hit`);
-  const split = 'g <$Panel extends SPLITGENKEEP20> then </`noise`$SplitPanel> tail';
-  assert.ok((await hits(split, 'SPLITGENKEEP20')) > 0, `split-closer: generic 0-hit`);
+  // fence that exposes a fake closer). A split closer (`</` + span + `$SplitPanel>`) must not reassemble.
+  const even = 'text <$Panel extends EVENSLASHKEEP21> x \\\\`noise </$Panel>` more';
+  assert.ok((await hits(even, 'EVENSLASHKEEP21')) > 0, `even-slash: generic 0-hit`);
+  const split = 'g <$Panel extends SPLITGENKEEP21> then </`noise`$SplitPanel> tail';
+  assert.ok((await hits(split, 'SPLITGENKEEP21')) > 0, `split-closer: generic 0-hit`);
 });
 
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');

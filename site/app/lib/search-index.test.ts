@@ -993,6 +993,55 @@ test('real structure() round-28: lexical-safe opener span, unified LIFO pairing,
   assert.ok((await hits(od, 'BODYOBJDIV27')) > 0, 'division after } object-literal operand emptied the chunk');
 });
 
+// EVE round 29 — the final review's 4 exact P1s, made non-skippable:
+// (1) the generic-flow budget must have NO encounter-order bias — a leading GLUED technical generic must
+//     not steal the lone surplus closer that belongs to a later STANDALONE real generic-shaped flow (and
+//     vice-versa when the order is reversed).
+// (2) lossyOpenerEnd is OPENER-LOCAL — an honest body `">` / `'>` after a CLEAN attributed opener must
+//     not be mistaken for a leaked close (its span glues `">`, never `" >`).
+// (3) single-quote lossy attributes are recovered exactly like double-quote ones (same-chunk & cross).
+// (4) the lossy forward recovery is regex/comment lexical-safe — a `)}>` / `}>` inside a regex or comment
+//     in the leaked attribute is not a real boundary.
+test('real structure() round-29: budget order-independence, opener-local & quote-consistent lossy recovery', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r29', data: { title: '/r29', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // (1) budget order-independence — a leading glued technical generic must keep (searchable) while the
+  // later standalone real flow claims the lone closer (its markup drops); then the reversed order.
+  const first = 'Technical <$Panel extends STALEFIRST28>.\n\n<$Panel extends REALFLOWATTR28>\n\n## H\n\nBODYKEEP28\n\n</$Panel>';
+  assert.ok((await hits(first, 'STALEFIRST28')) > 0, 'leading glued generic stole the later flow closer (order bias)');
+  assert.equal(await hits(first, 'REALFLOWATTR28'), 0, 'later standalone real flow markup leaked (budget starved)');
+  assert.ok((await hits(first, 'BODYKEEP28')) > 0, 'real flow body lost');
+  const rev = '<$Panel extends REALFLOWATTR28>\n\n## H\n\nBODYKEEP28\n\n</$Panel>\n\nTechnical <$Panel extends STALESECOND28>.';
+  assert.equal(await hits(rev, 'REALFLOWATTR28'), 0, 'leading standalone real flow markup leaked (reversed order)');
+  assert.ok((await hits(rev, 'STALESECOND28')) > 0, 'trailing glued technical generic wrongly deleted (reversed order)');
+
+  // (2) opener-local — a CLEAN attributed opener whose visible body carries an honest `">` must survive.
+  const cross = '<$Panel a="1">LEFTCROSSQ28 text "> RIGHTCROSSQ28\n\n## H\n\ntail\n\n</$Panel>';
+  assert.ok((await hits(cross, 'LEFTCROSSQ28')) > 0 && (await hits(cross, 'RIGHTCROSSQ28')) > 0, 'honest body `">` mistaken for a leaked close');
+
+  // (3) single-quote lossy — same-chunk inline and cross-chunk flow both strip the leaked attribute.
+  const sqSame = "<$Panel title='a \\' > LEAKSQ28'>BODYSQ28</$Panel> suffix";
+  assert.equal(await hits(sqSame, 'LEAKSQ28'), 0, 'single-quote same-chunk lossy attribute leaked');
+  assert.ok((await hits(sqSame, 'BODYSQ28')) > 0, 'single-quote same-chunk body lost');
+  const sqCross = "<$Panel title='a \\' > LEAKSQCROSS28'>\n\n## H\n\nbodySqCross\n\n</$Panel>";
+  assert.equal(await hits(sqCross, 'LEAKSQCROSS28'), 0, 'single-quote cross-chunk lossy attribute leaked');
+  assert.ok((await hits(sqCross, 'bodySqCross')) > 0, 'single-quote cross-chunk body lost');
+
+  // (4) regex/comment lexical-safe forward recovery — a `)}>` inside a regex (and a comment) in the leaked
+  // attribute is not the real boundary; the real `)}>` after it is.
+  const reg = '<$Panel value={fn("a \\" } > LEAKREG28", /[)}>]/.test(REGTAIL28))}>BODYREG28</$Panel> suffix';
+  assert.equal(await hits(reg, 'LEAKREG28'), 0, 'regex-in-attr leaked attribute survived');
+  assert.equal(await hits(reg, 'REGTAIL28'), 0, 'regex body content leaked (miscounted as boundary)');
+  assert.ok((await hits(reg, 'BODYREG28')) > 0, 'regex-case visible body lost');
+  const cmt = '<$Panel value={fn("a \\" } > LEAKCMT28", /* )}> */ 1)}>BODYCMT28</$Panel> suffix';
+  assert.equal(await hits(cmt, 'LEAKCMT28'), 0, 'comment-in-attr leaked attribute survived');
+  assert.ok((await hits(cmt, 'BODYCMT28')) > 0, 'comment-case visible body lost');
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

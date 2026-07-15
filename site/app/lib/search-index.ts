@@ -165,7 +165,12 @@ export function pairResidues(chunks: string[]): Set<string> {
   // byte-identical nested sibling (SAME openers + TWO closers) are indistinguishable by position
   // under pure LIFO — the surplus closer is the only honest signal. So count `closers − nonGeneric
   // openers` per name; only that many generic-shaped openers may stack as flow, the rest stay prose.
-  const closers = new Map<string, number>(), nonGenericOpeners = new Map<string, number>();
+  // When the budget is SCARCE, a STANDALONE generic (own chunk — structure() split a real flow around
+  // a heading) outranks a GLUED one (mid-prose technical generic), regardless of source order — so the
+  // budget reserves one slot per standalone generic and a glued generic only stacks on the surplus
+  // ABOVE that reserve (EVE's STALEFIRST28: a leading glued generic must not steal the lone closer that
+  // belongs to a later standalone real flow).
+  const closers = new Map<string, number>(), nonGenericOpeners = new Map<string, number>(), standaloneGenerics = new Map<string, number>();
   chunks.forEach((text) => {
     let i = 0;
     while (i < text.length) {
@@ -176,13 +181,15 @@ export function pairResidues(chunks: string[]): Set<string> {
         if (tag.closing) closers.set(tag.name, (closers.get(tag.name) ?? 0) + 1);
         else {
           const inner = deEscape(text.slice(tag.lt + 1, tag.closed ? tag.end - 1 : tag.end)).trim();
-          if (!(/[\s,=]/.test(inner) && isTsGeneric(inner))) nonGenericOpeners.set(tag.name, (nonGenericOpeners.get(tag.name) ?? 0) + 1);
+          const isGeneric = /[\s,=]/.test(inner) && isTsGeneric(inner);
+          if (!isGeneric) nonGenericOpeners.set(tag.name, (nonGenericOpeners.get(tag.name) ?? 0) + 1);
+          else if (text.slice(0, tag.esc ? tag.lt - 1 : tag.lt).trim() === '') standaloneGenerics.set(tag.name, (standaloneGenerics.get(tag.name) ?? 0) + 1);
         }
       }
       i = tag.closed ? tag.end : tag.nameEnd;
     }
   });
-  const genericFlowBudget = new Map<string, number>();
+  const genericFlowBudget = new Map<string, number>(), standaloneReserve = new Map(standaloneGenerics);
   for (const [name, c] of closers) genericFlowBudget.set(name, c - (nonGenericOpeners.get(name) ?? 0));
   chunks.forEach((text, ci) => {
     const local: { name: string; key: string; endsChunk: boolean; definite: boolean; generic: boolean }[] = [];
@@ -228,11 +235,13 @@ export function pairResidues(chunks: string[]): Set<string> {
           // generic-shaped nested flow opener.
           const inBody = callGlued || (flowOpen && (glued || !tag.closed || (generic && trailing)));
           const definite = !generic && !glued && (tag.closed || lossy); // bare/attr'd real component, not generic-shaped
-          // A STANDALONE generic-shaped opener stacks as flow only while a same-name closer remains
-          // surplus (see genericFlowBudget) — otherwise it is a lone technical generic (no closer of
-          // its own) and stays prose so a real component's closer isn't stolen by pure LIFO.
-          const genericFlow = !inBody && generic && tag.closed && (genericFlowBudget.get(tag.name) ?? 0) > 0;
-          if (genericFlow) genericFlowBudget.set(tag.name, (genericFlowBudget.get(tag.name) ?? 0) - 1);
+          // A generic-shaped opener stacks as flow only while a same-name closer remains for it (see
+          // genericFlowBudget). A STANDALONE generic draws its own reserved slot; a GLUED one only stacks
+          // on the surplus ABOVE the still-unclaimed standalone reserve, so a leading technical generic
+          // can't steal the closer a later standalone real flow needs (EVE's STALEFIRST28).
+          const budget = genericFlowBudget.get(tag.name) ?? 0, reserve = standaloneReserve.get(tag.name) ?? 0;
+          const genericFlow = !inBody && generic && tag.closed && budget > 0 && (!glued || budget > reserve);
+          if (genericFlow) { genericFlowBudget.set(tag.name, budget - 1); if (!glued && reserve > 0) standaloneReserve.set(tag.name, reserve - 1); }
           const flow = !inBody && (definite || lossy || (generic ? genericFlow : tag.closed));
           // A same-name UNCLOSED in-body generic reads as a JSX opener to the per-chunk grammar (`\<$Panel
           // remains STARTCOMPACT23` = two bare attrs) and would be wrongly stripped by stripComponentResidue,
@@ -455,48 +464,40 @@ function rawCloserRe(name: string): RegExp {
 
 // The single lexical-safe boundary scanner for a same-name FLOW opener whose scanTag `>` (`k`) may be
 // FAKE. structure() escapes EVERY opening bracket (`\{`, `\[`) and leaves EVERY close bare, and it can
-// drop the backslash of a `\"` inside a string attribute — either way an opener's REAL end can leak
-// PAST `k`. Two mutually-exclusive tells over the opener residue (from `nameEnd`) each enable ONE branch
-// of a forward scan from `k`; a clean opener trips neither and this returns -1 so `k` stays the boundary
-// and the visible intro survives:
-//   • QUOTE leak (ODD unescaped `"`) — a dropped `\"` (`title="a \" > X"` → `title="a " > X"`) desyncs
-//     the quotes; the string's real close leaks as a `">` glued to the true tag `>`.
-//   • BRACKET leak (EVEN `"`) — a `\{…}` attribute expression leaked a close (`value=\{x } > X / 2}>`).
-//     A quote-aware bracket count (escaped-open `\{`/`\[` = +1, bare `}`/`]` = −1) going NEGATIVE marks it.
-// BOTH the tell pre-count and the forward scan are LEXICALLY SAFE: a regex literal `/…/`, a `/* … */` /
-// `// …` comment inside a `{…}` attribute, and a code span `` `…` `` are skipped, so a literal `}` / `]`
-// / `>` / quote in `pattern={/[}>]/}` or `x={/* } */ 1}` never miscounts. A DOUBLE structural close
-// glued to `>` (`)}>` / `]}>` / `}}>`) is an unambiguous leak in either branch. `}` after a closed
-// string / object operand is division, not a regex — matched by regexEnd's operand awareness.
+// drop the backslash of a `\"` / `\'` inside a string attribute — either way an opener's REAL end can
+// leak PAST `k`. Both tells are OPENER-LOCAL (derived from the span `nameEnd..k`, never the visible
+// body) and single/double-quote consistent; a clean opener trips neither, so this returns -1 and `k`
+// stays the boundary (the visible intro survives):
+//   • QUOTE leak — the span ENDS with `["']\s+>`: a dropped quote-backslash closed the string one char
+//     early (`title="a \" >…` → `title="a " >…`, `title='a \' >…` → `title='a ' >…`), so the residual
+//     value-close quote sits with whitespace before the fake `>`. A CLEAN opener glues its `>` to the
+//     last attribute token (`a="1">`), so this never fires on honest intro. Recover to the leaked
+//     string's REAL close `["']\s*>` in the body.
+//   • BRACKET leak — a depth scan from `k` where structure()'s escaped opens (`\{`/`\[`) are +1 and bare
+//     closes (`}`/`]`) are −1. Honest body brackets are ALWAYS structure-escaped, so depth only goes
+//     NEGATIVE on a `}`/`]` leaked from the opener's own `{…}` attribute expression; that negative-depth
+//     close glued to `>` (`}>` / `]}>` / `)}>`) is the real end. This also covers the quote-leak variant
+//     whose corrupting quote sits PAST `k` (`value={fn("a \" } > X", …)}>` — the span looks balanced but
+//     the real end is the trailing `)}>`). Lexically safe: regex literals `/…/`, `/* … */` / `// …`
+//     comments, and code spans `` `…` `` are skipped so their literal `}` / `]` / `>` never miscount.
 function lossyOpenerEnd(text: string, nameEnd: number, k: number): number {
-  const seg = text.slice(nameEnd);
-  let sq = '', quoteCount = 0, bnet = 0, bracketLeak = false, prevSig = '';
-  for (let m = 0; m < seg.length; m++) {
-    const ch = seg[m];
-    if (sq) { if (ch === '\\') { m++; continue; } if (ch === '"') quoteCount++; if (ch === sq) { sq = ''; prevSig = '"'; } continue; }
-    if (ch === '\\') { const n = seg[m + 1]; if (n === '{' || n === '[') { bnet++; prevSig = n; } m++; continue; } // structure()'s escaped opening bracket
-    if (ch === '`') { const cs = codeSpanEnd(seg, m); if (cs !== -1) { m = cs - 1; prevSig = '`'; continue; } }
-    if (ch === '/' && seg[m + 1] === '*') { const e = seg.indexOf('*/', m + 2); m = e === -1 ? seg.length : e + 1; continue; }
-    if (ch === '/' && seg[m + 1] === '/') { const e = seg.indexOf('\n', m + 2); m = e === -1 ? seg.length : e; continue; }
-    if (ch === '/' && !/[\w$)\]}"'`]/.test(prevSig)) { const e = regexEnd(seg, m); if (e !== -1) { m = e - 1; prevSig = '/'; continue; } } // regex only after a non-operand
-    if (ch === '"') quoteCount++;
-    if (ch === '"' || ch === "'" || ch === '`') { sq = ch; continue; }
-    if (ch === '}' || ch === ']') { bnet--; if (bnet < 0) bracketLeak = true; }
-    if (!/\s/.test(ch)) prevSig = ch;
+  if (/["']\s+>$/.test(text.slice(nameEnd, k))) {
+    for (let m = k; m < text.length; m++) {
+      const ch = text[m];
+      if (ch === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs - 1; continue; } }
+      if (ch === '"' || ch === "'") { const cq = /^["']\s*>/.exec(text.slice(m)); if (cq) return m + cq[0].length; }
+    }
   }
-  const oddQuote = quoteCount % 2 === 1;
-  if (!oddQuote && !bracketLeak) return -1;
-  let depth = 0, parity = 0, q = '';
+  let depth = 0, prevSig = '';
   for (let m = k; m < text.length; m++) {
     const ch = text[m];
-    if (ch === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs - 1; continue; } }
-    const dbl = /^[)\]}]{2}\s*>/.exec(text.slice(m)); if (dbl) return m + dbl[0].length; // double structural close glued to `>` — unambiguous leak in either branch
-    if (ch === '\\') { const n = text[m + 1]; if (n === '{' || n === '[') depth++; m++; continue; }
-    if (oddQuote && ch === '"') { const cq = /^"\s*>/.exec(text.slice(m)); if (parity === 0 && cq) return m + cq[0].length; parity ^= 1; continue; }
-    if (bracketLeak && q) { if (ch === q) q = ''; continue; }
-    if (bracketLeak && (ch === '"' || ch === "'" || ch === '`')) { q = ch; continue; }
-    if (ch === '{' || ch === '[') { depth++; continue; }
-    if (bracketLeak && (ch === '}' || ch === ']')) { depth--; const cb = /^[}\]]\s*>/.exec(text.slice(m)); if (depth < 0 && cb) return m + cb[0].length; }
+    if (ch === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs - 1; prevSig = '`'; continue; } }
+    if (ch === '/' && text[m + 1] === '*') { const e = text.indexOf('*/', m + 2); m = e === -1 ? text.length : e + 1; continue; }
+    if (ch === '/' && text[m + 1] === '/') { const e = text.indexOf('\n', m + 2); m = e === -1 ? text.length : e; continue; }
+    if (ch === '/' && !/[\w$)\]}"'`]/.test(prevSig)) { const e = regexEnd(text, m); if (e !== -1) { m = e - 1; prevSig = '/'; continue; } } // regex only after a non-operand
+    if (ch === '\\') { const n = text[m + 1]; if (n === '{' || n === '[') depth++; m++; if (n && !/\s/.test(n)) prevSig = n; continue; } // structure()'s escaped opening bracket
+    if (ch === '}' || ch === ']') { depth--; if (depth < 0) { const cb = /^[}\]]\s*>/.exec(text.slice(m)); if (cb) return m + cb[0].length; } }
+    if (!/\s/.test(ch)) prevSig = ch;
   }
   return -1;
 }

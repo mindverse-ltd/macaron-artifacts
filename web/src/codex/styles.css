@@ -77,6 +77,8 @@ body {
   background: #F2F2F0;
   border-radius: 10px;
 }
+:root[data-theme="dark"] .cx-sb-brand { background: #35332C; }
+:root[data-theme="dark"] .cx-sb-brand-name { color: #7C97FF; }
 .cx-sb-logo {
   width: 26px;
   height: 26px;

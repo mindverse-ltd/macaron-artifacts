@@ -910,6 +910,36 @@ test('real structure() round-26: hierarchy role, opener-local lossy boundary, le
   assert.ok((await hits(commentAttr, 'BODYCOMMENT')) > 0, 'comment-attr body lost');
 });
 
+// EVE round 27 — one lexical-safe opener scanner (lossyOpenerEnd) resolves EVERY same-name flow-opener
+// boundary: a clean opener stops at its real `>` (honest MDX-expr / balanced-quote intro survives), while
+// each lossy shape is recovered from the opener's OWN residue — no visible-intro scan, no forked
+// `lastIndexOf` heuristic for the leaked-attribute case. Covers the two disjoint lossy tells (odd-`"`
+// quote leak, even-`"` bracket leak incl. a `}`/division inside an attr string) plus the apostrophe body
+// that must not be mistaken for a quote leak.
+test('real structure() round-27: unified lexical-safe opener boundary across lossy shapes', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r27', data: { title: '/r27', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // Clean attributed opener — its honest MDX-expression intro `{arr[i]}>0` must survive (no lossy tell).
+  const attrMdx = 'prefix<$Panel a="1">LEFTATTR26 {arr[i]}>0 RIGHTATTR26\n\n## H\n\nt\n\n</$Panel>';
+  assert.ok((await hits(attrMdx, 'LEFTATTR26')) > 0 && (await hits(attrMdx, 'RIGHTATTR26')) > 0, 'clean attributed opener ate its MDX-expression intro');
+  // Clean attributed opener with a BALANCED quote pair in the body (`" > "`) — quotes stay even, no cut.
+  const balQuote = '<$Panel a="1">LEFTBALQ26 " > " RIGHTBALQ26\n\n## H\n\nt\n\n</$Panel>';
+  assert.ok((await hits(balQuote, 'LEFTBALQ26')) > 0 && (await hits(balQuote, 'RIGHTBALQ26')) > 0, 'balanced-quote body misfired the dangling-close cut');
+  // BRACKET leak with EVEN quotes — a `}` closes an attr expression early; division after the string
+  // operand must not be read as a regex, and the leaked `}>` is recovered so the intro survives.
+  const division = '<$Panel value={"} > DIVLEAK27" / 2}>LEFTDIV27 body\n\n## H\n\nt\n\n</$Panel>';
+  assert.equal(await hits(division, 'DIVLEAK27'), 0, 'division-in-attr leaked past the fake early >');
+  assert.ok((await hits(division, 'LEFTDIV27')) > 0, 'division-case visible body lost');
+  // QUOTE leak whose body carries an apostrophe (`it's`) — the lone `'` must NOT flip the `"`-parity tell.
+  const apos = '<$Panel title="it\'s \\" > APOSLEAK27">LEFTAP27 body\n\n## H\n\nt\n\n</$Panel>';
+  assert.equal(await hits(apos, 'APOSLEAK27'), 0, 'apostrophe body defeated the quote-leak tell, attribute leaked');
+  assert.ok((await hits(apos, 'LEFTAP27')) > 0, 'apostrophe-case visible body lost');
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

@@ -109,7 +109,7 @@ function scanTag(text: string, i: number): Tag | null {
     const ch = text[k];
     if (quote) {
       if (ch === '\\') { k += 2; continue; } // escaped char inside a string/template
-      if (ch === quote) quote = '';
+      if (ch === quote) { quote = ''; prevSig = '"'; } // a closed string is an OPERAND: a following `/` is division, not a regex
       k++; continue;
     }
     // Inside a `{…}` expression, a `/` starts a comment or (when not a division operator) a regex
@@ -118,7 +118,7 @@ function scanTag(text: string, i: number): Tag | null {
     // intact, so this stays deterministic. A `/` after an operand (ident / `)` / `]`) is division.
     if (brace > 0 && ch === '/' && text[k + 1] === '*') { const e = text.indexOf('*/', k + 2); k = e === -1 ? text.length : e + 2; continue; }
     if (brace > 0 && ch === '/' && text[k + 1] === '/') { const e = text.indexOf('\n', k + 2); k = e === -1 ? text.length : e; continue; }
-    if (brace > 0 && ch === '/' && !/[\w$)\]]/.test(prevSig)) {
+    if (brace > 0 && ch === '/' && !/[\w$)\]"'`]/.test(prevSig)) {
       let m = k + 1, cls = false;
       for (; m < text.length; m++) { const r = text[m]; if (r === '\\') { m++; continue; } if (r === '[') cls = true; else if (r === ']') cls = false; else if (r === '/' && !cls) break; }
       k = m + 1; prevSig = '/'; continue;
@@ -157,9 +157,9 @@ export function pairResidues(chunks: string[]): Set<string> {
   // only a DEFINITE same-name flow being open makes a later same-name generic in-body content (so the
   // flow's own closer can't reach past it — EVE's `IDENTGEN23`), while a tentative generic never
   // poisons a subsequent real flow's classification. Code-span aware throughout.
-  const global: { name: string; key: string; definite: boolean }[] = [];
+  const global: { name: string; key: string; definite: boolean; generic: boolean }[] = [];
   chunks.forEach((text, ci) => {
-    const local: { name: string; key: string; endsChunk: boolean; definite: boolean }[] = [];
+    const local: { name: string; key: string; endsChunk: boolean; definite: boolean; generic: boolean }[] = [];
     let i = 0;
     while (i < text.length) {
       if (text[i] === '`') { const cs = codeSpanEnd(text, i); if (cs !== -1) { i = cs; continue; } }
@@ -167,15 +167,15 @@ export function pairResidues(chunks: string[]): Set<string> {
       if (!tag) { i++; continue; }
       if (!tag.selfClose) {
         if (tag.closing) {
-          // A closer pops the nearest same-name opener, but PREFERS a DEFINITE one over a
-          // tentative generic-shaped opener: a definite flow is guaranteed to have a closer, a
-          // generic never is, so a lone closer belongs to the real flow even when a standalone
-          // technical generic sits nearer (EVE's `STANDALONEKEEP25`: the outer closer pops the
-          // definite outer, the generic stays unpaired → kept). With balanced closers this still
-          // resolves true nesting — the inner closer finds no definite nearer than the inner one.
-          const pop = (stack: { name: string; key: string; definite: boolean }[]) => {
+          // A closer pops the nearest same-name opener (LOCAL first, then GLOBAL), preferring a
+          // NON-generic-shaped opener over an ambiguous generic-shaped one at the same name. A real
+          // component always emits its own closer; a technical generic never does — so a lone closer
+          // belongs to the real opener even when a standalone generic sits nearer (EVE's
+          // `STANDALONEKEEP25`, kept). Balanced closers still resolve true nesting: the inner closer
+          // finds the inner opener before any farther one.
+          const pop = (stack: { name: string; key: string; generic: boolean }[]) => {
             let idx = -1;
-            for (let s = stack.length - 1; s >= 0; s--) if (stack[s].name === tag.name) { if (stack[s].definite) { idx = s; break; } if (idx === -1) idx = s; }
+            for (let s = stack.length - 1; s >= 0; s--) if (stack[s].name === tag.name) { if (!stack[s].generic) { idx = s; break; } if (idx === -1) idx = s; }
             if (idx === -1) return false;
             paired.add(stack[idx].key); paired.add(`${ci}:${tag.lt}`); stack.splice(idx, 1); return true;
           };
@@ -213,12 +213,15 @@ export function pairResidues(chunks: string[]): Set<string> {
           // Closed in-body generics (`\<$Panel extends IDENTGEN23>`, call-glued `factory()\<$Panel<G>>()`) are
           // already kept by sanitize's grammar fallback — don't `keep:` them, that would truncate nested `<…>`.
           if (inBody && !tag.closed) paired.add(`keep:${ci}:${tag.lt}`);
-          local.push({ name: tag.name, key: `${ci}:${tag.lt}`, endsChunk: flow, definite });
+          // In-body prose (a glued/trailing same-name generic while a flow is open) is NOT a pairing
+          // candidate — pushing it lets a later same-name closer mis-pop it (LIFO nearest) and leave
+          // the real outer flow unpaired (EVE's `LOCALKEEP26`: generic + outer closer share a chunk).
+          if (!inBody) local.push({ name: tag.name, key: `${ci}:${tag.lt}`, endsChunk: flow, definite, generic });
         }
       }
       i = tag.closed ? tag.end : tag.nameEnd;
     }
-    for (const o of local) if (o.endsChunk) global.push({ name: o.name, key: o.key, definite: o.definite });
+    for (const o of local) if (o.endsChunk) global.push({ name: o.name, key: o.key, definite: o.definite, generic: o.generic });
   });
   return paired;
 }
@@ -273,74 +276,29 @@ function stripComponentResidue(text: string, chunkIndex: number, paired: Set<str
     const closerRe = rawCloserRe(tag.name);
     const closerAfter = text.slice(tag.nameEnd).search(closerRe); // matching `</Name>` (escape-tolerant), offset relative to nameEnd
     if (isPaired && !closing && !selfClose && closerAfter === -1) {
-      // scanTag can stop at a FAKE early `>` inside a corrupted attribute expression (structure()
-      // dropped a string-quote backslash so `value=\{fn("a \" } > x", y)}>` reads its inner `>` as the
-      // tag end). The attribute expression's REAL structural close then leaks past the fake `>` as a
-      // DOUBLE close glued to the true tag `>` — `)}>` / `]}>` / `}}>` — because a `\{…}`/`\[…]` nests
-      // at least two brackets. Honest intro after a clean opener never produces that OUTSIDE code: its
-      // `>` is a BARE comparison preceded by a SINGLE close at most (`arr\[i]>0` → lone `]>`), and a
-      // regex `/\(/` or comment `/* ( */` inside an honest attribute stays inside scanTag's balanced
-      // span. A code span CAN hold a literal `]}>` (`` `arr[i]}>0` ``), so the scan SKIPS code spans —
-      // a leaked attribute close is never inside one. Absent a double-close-glued-`>`, `k` is the real
-      // tag end (clean opener) and the visible intro after it survives.
-      // ONLY an opener that actually carried attributes could have leaked a real attribute close
-      // past a FAKE early `>`. A BARE opener (`\<$Panel>`, nothing between the name and `>`) landed
-      // on its TRUE `>` at `k`, so its visible body may legitimately contain a `]}>` (an honest MDX
-      // expression `\{arr\[i]}>0`) — scanning past `k` there would eat honest intro. Gate the
-      // double-close hunt on the opener being attributed (its `nameEnd..>` span is non-empty).
-      const attributed = deEscape(text.slice(tag.nameEnd, closed ? k - 1 : k)).trim() !== '';
-      // A dropped string-quote backslash (`title="a \" > X"` → `title="a " > X"`) desyncs scanTag's
-      // quote state: it closes the string at the FAKE inner `"`, stops at the `>` inside, and leaks the
-      // attribute tail `X">` past `k` with the string's REAL close quote GLUED to the true tag `>`.
-      // A `">` / `'>` (quote glued to `>`) is the real tag end WHEN the running count of unescaped
-      // quotes from `nameEnd` to that quote is ODD — i.e. that quote closes a dangling string opened by
-      // the dropped-backslash desync. An honest intro's quotes are balanced, so the parity there is even
-      // at any glued `">` and this never fires. Counted incrementally so parity reflects position.
-      let gc = -1;
-      if (attributed) {
-        const quotes = deEscape(text.slice(tag.nameEnd, k)).match(/["']/g)?.length ?? 0;
-        let parity = quotes % 2; // quote parity already consumed inside the opener span
-        for (let m = k; m < text.length; ) {
-          if (text[m] === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs; continue; } }
-          const dbl = /^[)\]}]{2}\s*>/.exec(text.slice(m));
-          if (dbl) { gc = m + dbl[0].length; break; }
-          const ch = text[m];
-          if (ch === '\\') { m += 2; continue; }
-          if ((ch === '"' || ch === "'")) { if (parity === 0 && /^["']\s*>/.test(text.slice(m))) { gc = m + /^["']\s*>/.exec(text.slice(m))![0].length; break; } parity ^= 1; }
-          m++;
-        }
-      }
+      // A paired cross-chunk FLOW opener (structure() split the component around a nested heading, so the
+      // whole opening tag is this chunk and the closer lives LATER). Strip the opener only, deriving the
+      // boundary from lossyOpenerEnd's lexical-safe scan of the opener's OWN residue — a clean opener
+      // ends at `k` (visible intro survives), a lossy one recovers past the leaked attribute close.
+      const gc = lossyOpenerEnd(text, tag.nameEnd, k);
       out += ' '; i = gc === -1 ? k : gc;
       continue;
     }
-    // Lossy `>`-recovery for a GLUED opener whose matching `</Name>` sits LATER IN THIS CHUNK.
-    // structure() can drop the escaping backslash of a quote/template inside an opener's attribute,
-    // desyncing scanTag's quote tracking. structure() markdown-escapes EVERY opening bracket (`\{`,
-    // `\[`) — structural AND string-content alike — but leaves closes bare, so a brace/bracket-depth
-    // scan is fooled by unbalanced brackets inside the corrupted attribute STRING: `items={["a }] > x"]}>`
-    // under-counts and scanTag cuts EARLY at the string-internal `>` (attr residue leaks as fake suffix),
-    // while `items={["a { [ x"]}>` over-counts so scanTag never closes (body+suffix swallowed). A dropped
-    // string-quote backslash (`title="a \" b"` → `title="a " b"`) desyncs the quote state the same way.
-    // The desync is decided from OPENER-LOCAL signals only, NEVER whole-body balance (a body apostrophe /
-    // stray `[` / lone `]` defeats that — EVE's `<Panel …>LEFT [ compare > RIGHT` honest-opener case):
-    //   (a) the OPENER'S OWN attribute span (what scanTag consumed, `nameEnd..k`) is quote- and
-    //       bracket-unbalanced — catches `!closed`, the dropped-quote case, and mismatched `}]`; a clean
-    //       opener's span is balanced (`mode=\{\{ a }} title="x">`) even when the body carries a stray `[`.
-    //   (b) the span rebalanced by luck (`]}` closes `\[\{` in order) but scanTag stopped at a FAKE `>`,
-    //       leaving the attribute's REAL structural close glued to the true tag end as `]}>` / `}]>` /
-    //       `]]>` / `}}>` residue before the closer. structure() never emits a DOUBLE bare close-then-`>`
-    //       in honest body: body opens are escaped `\[` / `\{`, and their closes are bare and single, so
-    //       an honest `arr\[i]>0` yields a lone `]>` (never `]}>`). Only a leaked attribute's real
-    //       structural close (`\{\["…"]}` → `]}`) doubles onto the tag `>`, so a run of TWO closes
-    //       immediately before a `>` (optionally across whitespace: `]}   >`) is unambiguous leaked
-    //       opener serialization. This IS an after-`k` read, but a TARGETED double-close signature, not a
-    //       whole-body balance scan — a single body `]>` / `>` can never match it (EVE's `arr[i]>0`).
-    // On a confirmed-lossy opener, re-anchor to the LAST `>` before the closer and strip directly (the
-    // mangled residue is ungrammatical, so grammar classification below would wrongly KEEP it as prose).
-    const attrLeak = /[\]}]{2}\s*>/.test(text.slice(k, tag.nameEnd + closerAfter));
-    if (glued && esc && !closing && !selfClose && closerAfter !== -1 && (!closed || bracketDesync(text.slice(tag.nameEnd, k)) || attrLeak)) {
-      const gt = text.lastIndexOf('>', tag.nameEnd + closerAfter);
-      if (gt > tag.nameEnd) { out += ' '; i = gt + 1; continue; }
+    // Same recovery when the matching `</Name>` sits LATER IN THIS CHUNK (a GLUED inline opener whose
+    // close was not split off). lossyOpenerEnd handles the UNDER-count / dropped-quote / double-close
+    // leaks (scanTag stopped at a fake early `>`); it returns -1 for a clean inline tag AND for the
+    // OVER-count swallow case (`items={["a { [ x"]}>` — unbalanced opens so scanTag never closed and ran
+    // to end, `k` past the closer). That swallow case can't be reached by a forward-from-`k` scan, so it
+    // falls through to the closer-anchored recovery below: re-anchor to the LAST `>` before the in-chunk
+    // closer. Gated on the opener span being genuinely desynced so a clean inline tag is left to the
+    // grammar classifier (which strips a balanced tag whole).
+    if (glued && esc && !closing && !selfClose && closerAfter !== -1) {
+      const gc = lossyOpenerEnd(text, tag.nameEnd, k);
+      if (gc !== -1) { out += ' '; i = gc; continue; }
+      if (!closed || bracketDesync(text.slice(tag.nameEnd, k))) {
+        const gt = text.lastIndexOf('>', tag.nameEnd + closerAfter);
+        if (gt > tag.nameEnd) { out += ' '; i = gt + 1; continue; }
+      }
     }
     // Fallback brace/bracket-depth recovery for a GLUED or non-escaped opener with no in-chunk closer
     // to anchor on — cut at the first `>` OUTSIDE any `{…}`/`[…]` expression past the tag name. A
@@ -466,6 +424,43 @@ function codeSpanEnd(text: string, i: number): number {
 function rawCloserRe(name: string): RegExp {
   const body = [...name].map((c) => '\\\\?' + c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
   return new RegExp(`</${body}\\s*>`);
+}
+
+// The single lexical-safe boundary scanner for a same-name FLOW opener whose scanTag `>` (`k`) may be
+// FAKE. structure() escapes EVERY opening bracket (`\{`, `\[`) and leaves EVERY close bare, and it can
+// drop the backslash of a `\"` inside a string attribute — either way an opener's REAL end can leak
+// PAST `k`. Two opener-global tells over the residue from `nameEnd`, mutually exclusive by quote parity,
+// each enable ONE branch of a forward scan from `k`; a clean opener trips neither and this returns -1 so
+// `k` stays the boundary and the visible intro survives:
+//   • QUOTE leak (ODD unescaped `"`) — a dropped `\"` (`title="a \" > X"` → `title="a " > X"`) desyncs
+//     the quotes; quote state is CORRUPTED so bracket counting is meaningless. The string's real close
+//     leaks as a `">` glued to the true tag `>`; the quote branch recovers past it.
+//   • BRACKET leak (EVEN `"`, quotes TRUSTWORTHY) — a `\{…}` attribute expression leaked a close
+//     (`value=\{x } > DIVLEAK / 2}>`, or `value=\{"} > X" / 2}>` with the `}` inside a string). A
+//     quote-aware bracket count (escaped-open `\{`/`\[` = +1, bare `}`/`]` = −1) going NEGATIVE marks it;
+//     the bracket branch recovers past the unmatched close glued to `>`.
+// A DOUBLE structural close glued to `>` (`)}>` / `]}>` / `}}>`) is an unambiguous leak in BOTH branches
+// (`\{fn("…" } > X", x)}>` closes call + expression at once past the fake `>`). Code spans are skipped so
+// a literal `]}>` inside `` `…` `` never trips it. Honest body never emits two bare closes before a `>`.
+function lossyOpenerEnd(text: string, nameEnd: number, k: number): number {
+  const seg = text.slice(nameEnd);
+  const oddQuote = ((seg.replace(/\\./g, '').match(/"/g)?.length ?? 0) % 2) === 1;
+  let bnet = 0, bracketLeak = false, q = '';
+  if (!oddQuote) for (let m = 0; m < seg.length; m++) { const ch = seg[m]; if (ch === '\\') { const n = seg[m + 1]; if (!q && (n === '{' || n === '[')) bnet++; m++; continue; } if (q) { if (ch === q) q = ''; continue; } if (ch === '"' || ch === "'" || ch === '`') { q = ch; continue; } if (ch === '}' || ch === ']') { bnet--; if (bnet < 0) bracketLeak = true; } }
+  if (!oddQuote && !bracketLeak) return -1;
+  let depth = 0, parity = 0, sq = '';
+  for (let m = k; m < text.length; m++) {
+    const ch = text[m];
+    if (ch === '`') { const cs = codeSpanEnd(text, m); if (cs !== -1) { m = cs - 1; continue; } }
+    const dbl = /^[)\]}]{2}\s*>/.exec(text.slice(m)); if (dbl) return m + dbl[0].length;
+    if (ch === '\\') { const n = text[m + 1]; if (n === '{' || n === '[') depth++; m++; continue; }
+    if (oddQuote && ch === '"') { const cq = /^"\s*>/.exec(text.slice(m)); if (parity === 0 && cq) return m + cq[0].length; parity ^= 1; continue; }
+    if (bracketLeak && sq) { if (ch === sq) sq = ''; continue; }
+    if (bracketLeak && (ch === '"' || ch === "'" || ch === '`')) { sq = ch; continue; }
+    if (ch === '{' || ch === '[') { depth++; continue; }
+    if (bracketLeak && (ch === '}' || ch === ']')) { depth--; const cb = /^[}\]]\s*>/.exec(text.slice(m)); if (depth < 0 && cb) return m + cb[0].length; }
+  }
+  return -1;
 }
 
 // Is the OPENER'S OWN attribute span (what scanTag consumed between the tag name and its landing

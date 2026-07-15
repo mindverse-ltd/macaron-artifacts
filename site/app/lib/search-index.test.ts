@@ -1173,6 +1173,41 @@ test('real structure() round-32: JSX boolean props are not TS prose, quota count
   assert.ok((await hits(expr32, 'RIGHTEXPR31')) > 0, 'clean expression-attr trailing body lost');
 });
 
+test('real structure() round-33: per-closer-interval quota, opener-local expression/bracket recovery, lexical-safe desync', async () => {
+  const oramaFor = async (raw: string) => {
+    const index = await buildIndex({ url: '/r33', data: { title: '/r33', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
+    return initAdvancedSearch({ language: 'english', indexes: [index] });
+  };
+  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
+
+  // (P1-1) The nearest-wins glued-generic quota must be allocated PER closer interval, not whole-page. A
+  // technical generic that appears AFTER the lone closer (`STALEAFTER32`) can never pair with it (LIFO pops
+  // the nearest PRECEDING opener), so it must not consume the slot the real flow BEFORE the closer needs.
+  // The old page-global "last G win" quota let the trailing generic steal it, leaking the real flow markup.
+  const interval = 'prefix<$Panel extends REALBEFORE32>INTRO\n\n## H\n\nBODY\n\n</$Panel>\n\nTechnical <$Panel extends STALEAFTER32>.';
+  assert.equal(await hits(interval, 'REALBEFORE32'), 0, 'real flow before the closer leaked (trailing generic stole its quota slot)');
+  assert.ok((await hits(interval, 'STALEAFTER32')) > 0, 'technical generic after the lone closer wrongly deleted');
+
+  // (P1-2) A CLEAN balanced expression opener with a legit space before `>` (`b={x} >`) is NOT lossy — JSX
+  // allows the space — so recovery must not fire. The old bracket branch treated `/\s>$/` as proof of loss
+  // and then scanned the visible body, mistaking an honest body `}>` for the opener boundary and eating the
+  // intro. The drift signature now only fires when the span actually carried a string that could lose a quote.
+  const exprSpace = '<$Panel b={x} >LEFTEXPRSPACE32 text "}>RIGHTEXPRSPACE32\n\n## H\n\nt\n\n</$Panel>';
+  assert.ok((await hits(exprSpace, 'LEFTEXPRSPACE32')) > 0, 'clean spaced expression-attr intro eaten by body-driven recovery');
+  assert.ok((await hits(exprSpace, 'RIGHTEXPRSPACE32')) > 0, 'clean spaced expression-attr trailing body lost');
+
+  // (P1-3) `bracketDesync` must be regex/comment lexical-safe. A clean opener whose expression attribute
+  // holds a regex `pattern={/[}>]/}` or a comment `x={/* } > */ 1}` carries literal `[`/`}`/`>` that must be
+  // LEXED, not counted — else the opener is mis-marked desynced at the recovery entry point and its honest
+  // intro is deleted. The recovery scan already skips regex/comment; the desync gate now does too.
+  const rgx = '<$Panel pattern={/[}>]/}>LEFTRGX32 text "}>RIGHTRGX32\n\n## H\n\nt\n\n</$Panel>';
+  assert.ok((await hits(rgx, 'LEFTRGX32')) > 0, 'clean regex-attr intro deleted (bracketDesync miscounted regex brackets)');
+  assert.ok((await hits(rgx, 'RIGHTRGX32')) > 0, 'clean regex-attr trailing body lost');
+  const cmt = '<$Panel x={/* } > */ 1}>LEFTCMT32 text "}>RIGHTCMT32\n\n## H\n\nt\n\n</$Panel>';
+  assert.ok((await hits(cmt, 'LEFTCMT32')) > 0, 'clean comment-attr intro deleted (bracketDesync miscounted comment brackets)');
+  assert.ok((await hits(cmt, 'RIGHTCMT32')) > 0, 'clean comment-attr trailing body lost');
+});
+
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
 function mdxFiles(dir: string): string[] {

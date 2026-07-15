@@ -171,14 +171,22 @@ export function pairResidues(chunks: string[]): Set<string> {
   // ABOVE that reserve (EVE's STALEFIRST28: a leading glued generic must not steal the lone closer that
   // belongs to a later standalone real flow).
   const closers = new Map<string, number>(), nonGenericOpeners = new Map<string, number>(), standaloneGenerics = new Map<string, number>(), gluedGenerics = new Map<string, number>();
-  chunks.forEach((text) => {
+  // A glued generic can only pair with a same-name closer positioned AFTER it (LIFO pops the nearest
+  // PRECEDING opener), so a glued generic with no later same-name closer can never stack — it must be
+  // left out of the quota entirely, else a trailing technical generic AFTER the lone closer steals the
+  // slot a real flow BEFORE the closer needs (EVE round-33 P1-1: quota must be per closer interval, not
+  // whole-page). Record every closer's ordinal position per name, and each glued generic's position, so
+  // a second pass can keep only the glued generics that have a same-name closer after them.
+  const closerPos = new Map<string, number[]>(), gluedGenericAt: { name: string; pos: number; key: string }[] = [];
+  chunks.forEach((text, ci) => {
     let i = 0;
     while (i < text.length) {
       if (text[i] === '`') { const cs = codeSpanEnd(text, i); if (cs !== -1) { i = cs; continue; } }
       const tag = scanTag(text, i);
       if (!tag) { i++; continue; }
+      const pos = ci * 1e7 + tag.lt;
       if (!tag.selfClose) {
-        if (tag.closing) closers.set(tag.name, (closers.get(tag.name) ?? 0) + 1);
+        if (tag.closing) { closers.set(tag.name, (closers.get(tag.name) ?? 0) + 1); (closerPos.get(tag.name) ?? closerPos.set(tag.name, []).get(tag.name)!).push(pos); }
         else {
           const inner = deEscape(text.slice(tag.lt + 1, tag.closed ? tag.end - 1 : tag.end)).trim();
           const isGeneric = /[\s,=]/.test(inner) && isTsGeneric(inner);
@@ -202,12 +210,18 @@ export function pairResidues(chunks: string[]): Set<string> {
           if (proseGlued) { i = tag.closed ? tag.end : tag.nameEnd; continue; } // prose instantiation/type-argument, not a residue
           if (!isGeneric) nonGenericOpeners.set(tag.name, (nonGenericOpeners.get(tag.name) ?? 0) + 1);
           else if (!gluedOpener) standaloneGenerics.set(tag.name, (standaloneGenerics.get(tag.name) ?? 0) + 1);
-          else gluedGenerics.set(tag.name, (gluedGenerics.get(tag.name) ?? 0) + 1);
+          else gluedGenericAt.push({ name: tag.name, pos, key: `${ci}:${tag.lt}` });
         }
       }
       i = tag.closed ? tag.end : tag.nameEnd;
     }
   });
+  // Keep only glued generics that have a same-name closer positioned AFTER them — the rest can never be
+  // popped, so they neither count toward nor consume the quota (P1-1: quota is per closer interval).
+  const gluedEligible = new Set<string>();
+  for (const g of gluedGenericAt) {
+    if ((closerPos.get(g.name) ?? []).some((cp) => cp > g.pos)) { gluedEligible.add(g.key); gluedGenerics.set(g.name, (gluedGenerics.get(g.name) ?? 0) + 1); }
+  }
   const genericFlowBudget = new Map<string, number>(), standaloneReserve = new Map(standaloneGenerics);
   for (const [name, c] of closers) genericFlowBudget.set(name, c - (nonGenericOpeners.get(name) ?? 0));
   // How many GLUED generics of each name may stack as flow (the surplus above the standalone reserve),
@@ -273,11 +287,13 @@ export function pairResidues(chunks: string[]): Set<string> {
           // nearest opener by LIFO, so an earlier glued generic can't steal a later flow's closer regardless
           // of source order (EVE round-30 STALEGLUED29 → REALGLUED29 order-independence).
           const budget = genericFlowBudget.get(tag.name) ?? 0, reserve = standaloneReserve.get(tag.name) ?? 0;
-          // Only a glued generic that pre-scan actually COUNTED into gluedGenerics advances the remaining
-          // window — a proseGlued opener was skipped there, so decrementing on it would shift the window and
-          // hand a scarce closer to an EARLIER glued generic (EVE round-31 STALESHIFT31 → REALSHIFT31).
-          if (generic && glued && tag.closed && !proseGlued) { const r = (gluedRemaining.get(tag.name) ?? 0) - 1; gluedRemaining.set(tag.name, r); }
-          const gluedWins = !glued || (gluedRemaining.get(tag.name) ?? 0) < (gluedSlots.get(tag.name) ?? 0);
+          // Only a glued generic that pre-scan COUNTED into gluedGenerics advances the remaining window: it
+          // must be non-prose AND have a same-name closer positioned after it (gluedEligible). A trailing
+          // glued generic with no later closer can never pair, so it neither shifts the window nor stacks —
+          // else it would steal a scarce closer from a real flow BEFORE it (EVE round-33 P1-1 STALEAFTER32).
+          const eligibleGlued = gluedEligible.has(`${ci}:${tag.lt}`);
+          if (generic && glued && tag.closed && !proseGlued && eligibleGlued) { const r = (gluedRemaining.get(tag.name) ?? 0) - 1; gluedRemaining.set(tag.name, r); }
+          const gluedWins = !glued || (eligibleGlued && (gluedRemaining.get(tag.name) ?? 0) < (gluedSlots.get(tag.name) ?? 0));
           const genericFlow = !inBody && generic && tag.closed && budget > 0 && (!glued || budget > reserve) && gluedWins;
           if (genericFlow) { genericFlowBudget.set(tag.name, budget - 1); if (!glued && reserve > 0) standaloneReserve.set(tag.name, reserve - 1); }
           const flow = !inBody && (definite || lossy || (generic ? genericFlow : tag.closed));
@@ -578,12 +594,15 @@ function lossyOpenerEnd(text: string, nameEnd: number, k: number): number {
   // BRACKET leak — only when the opener's OWN span carried a `{…}`/`[…]` attribute expression
   // (structure() escapes its open as `\{`/`\[`) AND that span is opener-provably lossy: either
   // bracket-DESYNCED, or scanTag landed on a FAKE early `>` preceded by whitespace (`… }] >` / `… ]} >`
-  // — a dropped string-quote let the leaked closes drift, so the `>` sits after a space). A CLEAN
+  // — a dropped string-quote let the leaked closes drift, so the `>` sits after a space). That
+  // drift signature (`/\s>$/`) only proves a leak when the span actually CARRIED a string whose quote
+  // could be dropped — a CLEAN expression attribute with a legit space (`b={x} >`, `arr={[1,2]} >`)
+  // has no quote, so it is NOT recovered and its honest body survives (EVE round-33 P1-2). A CLEAN
   // expression attribute (`b={x}>` — the bracket close is GLUED to the real `>`, no space) is neither,
   // so an honest body `"}>` / `]>` is never mistaken for a leaked bracket close. Opener-local: reads
   // only the opener span, never the visible body.
   const bspan = text.slice(nameEnd, k);
-  if (!/\\[{[]/.test(bspan) || !(bracketDesync(bspan) || /\s>$/.test(bspan))) return -1;
+  if (!/\\[{[]/.test(bspan) || !(bracketDesync(bspan) || (/\s>$/.test(bspan) && /["'`]/.test(bspan)))) return -1;
   let depth = 0, prevSig = '';
   for (let m = k; m < text.length; m++) {
     const ch = text[m];
@@ -620,15 +639,21 @@ function regexEnd(s: string, p: number): number {
 // regex `/(/` or comment `/* ( */` inside an honest attribute would otherwise read as unbalanced.
 function bracketDesync(seg: string): boolean {
   const stack: string[] = [];
-  let quote = '';
+  let quote = '', prevSig = '';
   for (let m = 0; m < seg.length; m++) {
     let ch = seg[m];
     if (ch === '\\') { ch = seg[m + 1] ?? ''; m++; if (quote) continue; }
     else if (quote) { if (ch === quote) quote = ''; continue; }
     else if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    // Skip regex / block / line comment bodies so their literal brackets don't desync an honest
+    // opener (`pattern={/[}>]/}`, `x={/* } > */ 1}`) — same lexical rules as the recovery scan below.
+    else if (ch === '/' && seg[m + 1] === '*') { const e = seg.indexOf('*/', m + 2); m = e === -1 ? seg.length : e + 1; continue; }
+    else if (ch === '/' && seg[m + 1] === '/') { const e = seg.indexOf('\n', m + 2); m = e === -1 ? seg.length : e; continue; }
+    else if (ch === '/' && !/[\w$)\]}"'`]/.test(prevSig)) { const e = regexEnd(seg, m); if (e !== -1) { m = e - 1; prevSig = '/'; continue; } }
     if (ch === '{' || ch === '[') stack.push(ch);
     else if (ch === '}') { if (stack.pop() !== '{') return true; }
     else if (ch === ']') { if (stack.pop() !== '[') return true; }
+    if (ch && !/\s/.test(ch)) prevSig = ch;
   }
   return stack.length !== 0 || quote !== '';
 }

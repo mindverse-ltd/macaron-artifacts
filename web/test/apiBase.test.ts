@@ -1,28 +1,23 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-// jsdom-free localStorage shim so apiBase's storage-backed cache works under
-// node:test. Must be installed before importing the module (it caches on read).
+// jsdom-free storage shims. apiBase caches on read, so install before import.
 class MemStorage {
   private m = new Map<string, string>();
   getItem(k: string) { return this.m.has(k) ? this.m.get(k)! : null; }
   setItem(k: string, v: string) { this.m.set(k, v); }
   removeItem(k: string) { this.m.delete(k); }
+  clear() { this.m.clear(); }
 }
-(globalThis as unknown as { localStorage: MemStorage }).localStorage = new MemStorage();
+const local = new MemStorage();
+const session = new MemStorage();
+(globalThis as unknown as { localStorage: MemStorage }).localStorage = local;
+(globalThis as unknown as { sessionStorage: MemStorage }).sessionStorage = session;
 
-// window shim so consumeServerFromUrl can read location + scrub via replaceState.
-let currentHref = 'https://hosted.example/';
-const win = {
-  get location() { return new URL(currentHref); },
-  history: { replaceState(_s: unknown, _t: string, url: string) { currentHref = new URL(url, currentHref).href; } },
-};
-(globalThis as unknown as { window: typeof win }).window = win;
-function setHref(h: string) { currentHref = h; }
+const { getApiBase, setApiBase, clearApiBase, resolveApiUrl, isLoopbackBase } = await import('../src/lib/apiBase');
+const { getToken, setToken, clearToken, consumeHandoff } = await import('../src/lib/auth');
 
-const { getApiBase, setApiBase, clearApiBase, resolveApiUrl, isLoopbackBase, consumeServerFromUrl } = await import('../src/lib/apiBase');
-
-beforeEach(() => { clearApiBase(); setHref('https://hosted.example/'); });
+beforeEach(() => { local.clear(); session.clear(); clearApiBase(); });
 
 test('same-origin (empty base): /api paths pass through untouched', () => {
   assert.equal(getApiBase(), '');
@@ -73,38 +68,45 @@ test('clearApiBase reverts to same-origin passthrough', () => {
   assert.equal(resolveApiUrl('/api/x'), '/api/x');
 });
 
-// --- P0-3: credential must bind to origin; a ?server= switch can't leak a token ---
+// --- P0-2 + P1-bypass: hosted handoff comes from same-tab sessionStorage, NOT
+// the URL. A crafted ?server= link carries no handoff and is inert. ---
 
-test('consumeServerFromUrl: ?server= without ?token= clears the stored token (no leak to new origin)', () => {
-  let cleared = false;
-  setHref('https://hosted.example/?server=https%3A%2F%2Fattacker.example');
-  consumeServerFromUrl(() => { cleared = true; });
-  assert.equal(cleared, true);            // stale credential dropped
-  assert.equal(getApiBase(), 'https://attacker.example');
-  assert.equal(window.location.search, ''); // ?server= scrubbed
-});
+const HANDOFF_KEY = 'macaron_connect_handoff';
+function stashHandoff(server: string, token: string) { session.setItem(HANDOFF_KEY, JSON.stringify({ server, token })); }
 
-test('consumeServerFromUrl: ?server= WITH a fresh ?token= keeps the token (reissued for new origin)', () => {
-  let cleared = false;
-  setHref('https://hosted.example/?server=https%3A%2F%2Ftunnel.test&token=fresh');
-  consumeServerFromUrl(() => { cleared = true; });
-  assert.equal(cleared, false);           // same load brings a matching token
+test('consumeHandoff: binds api base + token from the same-tab handoff, then clears it', () => {
+  stashHandoff('https://tunnel.test', 'tok-A');
+  consumeHandoff();
   assert.equal(getApiBase(), 'https://tunnel.test');
+  assert.equal(getToken(), 'tok-A');
+  assert.equal(session.getItem(HANDOFF_KEY), null); // one-time
 });
 
-test('consumeServerFromUrl: malformed ?server= still scrubs the URL (and clears token)', () => {
-  let cleared = false;
-  setHref('https://hosted.example/?server=https%3A%2F%2Fbad.example%2Fdeep%2Fpath');
-  consumeServerFromUrl(() => { cleared = true; });
-  assert.equal(cleared, true);
-  assert.equal(getApiBase(), '');         // rejected, base left unset
-  assert.equal(window.location.search, ''); // but URL still scrubbed
-});
-
-test('consumeServerFromUrl: no ?server= at all is a no-op (token untouched)', () => {
-  let cleared = false;
-  setHref('https://hosted.example/?token=keepme');
-  consumeServerFromUrl(() => { cleared = true; });
-  assert.equal(cleared, false);
+test('consumeHandoff: no handoff is a no-op (same-origin local mode, base stays empty)', () => {
+  consumeHandoff();
   assert.equal(getApiBase(), '');
 });
+
+test('consumeHandoff: malformed handoff leaves no half-bound base', () => {
+  session.setItem(HANDOFF_KEY, '{not json');
+  consumeHandoff();
+  assert.equal(getApiBase(), '');
+});
+
+// --- P0-3: {origin, token} bind atomically. Two hosted tabs on different
+// servers can't leak one's token to the other, even sharing one localStorage. ---
+
+test('two-realm: token minted for server A is never returned when the base is server B', () => {
+  // Tab A binds server A + token A.
+  stashHandoff('https://server-a.test', 'TOKEN_A');
+  consumeHandoff();
+  assert.equal(getToken(), 'TOKEN_A');
+  // Tab B (same localStorage) binds server B + token B via its own sessionStorage.
+  setApiBase('https://server-b.test');
+  setToken('TOKEN_B');
+  assert.equal(getToken(), 'TOKEN_B');
+  // Back on server A's base, we still read A's token — B never clobbered it.
+  setApiBase('https://server-a.test');
+  assert.equal(getToken(), 'TOKEN_A');
+});
+

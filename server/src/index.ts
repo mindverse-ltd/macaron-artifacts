@@ -98,7 +98,7 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 // the network. resolveToken auto-generates one when bound to a non-loopback
 // host with no token set; seed it into the module-level armed slot so the hook
 // and a later tunnel-start share one live secret.
-const { token: authToken, generated: authGenerated } = resolveToken(HOST, AUTH_TOKEN);
+const { token: authToken, generated: authGenerated } = resolveToken(HOST, AUTH_TOKEN, ALLOWED_ORIGINS.length > 0);
 setArmedToken(authToken);
 // CORS/LNA must run before auth so a token-less OPTIONS preflight is answered
 // (and short-circuited) instead of being 401'd by the auth hook. Registered
@@ -183,7 +183,7 @@ try {
   await app.listen({ host: HOST, port: PORT });
   app.log.info(`macaron server listening on http://${HOST}:${PORT}`);
   if (authGenerated) {
-    app.log.warn(`bound to non-loopback host ${HOST} with no MACARON_AUTH_TOKEN — generated one for this run.`);
+    app.log.warn(`API reachable beyond a local peer (non-loopback bind or cross-origin enabled) with no MACARON_AUTH_TOKEN — generated one for this run.`);
     // The token is a live credential — keep it out of the structured log (which may be
     // shipped off-box) and print the connection string straight to stdout so the operator
     // can still grab it from their own terminal on first launch.

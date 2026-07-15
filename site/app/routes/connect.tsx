@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { baseOptions } from '@/lib/layout.shared';
 import { submit, onRestore } from '@/lib/connect-state';
-import type { Engine } from '@/lib/hosted-target';
+import { HANDOFF_KEY, type Engine } from '@/lib/hosted-target';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -31,11 +31,18 @@ export default function Connect() {
   }, [url, token, error]);
 
   const go = () => {
-    const { state, navigate } = submit(url, token, window.location.origin, engine);
+    const { state, navigate, handoff } = submit(url, token, window.location.origin, engine);
     setUrl(state.url);
     setToken(state.token);
     setError(state.error);
-    if (navigate) window.location.assign(navigate); // same-origin hosted route (?server=) — the WebUI binds the token to that server, then scrubs it
+    if (navigate && handoff) {
+      // Stash the {server, token} in sessionStorage (same tab, same origin) and
+      // open the clean hosted route — the credential never rides the URL, so it
+      // can't leak into the document GET / access logs / referrers. The hosted
+      // SPA reads and clears it on load.
+      try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify(handoff)); } catch { /* private mode */ }
+      window.location.assign(navigate);
+    }
   };
 
   return (
@@ -96,7 +103,11 @@ export default function Connect() {
           </button>
 
           <p className="text-xs text-fd-muted-foreground mt-4 text-center">
-            The WebUI runs here and talks directly to the server you name — your token is bound to that server, never stored on this site, and scrubbed from the URL on load.
+            The WebUI runs here and talks directly to the server you name — your token is bound to that server, never put in the URL, and never stored on this site.
+          </p>
+          <p className="text-xs text-fd-muted-foreground mt-2 text-center">
+            Your server must allow this origin: start it with{' '}
+            <code>MACARON_ALLOWED_ORIGINS={typeof window !== 'undefined' ? window.location.origin : 'https://artifacts.macaron.im'}</code>. It then requires an access token for cross-origin requests — set <code>MACARON_AUTH_TOKEN</code> or copy the one it prints on start.
           </p>
         </div>
       </div>

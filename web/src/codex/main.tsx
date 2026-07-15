@@ -12,15 +12,15 @@ import { CodexWorkspace } from './CodexWorkspace';
 import { AuthGate } from '../components/AuthGate';
 import { ToastProvider } from '../components/Toast';
 import { ConfirmProvider } from '../components/Confirm';
-import { clearToken, consumeTokenFromUrl } from '../lib/auth';
-import { consumeServerFromUrl } from '../lib/apiBase';
+import { consumeTokenFromUrl, consumeHandoff } from '../lib/auth';
 import { registerServiceWorker } from '../lib/pwa';
 import './styles.css';
 import '../chat-code.css';
 
-// Pick up a ?server=... then ?token=... bootstrap from a shared link before
-// anything fetches. clearToken lets a server switch drop a stale credential.
-consumeServerFromUrl(clearToken);
+// Pick up the hosted-mode handoff (docs connect page stashed {server, token}
+// same-tab in sessionStorage), then a same-origin ?token= share link. The
+// handoff binds the token to its server origin; nothing secret rides the URL.
+consumeHandoff();
 consumeTokenFromUrl();
 
 const router = createHashRouter([

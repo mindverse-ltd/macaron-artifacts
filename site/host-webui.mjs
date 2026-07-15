@@ -21,6 +21,16 @@ const webDir = path.join(repoRoot, 'web');
 const webDist = path.join(webDir, 'dist');
 const target = path.join(siteDir, 'build', 'client', 'app');
 
+// Vercel's install step runs only in `site/` (site/vercel.json installCommand),
+// so the app workspace (`web` + its `@macaron/shared` build dep) is uninstalled
+// and unbuilt when we get here. Bootstrap the repo-root workspace ourselves so a
+// clean CI/Vercel build can produce web/dist — the `site` install stays isolated
+// by site/pnpm-workspace.yaml, so this is the only place the app deps come from.
+console.log('[host-webui] installing app workspace deps (web + shared) …');
+execFileSync('pnpm', ['install', '--frozen-lockfile'], { cwd: repoRoot, stdio: 'inherit' });
+console.log('[host-webui] building @macaron/shared (web imports it) …');
+execFileSync('pnpm', ['--filter', '@macaron/shared', 'build'], { cwd: repoRoot, stdio: 'inherit' });
+
 console.log('[host-webui] building /web with base=/app/ …');
 execFileSync('pnpm', ['exec', 'vite', 'build', '--base=/app/'], { cwd: webDir, stdio: 'inherit' });
 

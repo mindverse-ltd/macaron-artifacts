@@ -1,25 +1,29 @@
 // Turn a validated server target (from buildTarget: `<origin>/?token=<t>`) into
-// the SAME-ORIGIN hosted-route URL that opens the WebUI we host under /app and
-// points it at that server. This is the difference between the old flow (a full
-// redirect to the server's own origin) and hosting: we stay on the docs origin,
-// load our staged SPA, and pass the server as `?server=` for apiBase to consume.
+// the same-origin hosted route that opens the WebUI we host under /app, plus a
+// one-time handoff carrying the server origin and token.
 //
 // Claude Code → /app (index.html), Codex → /app/codex (codex.html). The server
-// origin and token ride as query params; the WebUI's consumeServerFromUrl binds
-// the token to that origin and scrubs both from the URL on first load.
+// and token are deliberately NOT put on the URL: the connect page stashes the
+// handoff in sessionStorage and navigates to the clean route, so the credential
+// never lands in the document GET, the docs/CDN access logs, or referrers. The
+// hosted SPA reads the handoff on first load (see web apiBase.consumeHandoff),
+// binds the token to that server origin, and clears it. A crafted `/app?server=…`
+// URL is inert — only the same-tab handoff is trusted — so buildTarget's
+// scheme / self-origin / public-HTTP validation cannot be bypassed.
 export type Engine = 'claude' | 'codex';
 
 const ROUTE: Record<Engine, string> = { claude: '/app', codex: '/app/codex' };
 
+// sessionStorage key the docs connect page WRITES and the hosted SPA READS.
+// Must stay identical to HANDOFF_KEY in web/src/lib/apiBase.ts.
+export const HANDOFF_KEY = 'macaron_connect_handoff';
+
+export type Handoff = { server: string; token: string };
+export type HostedTarget = { route: string; handoff: Handoff };
+
 // `serverHref` is buildTarget's output, already normalized to `<origin>/` with
-// an optional `?token=`. We split it back into origin + token so the hosted
-// route gets `?server=<origin>` (no trailing `/`, path already dropped upstream)
-// and `?token=<t>` only when present.
-export function hostedTarget(serverHref: string, engine: Engine): string {
+// an optional `?token=`. Split it into origin + token for the handoff.
+export function hostedTarget(serverHref: string, engine: Engine): HostedTarget {
   const u = new URL(serverHref);
-  const token = u.searchParams.get('token') || '';
-  const target = new URL(ROUTE[engine], 'https://placeholder.invalid');
-  target.searchParams.set('server', u.origin);
-  if (token) target.searchParams.set('token', token);
-  return target.pathname + target.search; // relative, same-origin
+  return { route: ROUTE[engine], handoff: { server: u.origin, token: u.searchParams.get('token') || '' } };
 }

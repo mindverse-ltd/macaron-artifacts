@@ -6,8 +6,10 @@
 // installed PWA) degrades to "unsupported" rather than throwing.
 
 import { authedFetch } from './auth';
+import { assetUrl } from './assetBase';
 
-const SW_URL = '/sw.js';
+// Base-relative so the SW resolves under /app/ when hosted, not just at root.
+const SW_URL = assetUrl('/sw.js');
 
 export function pushSupported(): boolean {
   return (

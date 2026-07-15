@@ -4,20 +4,29 @@
 // the browser EventSource), so a single Authorization header covers plain
 // requests and streaming reads alike — no cookie / query-token escape hatch.
 
-import { getApiBase, isLoopbackBase, resolveApiUrl } from './apiBase';
+import { getApiBase, isLoopbackBase, resolveApiUrl, setApiBase, clearApiBase } from './apiBase';
 
+// The token is keyed by the server origin it was minted for, so a token bound to
+// server A can never be sent to server B — even with two hosted tabs sharing one
+// localStorage. Same-origin (empty base) keeps the historical bare key so an
+// existing local login survives the upgrade. See the P0-3 two-realm regression.
 const KEY = 'macaron_auth_token';
+function tokenKey(): string { const b = getApiBase(); return b ? `${KEY}::${b}` : KEY; }
+
+// sessionStorage key the docs connect page WRITES and we READ once on load.
+// Must stay identical to HANDOFF_KEY in site/app/lib/hosted-target.ts.
+const HANDOFF_KEY = 'macaron_connect_handoff';
 
 export function getToken(): string {
-  try { return localStorage.getItem(KEY) || ''; } catch { return ''; }
+  try { return localStorage.getItem(tokenKey()) || ''; } catch { return ''; }
 }
 
 export function setToken(token: string): void {
-  try { localStorage.setItem(KEY, token); } catch { /* private mode */ }
+  try { localStorage.setItem(tokenKey(), token); } catch { /* private mode */ }
 }
 
 export function clearToken(): void {
-  try { localStorage.removeItem(KEY); } catch { /* private mode */ }
+  try { localStorage.removeItem(tokenKey()); } catch { /* private mode */ }
 }
 
 export function authHeaders(): Record<string, string> {
@@ -58,4 +67,27 @@ export function consumeTokenFromUrl(): void {
     url.searchParams.delete('token');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
   } catch { /* non-browser / malformed URL */ }
+}
+
+// Hosted-mode bootstrap. The docs connect page validated the server target and
+// stashed {server, token} in sessionStorage (same tab, same origin) — never on
+// the URL, so the credential can't leak into the document GET / logs / referrers.
+// Read it ONCE, bind the api base FIRST so the token is keyed to that origin,
+// then store the token atomically with it, and delete the handoff.
+//
+// Only this same-tab handoff is trusted: a hand-crafted `/app?server=<attacker>`
+// carries no handoff and is ignored, so the connect page's scheme / self-origin
+// / public-HTTP validation cannot be bypassed by a direct link. Call once at
+// startup, before anything fetches. No handoff → same-origin local mode, base
+// stays empty and any existing local login survives.
+export function consumeHandoff(): void {
+  let raw: string | null = null;
+  try { raw = sessionStorage.getItem(HANDOFF_KEY); sessionStorage.removeItem(HANDOFF_KEY); } catch { return; }
+  if (!raw) return;
+  try {
+    const { server, token } = JSON.parse(raw) as { server?: string; token?: string };
+    if (!server) return;
+    setApiBase(server);                       // bind origin FIRST → token keys to it
+    if (token) setToken(token); else clearToken();
+  } catch { clearApiBase(); }                 // malformed handoff → no half-bound base
 }

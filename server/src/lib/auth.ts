@@ -68,11 +68,16 @@ export function tokensMatch(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-// The configured token wins. When the server is bound to a non-loopback host
-// but no token was set, generate one so an exposed server is never wide open.
-export function resolveToken(host: string, configured: string): { token: string; generated: boolean } {
+// The configured token wins. Otherwise auto-generate one so the API is never
+// left wide open when it's actually reachable by something other than a genuine
+// local peer: a non-loopback bind (exposed to the network) OR cross-origin mode
+// enabled (a hosted WebUI on another origin will drive this loopback server, and
+// isLocalRequest already denies those the frictionless-localhost bypass — so
+// without a token they'd hit a fully unauthenticated API). Loopback-only with no
+// cross-origin stays auth-off (the frictionless local default).
+export function resolveToken(host: string, configured: string, crossOriginEnabled = false): { token: string; generated: boolean } {
   if (configured) return { token: configured, generated: false };
-  if (!isLoopbackHost(host)) return { token: randomBytes(24).toString('base64url'), generated: true };
+  if (!isLoopbackHost(host) || crossOriginEnabled) return { token: randomBytes(24).toString('base64url'), generated: true };
   return { token: '', generated: false };
 }
 

@@ -45,23 +45,28 @@ test('reject: malformed URL with literal + encoded token keys scrubs both', () =
 });
 
 // Success now opens a SAME-ORIGIN hosted route (/app for Claude, /app/codex for
-// Codex) with the server carried as ?server= — NOT a redirect to the server's
-// own origin. The token rides along for consumeServerFromUrl to bind + scrub.
-test('success: opens the hosted Claude route pointed at the server, clears inputs', () => {
+// Codex) and returns a one-time `handoff` with the server + token. The token
+// rides in the handoff (stashed same-tab), NEVER on the navigate URL — so it
+// can't leak into the document GET / access logs / referrers.
+test('success: opens the hosted Claude route + handoff, clears inputs', () => {
   const r = submit('localhost:7878', 'field-tok', SELF, 'claude');
-  assert.equal(r.navigate, '/app?server=http%3A%2F%2Flocalhost%3A7878&token=field-tok');
+  assert.equal(r.navigate, '/app');
+  assert.deepEqual(r.handoff, { server: 'http://localhost:7878', token: 'field-tok' });
+  assert.ok(!r.navigate.includes('field-tok'));   // token never on the URL
   assert.equal(r.state.token, '');                // no token left in the field
   assert.equal(r.state.error, '');
 });
 
 test('success: engine=codex opens the hosted Codex route', () => {
   const r = submit('localhost:7979', 'field-tok', SELF, 'codex');
-  assert.equal(r.navigate, '/app/codex?server=http%3A%2F%2Flocalhost%3A7979&token=field-tok');
+  assert.equal(r.navigate, '/app/codex');
+  assert.deepEqual(r.handoff, { server: 'http://localhost:7979', token: 'field-tok' });
 });
 
-test('success: url-token is honored and scrubbed from the visible input', () => {
+test('success: url-token is honored (in handoff) and scrubbed from the visible input', () => {
   const r = submit('https://tunnel.test/?token=url-tok', '', SELF, 'claude');
-  assert.equal(r.navigate, '/app?server=https%3A%2F%2Ftunnel.test&token=url-tok');
+  assert.equal(r.navigate, '/app');
+  assert.deepEqual(r.handoff, { server: 'https://tunnel.test', token: 'url-tok' });
   assert.ok(!/token=/i.test(r.state.url));        // input no longer shows the token
 });
 

@@ -85,19 +85,22 @@ const hasLocalNodeModulePackage = (packageName: string) => {
 // files re-export from window.__macaron_* globals (set in main.tsx), so user
 // code, our vendored components, and partial-react all share one React.
 const BASE_IMPORTS: Record<string, string> = (() => {
+  // origin + Vite base, so shims resolve under /app/ when hosted (BASE_URL
+  // '/app/') and at root locally. The import map needs absolute URLs.
   const origin = typeof location !== 'undefined' ? location.origin : '';
+  const prefix = origin + import.meta.env.BASE_URL.replace(/\/$/, '');
   return {
-    react: origin + '/genui-shim/react.mjs',
-    'react/jsx-runtime': origin + '/genui-shim/react-jsx-runtime.mjs',
-    'react/jsx-dev-runtime': origin + '/genui-shim/react-jsx-dev-runtime.mjs',
-    'react-dom': origin + '/genui-shim/react-dom.mjs',
-    '$macaron/ui': origin + '/genui-shim/ui.mjs',
-    '$macaron/ui/charts': origin + '/genui-shim/charts.mjs',
-    'lucide-react': origin + '/genui-shim/lucide.mjs',
-    'framer-motion': origin + '/genui-shim/motion.mjs',
-    motion: origin + '/genui-shim/motion.mjs',
-    'motion/react': origin + '/genui-shim/motion.mjs',
-    '$macaron/chat': origin + '/genui-shim/chat.mjs',
+    react: prefix + '/genui-shim/react.mjs',
+    'react/jsx-runtime': prefix + '/genui-shim/react-jsx-runtime.mjs',
+    'react/jsx-dev-runtime': prefix + '/genui-shim/react-jsx-dev-runtime.mjs',
+    'react-dom': prefix + '/genui-shim/react-dom.mjs',
+    '$macaron/ui': prefix + '/genui-shim/ui.mjs',
+    '$macaron/ui/charts': prefix + '/genui-shim/charts.mjs',
+    'lucide-react': prefix + '/genui-shim/lucide.mjs',
+    'framer-motion': prefix + '/genui-shim/motion.mjs',
+    motion: prefix + '/genui-shim/motion.mjs',
+    'motion/react': prefix + '/genui-shim/motion.mjs',
+    '$macaron/chat': prefix + '/genui-shim/chat.mjs',
   };
 })();
 

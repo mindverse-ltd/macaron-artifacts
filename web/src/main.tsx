@@ -48,17 +48,17 @@ import { Mcp } from './views/Mcp';
 import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/Confirm';
 import { AuthGate } from './components/AuthGate';
-import { clearToken, consumeTokenFromUrl } from './lib/auth';
-import { consumeServerFromUrl } from './lib/apiBase';
+import { consumeTokenFromUrl, consumeHandoff } from './lib/auth';
 import { preloadRendererRuntime } from './macaron-vendor/StaticGenUIRenderer';
 import { registerServiceWorker } from './lib/pwa';
 import './styles.css';
 import './chat-code.css';
 
-// Pick up a ?server=... (hosted-mode server origin) then ?token=... bootstrap
-// from a shared link before anything fetches. Passing clearToken lets a server
-// switch drop a credential that wasn't reissued for the new origin.
-consumeServerFromUrl(clearToken);
+// Pick up the hosted-mode handoff (the docs connect page stashed {server, token}
+// in sessionStorage same-tab), then a same-origin ?token= share link. The
+// handoff binds the token to its server origin; nothing secret is read from the
+// URL, so a crafted ?server= link can't point us at an attacker.
+consumeHandoff();
 consumeTokenFromUrl();
 
 // The server serves the SPA for direct deep links, while createHashRouter reads

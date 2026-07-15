@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { assetUrl } from '../lib/assetBase';
 import {
   Check,
   ChevronDown,
@@ -342,7 +343,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar-v2">
       <Link className="sb-brand" to="/">
-        <img className="sb-logo" src="/mindlab-symbol.svg" alt="" />
+        <img className="sb-logo" src={assetUrl('/mindlab-symbol.svg')} alt="" />
         <div>
           <div className="sb-brand-name">Macaron Artifacts</div>
           <div className="sb-brand-sub">Presented by Mind Lab</div>

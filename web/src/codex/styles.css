@@ -1488,6 +1488,7 @@ body {
   color: var(--cx-text);
 }
 .cx-plan-step-glyph { font-family: ui-monospace, Menlo, monospace; }
+.cx-plan-step-glyph > svg { display: block; }
 .cx-plan-step.completed { color: var(--cx-muted); text-decoration: line-through; }
 .cx-plan-step.inProgress { font-weight: 600; }
 .cx-plan-step.inProgress .cx-plan-step-glyph { color: var(--cx-code-strong); }

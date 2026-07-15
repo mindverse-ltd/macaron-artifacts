@@ -10,7 +10,7 @@ const SELF = 'https://docs.example.com';
 // no-navigation guarantee on every rejection path.
 
 test('reject: never navigates and scrubs the token from both fields', () => {
-  const r = submit('http://127.attacker.invalid:7878/?token=EVE_BYPASS', 'EVE_FIELD', SELF);
+  const r = submit('http://127.attacker.invalid:7878/?token=EVE_BYPASS', 'EVE_FIELD', SELF, 'claude');
   assert.equal(r.navigate, undefined);            // NO navigation
   assert.equal(r.state.token, '');                // field token gone
   assert.ok(!/token=/i.test(r.state.url));        // url token stripped
@@ -19,41 +19,49 @@ test('reject: never navigates and scrubs the token from both fields', () => {
 });
 
 test('reject: self-origin (with trailing dot) does not navigate', () => {
-  const r = submit('https://docs.example.com./?token=EVE_SELF_DOT', 'EVE_FIELD', SELF);
+  const r = submit('https://docs.example.com./?token=EVE_SELF_DOT', 'EVE_FIELD', SELF, 'claude');
   assert.equal(r.navigate, undefined);
   assert.equal(r.state.token, '');
   assert.ok(!r.state.url.includes('EVE_SELF_DOT'));
 });
 
 test('reject: malformed URL with duplicate tokens scrubs all of them', () => {
-  const r = submit('http://public.example:bad/?token=EVE_DUP_FIRST&token=EVE_DUP_SECOND', '', SELF);
+  const r = submit('http://public.example:bad/?token=EVE_DUP_FIRST&token=EVE_DUP_SECOND', '', SELF, 'claude');
   assert.equal(r.navigate, undefined);
   assert.ok(!/token=/i.test(r.state.url));
   assert.ok(!r.state.url.includes('EVE_DUP_SECOND'));
 });
 
 test('reject: malformed URL with a percent-encoded token key scrubs it', () => {
-  const r = submit('http://public.example:bad/?%74oken=EVE_ENCODED', '', SELF);
+  const r = submit('http://public.example:bad/?%74oken=EVE_ENCODED', '', SELF, 'claude');
   assert.equal(r.navigate, undefined);                 // no navigation
   assert.ok(!r.state.url.includes('EVE_ENCODED'));     // no retention
 });
 
 test('reject: malformed URL with literal + encoded token keys scrubs both', () => {
-  const r = submit('http://public.example:bad/?token=EVE_LITERAL&%74oken=EVE_ENCODED', '', SELF);
+  const r = submit('http://public.example:bad/?token=EVE_LITERAL&%74oken=EVE_ENCODED', '', SELF, 'claude');
   assert.equal(r.navigate, undefined);
   assert.ok(!r.state.url.includes('EVE_LITERAL') && !r.state.url.includes('EVE_ENCODED'));
 });
 
-test('success: navigates to the built href and clears the inputs', () => {
-  const r = submit('localhost:7878', 'field-tok', SELF);
-  assert.equal(r.navigate, 'http://localhost:7878/?token=field-tok');
+// Success now opens a SAME-ORIGIN hosted route (/app for Claude, /app/codex for
+// Codex) with the server carried as ?server= — NOT a redirect to the server's
+// own origin. The token rides along for consumeServerFromUrl to bind + scrub.
+test('success: opens the hosted Claude route pointed at the server, clears inputs', () => {
+  const r = submit('localhost:7878', 'field-tok', SELF, 'claude');
+  assert.equal(r.navigate, '/app?server=http%3A%2F%2Flocalhost%3A7878&token=field-tok');
   assert.equal(r.state.token, '');                // no token left in the field
   assert.equal(r.state.error, '');
 });
 
+test('success: engine=codex opens the hosted Codex route', () => {
+  const r = submit('localhost:7979', 'field-tok', SELF, 'codex');
+  assert.equal(r.navigate, '/app/codex?server=http%3A%2F%2Flocalhost%3A7979&token=field-tok');
+});
+
 test('success: url-token is honored and scrubbed from the visible input', () => {
-  const r = submit('https://tunnel.test/?token=url-tok', '', SELF);
-  assert.equal(r.navigate, 'https://tunnel.test/?token=url-tok');
+  const r = submit('https://tunnel.test/?token=url-tok', '', SELF, 'claude');
+  assert.equal(r.navigate, '/app?server=https%3A%2F%2Ftunnel.test&token=url-tok');
   assert.ok(!/token=/i.test(r.state.url));        // input no longer shows the token
 });
 

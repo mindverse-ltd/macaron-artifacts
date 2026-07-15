@@ -65,16 +65,17 @@ consumeTokenFromUrl();
 // only the hash. Promote a pathname route before the router initializes so
 // opening /board (or a copied workspace/session URL) lands on that view rather
 // than silently rendering the dashboard.
-if (
-  !window.location.hash &&
-  window.location.pathname !== '/' &&
-  window.location.pathname !== '/index.html'
-) {
-  window.history.replaceState(
-    null,
-    '',
-    `/#${window.location.pathname}${window.location.search}`,
-  );
+//
+// BASE_URL is `/` when the server serves the SPA at its own root, but `/app/`
+// when the docs site HOSTS this bundle under a subpath. Strip the base so the
+// hash route is server-relative (`/app/w/x` → `#/w/x`), and treat the bare base
+// (`/app/`) the same as root so it boots the dashboard, not a 404 `#/app/`.
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, ''); // '' locally, '/app' when hosted
+const rel = BASE && window.location.pathname.startsWith(BASE)
+  ? window.location.pathname.slice(BASE.length) || '/'
+  : window.location.pathname;
+if (!window.location.hash && rel !== '/' && rel !== '/index.html') {
+  window.history.replaceState(null, '', `/#${rel}${window.location.search}`);
 }
 
 // Boot UnoCSS runtime: scans the DOM for utility classes and injects CSS as

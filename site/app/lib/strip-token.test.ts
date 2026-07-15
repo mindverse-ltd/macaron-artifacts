@@ -35,6 +35,24 @@ test('bare host with token strips the token, keeps the host', () => {
   assert.equal(stripToken('x.test/?token=abc'), 'x.test/');
 });
 
+test('malformed URL: strips a percent-encoded token key (%74oken)', () => {
+  const out = stripToken('http://public.example:bad/?%74oken=EVE_ENCODED');
+  assert.ok(!out.includes('EVE_ENCODED'), `encoded token survived: ${out}`);
+  assert.ok(!/oken=/i.test(out));
+});
+
+test('malformed URL: strips literal + encoded token keys together', () => {
+  const out = stripToken('http://public.example:bad/?token=EVE_LITERAL&%74oken=EVE_ENCODED');
+  assert.ok(!out.includes('EVE_LITERAL') && !out.includes('EVE_ENCODED'), out);
+});
+
+test('malformed URL: an undecodable key fails safe (dropped)', () => {
+  // `%zz` can't be decoded; treat it as a token key and drop it rather than leak.
+  const out = stripToken('http://public.example:bad/?%zzoken=EVE_BAD&a=1');
+  assert.ok(!out.includes('EVE_BAD'));
+  assert.ok(out.includes('a=1'));
+});
+
 test('input without a token is returned unchanged', () => {
   assert.equal(stripToken('localhost:7878'), 'localhost:7878');
 });

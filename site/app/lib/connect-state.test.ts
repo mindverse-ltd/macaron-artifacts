@@ -32,6 +32,18 @@ test('reject: malformed URL with duplicate tokens scrubs all of them', () => {
   assert.ok(!r.state.url.includes('EVE_DUP_SECOND'));
 });
 
+test('reject: malformed URL with a percent-encoded token key scrubs it', () => {
+  const r = submit('http://public.example:bad/?%74oken=EVE_ENCODED', '', SELF);
+  assert.equal(r.navigate, undefined);                 // no navigation
+  assert.ok(!r.state.url.includes('EVE_ENCODED'));     // no retention
+});
+
+test('reject: malformed URL with literal + encoded token keys scrubs both', () => {
+  const r = submit('http://public.example:bad/?token=EVE_LITERAL&%74oken=EVE_ENCODED', '', SELF);
+  assert.equal(r.navigate, undefined);
+  assert.ok(!r.state.url.includes('EVE_LITERAL') && !r.state.url.includes('EVE_ENCODED'));
+});
+
 test('success: navigates to the built href and clears the inputs', () => {
   const r = submit('localhost:7878', 'field-tok', SELF);
   assert.equal(r.navigate, 'http://localhost:7878/?token=field-tok');

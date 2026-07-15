@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
+import { AUTH_TOKEN, ALLOWED_ORIGINS, HOST, PORT, WEB_DIST } from './config.js';
 import { makeAuthHook, redactTokenInUrl, resolveToken, setArmedToken } from './lib/auth.js';
+import { makeCorsHook } from './lib/cors.js';
 import { warmSettingsCache } from './lib/settings-store.js';
 import { warmWorktreeCache } from './lib/worktree-store.js';
 import { warmPermissionRulesCache } from './lib/permission-rules.js';
@@ -99,6 +100,9 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 // and a later tunnel-start share one live secret.
 const { token: authToken, generated: authGenerated } = resolveToken(HOST, AUTH_TOKEN);
 setArmedToken(authToken);
+// CORS/LNA must run before auth so a token-less OPTIONS preflight is answered
+// (and short-circuited) instead of being 401'd by the auth hook.
+if (ALLOWED_ORIGINS.length > 0) app.addHook('onRequest', makeCorsHook(ALLOWED_ORIGINS));
 app.addHook('onRequest', makeAuthHook());
 
 await app.register(async (instance) => {

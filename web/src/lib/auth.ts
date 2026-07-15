@@ -4,6 +4,8 @@
 // the browser EventSource), so a single Authorization header covers plain
 // requests and streaming reads alike — no cookie / query-token escape hatch.
 
+import { getApiBase, isLoopbackBase, resolveApiUrl } from './apiBase';
+
 const KEY = 'macaron_auth_token';
 
 export function getToken(): string {
@@ -29,7 +31,15 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
   const headers = new Headers(init.headers);
   const t = getToken();
   if (t) headers.set('Authorization', `Bearer ${t}`);
-  const resp = await fetch(input, { ...init, headers });
+  const url = resolveApiUrl(input);
+  const extra: RequestInit = {};
+  // Cross-origin hosted mode: the browser needs credentials mode explicit, and
+  // loopback targets want the LNA hint so Chrome skips the mixed-content check.
+  if (getApiBase()) {
+    extra.mode = 'cors';
+    if (isLoopbackBase()) (extra as { targetAddressSpace?: string }).targetAddressSpace = 'loopback';
+  }
+  const resp = await fetch(url, { ...init, ...extra, headers });
   if (resp.status === 401) {
     clearToken();
     window.dispatchEvent(new Event('macaron:auth-required'));

@@ -8,6 +8,7 @@ import {
   sendTerminalInput,
   sendTerminalResize,
 } from '../lib/terminal';
+import { getApiBase } from '../lib/apiBase';
 import { useTheme, type ResolvedTheme } from '../lib/theme';
 
 // Terminal palette per resolved theme. xterm's `theme` is a plain JS object
@@ -117,7 +118,7 @@ export function Terminal({ project, sid, focused }: { project: string; sid: stri
 
       // history = full snapshot (reset+write, idempotent on reconnect);
       // output = incremental chunk; exit = dim footer.
-      es = new EventSource(terminalStreamUrl(project, sid, cols, rows));
+      es = new EventSource(terminalStreamUrl(project, sid, cols, rows), getApiBase() ? { withCredentials: true } : undefined);
       es.onmessage = (e) => {
         if (e.data === '[DONE]') { es?.close(); return; }
         let msg: { type?: string; data?: string; exitCode?: number; error?: string };

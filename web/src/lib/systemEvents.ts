@@ -7,6 +7,7 @@
 
 import type { SystemEvent } from '@macaron/shared';
 import { getToken } from './auth';
+import { getApiBase, resolveApiUrl } from './apiBase';
 
 type Listener = (ev: SystemEvent) => void;
 
@@ -15,12 +16,14 @@ const listeners = new Set<Listener>();
 
 function systemEventsUrl(): string {
   const token = getToken();
-  return token ? `/api/events?token=${encodeURIComponent(token)}` : '/api/events';
+  return resolveApiUrl(token ? `/api/events?token=${encodeURIComponent(token)}` : '/api/events');
 }
 
 function ensureSource(): void {
   if (source) return;
-  source = new EventSource(systemEventsUrl());
+  // Cross-origin hosted mode needs credentialed CORS on the SSE stream; same
+  // origin keeps the default so nothing changes for the local server.
+  source = new EventSource(systemEventsUrl(), getApiBase() ? { withCredentials: true } : undefined);
   source.onmessage = (e) => {
     let payload: SystemEvent | { type: string };
     try {

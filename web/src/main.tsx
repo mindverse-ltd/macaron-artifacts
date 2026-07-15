@@ -49,12 +49,15 @@ import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/Confirm';
 import { AuthGate } from './components/AuthGate';
 import { consumeTokenFromUrl } from './lib/auth';
+import { consumeServerFromUrl } from './lib/apiBase';
 import { preloadRendererRuntime } from './macaron-vendor/StaticGenUIRenderer';
 import { registerServiceWorker } from './lib/pwa';
 import './styles.css';
 import './chat-code.css';
 
-// Pick up a ?token=... bootstrap from a shared link before anything fetches.
+// Pick up a ?server=... (hosted-mode server origin) then ?token=... bootstrap
+// from a shared link before anything fetches.
+consumeServerFromUrl();
 consumeTokenFromUrl();
 
 // The server serves the SPA for direct deep links, while createHashRouter reads

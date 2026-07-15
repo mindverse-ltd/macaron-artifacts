@@ -12,6 +12,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../lib/api';
+import { getApiBase, resolveApiUrl } from '../lib/apiBase';
+import { getToken } from '../lib/auth';
 import { useToast } from './Toast';
 
 // Monaco is heavy — only load it when the user flips to Edit mode.
@@ -115,8 +117,11 @@ export function FileTile({
     if (isImage) {
       // Image preview via authed GET — reuse the read endpoint's raw path.
       // Server returns text for text files; for images we use an <img> with
-      // a proxied URL so the browser handles decoding.
-      const src = `/api/files/${encodeURIComponent(project)}/raw?path=${encodeURIComponent(path)}`;
+      // a proxied URL so the browser handles decoding. An <img> can't set the
+      // Authorization header, so in cross-origin hosted mode we ride the token
+      // via the query param the server also accepts.
+      const raw = `/api/files/${encodeURIComponent(project)}/raw?path=${encodeURIComponent(path)}`;
+      const src = getApiBase() && getToken() ? resolveApiUrl(`${raw}&token=${encodeURIComponent(getToken())}`) : resolveApiUrl(raw);
       return (
         <div className="ft-image-wrap">
           <img src={src} alt={basenameOf(path)} />

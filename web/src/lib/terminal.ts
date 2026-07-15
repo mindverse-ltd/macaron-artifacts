@@ -8,6 +8,7 @@
 // EventSource, which can't set headers — carries it as a `?token=` query param,
 // the other credential the server accepts.
 import { authedFetch, getToken } from './auth';
+import { resolveApiUrl } from './apiBase';
 
 const TERMINAL_PREFIX = 'term:';
 
@@ -34,7 +35,7 @@ function base(project: string, sid: string): string {
 export function terminalStreamUrl(project: string, sid: string, cols: number, rows: number): string {
   const url = `${base(project, sid)}/stream?cols=${cols}&rows=${rows}`;
   const t = getToken();
-  return t ? `${url}&token=${encodeURIComponent(t)}` : url;
+  return resolveApiUrl(t ? `${url}&token=${encodeURIComponent(t)}` : url);
 }
 
 // Keystrokes must arrive in order. Chain each input POST behind the previous

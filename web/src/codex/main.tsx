@@ -13,11 +13,14 @@ import { AuthGate } from '../components/AuthGate';
 import { ToastProvider } from '../components/Toast';
 import { ConfirmProvider } from '../components/Confirm';
 import { consumeTokenFromUrl } from '../lib/auth';
+import { consumeServerFromUrl } from '../lib/apiBase';
 import { registerServiceWorker } from '../lib/pwa';
 import './styles.css';
 import '../chat-code.css';
 
-// Pick up a ?token=... bootstrap from a shared link before anything fetches.
+// Pick up a ?server=... then ?token=... bootstrap from a shared link before
+// anything fetches.
+consumeServerFromUrl();
 consumeTokenFromUrl();
 
 const router = createHashRouter([

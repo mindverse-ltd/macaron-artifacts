@@ -4,9 +4,9 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { structure } from 'fumadocs-core/mdx-plugins/remark-structure';
-import { initAdvancedSearch } from 'fumadocs-core/search/server';
+import { initAdvancedSearch, type SearchServer } from 'fumadocs-core/search/server';
 import { oramaStaticClient } from 'fumadocs-core/search/client/orama-static';
-import { buildIndex, sanitizeSearchText, pairResidues, encodeEscapedQuotes } from './search-index';
+import { buildIndex, sanitizeSearchText, pairResidues } from './search-index';
 
 // Unit: the sanitizer strips markdown/entity artifacts WITHOUT mangling
 // technical identifiers. The old regex stack turned `MACARON_CODEX_TRANSPORT`
@@ -52,6 +52,51 @@ test('sanitizeSearchText strips markup but preserves identifiers', () => {
   assert.equal(sanitizeSearchText('returns `<T>(value)` => value'), 'returns <T>(value) => value');
 });
 
+// EVE round-35 P1-3 / P2: round-34 sentinel-encoded escaped quotes (`\"` → U+E000) before
+// structure(), which corrupted legit prose and collided with real content. That machinery is
+// gone; buildIndex now consumes Fumadocs' compiled structuredData directly. These cases lock
+// the reverted behavior: a Windows path trailing backslash, mixed single/double-quote
+// attributes, a raw private-use code point, a `&#xE000;` entity, and an inline-code escaped
+// quote all sanitize cleanly — needle text survives, no sentinel is introduced, and only the
+// self-closing component residue that CAN reach a compiled chunk (`<File … />`) is stripped.
+test('sanitizeSearchText: paths, mixed quotes, PUA/entity/inline-code round-trip cleanly', () => {
+  const noSentinel = (s: string) => assert.ok(!/[]/.test(s), `sentinel code point leaked: ${JSON.stringify(s)}`);
+
+  // A legit Windows path with a trailing backslash is preserved (round-34's `\"`/`\'` encoding
+  // could mis-handle a backslash before a later quote); the needle survives.
+  for (const src of ['Install to `C:\\Users\\me` then run BODYPATH', 'the path C:\\ works FICHE']) {
+    const out = sanitizeSearchText(src);
+    noSentinel(out);
+    assert.ok(out.includes(src.includes('BODYPATH') ? 'BODYPATH' : 'FICHE'), `path needle lost: ${JSON.stringify(out)}`);
+    assert.ok(out.includes('C:'), `path text lost: ${JSON.stringify(out)}`);
+  }
+
+  // Mixed single/double-quote attributes on one component: the tag is stripped, body kept.
+  assert.equal(sanitizeSearchText("Body <Callout title=\"a > b\" desc='c'>inner MIXQ</Callout> tail"), 'Body inner MIXQ tail');
+
+  // A raw private-use char and a `&#xE000;` entity are ordinary content — no sentinel decode
+  // mangles them, and the needle survives alongside.
+  const pua = sanitizeSearchText('literal  and  chars PUANEEDLE');
+  assert.ok(pua.includes('PUANEEDLE'), `PUA needle lost: ${JSON.stringify(pua)}`);
+  const ent = sanitizeSearchText('entity &#xE000; here ENTNEEDLE');
+  assert.ok(ent.includes('ENTNEEDLE'), `entity needle lost: ${JSON.stringify(ent)}`);
+
+  // An escaped quote INSIDE inline code is literal content, never an attribute quote — it must
+  // not be sentinel-encoded away; the needle after it survives.
+  const inline = sanitizeSearchText('code `inline \\" quote` and more INLINEESC');
+  noSentinel(inline);
+  assert.ok(inline.includes('INLINEESC'), `inline-code needle lost: ${JSON.stringify(inline)}`);
+
+  // A legit prose escaped quote keeps its characters (no sentinel round-trip corruption).
+  const prose = sanitizeSearchText('he said \\"hello\\" QUOTEPROSE');
+  noSentinel(prose);
+  assert.ok(prose.includes('QUOTEPROSE') && prose.includes('hello'), `prose quote lost: ${JSON.stringify(prose)}`);
+
+  // The one residue shape that DOES reach a compiled chunk (a self-closing childless component)
+  // is stripped to nothing.
+  assert.equal(sanitizeSearchText('<File name="plugin.json" />'), '');
+});
+
 // EVE round 5 — the adversarial cases must run through the SAME path production
 // does: raw MDX → structure() → sanitize. Fumadocs splits a flow component around
 // any nested heading, so the sanitizer sees standalone opening/closing RESIDUE
@@ -61,7 +106,7 @@ test('sanitizeSearchText strips markup but preserves identifiers', () => {
 // emits such a residue; the guarantee is that no needle-adjacent markup survives.
 test('real structure() split chunks: residue never leaks, prose survives', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -100,7 +145,7 @@ test('real structure() split chunks: residue never leaks, prose survives', () =>
 // chunks, plus boundary fidelity the earlier rounds missed.
 test('real structure() split chunks: escaped quotes, generic defaults, OOB entities', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -270,7 +315,7 @@ test('real structure() split chunks: escaped quotes, generic defaults, OOB entit
 // page-wide paired-position set, exactly as buildIndex does.
 test('real structure() cross-chunk closer pairing: lossy openers, ambiguous keywords, own-line >', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -334,7 +379,7 @@ test('real structure() cross-chunk closer pairing: lossy openers, ambiguous keyw
 // code point (astral + namespaced), and the whole-chunk `standalone` tie-break is gone.
 test('real structure() positional pairing: lossy > recovery, code-span closers, prose generics, astral names', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -385,7 +430,7 @@ test('real structure() positional pairing: lossy > recovery, code-span closers, 
 // wrongly emptied by the standalone `hasAttrShape` strip. Each is fed through real structure().
 test('real structure() round-15: lossy-expression recovery, same-name inner generic, bare modifier generics', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -442,7 +487,7 @@ test('real structure() round-15: lossy-expression recovery, same-name inner gene
 //       corrupted attribute hides such a `}]` is stripped whole, not cut at scanTag's false `>`.
 test('real structure() round-16: syntactic-role pairing exemption, string-aware lossy recovery', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -499,7 +544,7 @@ test('real structure() round-16: syntactic-role pairing exemption, string-aware 
 //       directions and keeps the visible body/suffix.
 test('real structure() round-17: glued custom-name pairing, glued inline bracket matrix', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -556,7 +601,7 @@ test('real structure() round-17: glued custom-name pairing, glued inline bracket
 //       inline component, entered the stack, and stole the outer real closer. The probe must skip code.
 test('real structure() round-18: desync-gated anchor, custom-name × bracket matrix, code-span fake closer', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -615,7 +660,7 @@ test('real structure() round-18: desync-gated anchor, custom-name × bracket mat
 //       unterminated run is literal, not a fence) shared by every code-span skip.
 test('real structure() round-19: opener-local desync, hierarchy attribution, CommonMark code spans', () => {
   const clean = (raw: string) => {
-    const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content);
+    const chunks = structure(raw).contents.map((c) => c.content);
     const paired = pairResidues(chunks);
     return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired));
   };
@@ -654,11 +699,11 @@ test('real structure() round-19: opener-local desync, hierarchy attribution, Com
 // recovery (honest body kept, lossy attribute dropped) — the exact reproductions from EVE's review.
 test('real structure() round-21: hierarchy-decided generics, opener-local recovery, code-span parity', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r21', data: { title: '/r21', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r21', data: { title: '/r21', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
-  const clean = (raw: string) => { const chunks = structure(encodeEscapedQuotes(raw)).contents.map((c) => c.content); const paired = pairResidues(chunks); return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired)); };
+  const clean = (raw: string) => { const chunks = structure(raw).contents.map((c) => c.content); const paired = pairResidues(chunks); return chunks.map((c, ci) => sanitizeSearchText(c, ci, paired)); };
 
   // P1 #1a — a same-name generic PRECEDING a real same-name inline, in live prose (NOT a code span, so
   // pairResidues actually sees it). Hierarchy must keep the generic: positional nearest-pop hands the
@@ -703,7 +748,7 @@ test('real structure() round-21: hierarchy-decided generics, opener-local recove
 // chunk stream. These drive the real structure() → buildIndex() → Orama chain with EVE's exact reals.
 test('real structure() round-22: outer/generic/inline hierarchy, cross-chunk flow, balanced-lossy contract', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r22', data: { title: '/r22', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r22', data: { title: '/r22', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -749,7 +794,7 @@ test('real structure() round-22: outer/generic/inline hierarchy, cross-chunk flo
 // the real structure() → buildIndex() → Orama chain with EVE's exact reals from the round-22 review.
 test('real structure() round-23: whole-chunk/compact generics, intro/nested flow, single-close recovery', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r23', data: { title: '/r23', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r23', data: { title: '/r23', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -789,7 +834,7 @@ test('real structure() round-23: whole-chunk/compact generics, intro/nested flow
 // Each case drives the real structure() → buildIndex() → Orama chain with EVE's exact round-23 reals.
 test('real structure() round-24: bidirectional generic classification, opener-local strip boundary', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r24', data: { title: '/r24', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r24', data: { title: '/r24', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -826,7 +871,7 @@ test('real structure() round-24: bidirectional generic classification, opener-lo
 // never a whole-chunk scan), and the `()` desync no longer misjudges JS lexical contexts (regex, comment).
 test('real structure() round-25: real-hierarchy pairing, opener-local lossy boundary, lexical-safe desync', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r25', data: { title: '/r25', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r25', data: { title: '/r25', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -872,7 +917,7 @@ test('real structure() round-25: real-hierarchy pairing, opener-local lossy boun
 // regex `/[}>]/` or comment `/* } > */` inside an honest `{…}` attribute is lexed, not miscounted.
 test('real structure() round-26: hierarchy role, opener-local lossy boundary, lexical-safe scan', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r26', data: { title: '/r26', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r26', data: { title: '/r26', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -918,7 +963,7 @@ test('real structure() round-26: hierarchy role, opener-local lossy boundary, le
 // that must not be mistaken for a quote leak.
 test('real structure() round-27: unified lexical-safe opener boundary across lossy shapes', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r27', data: { title: '/r27', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r27', data: { title: '/r27', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -950,7 +995,7 @@ test('real structure() round-27: unified lexical-safe opener boundary across los
 // (4) `/` after a `}` object-literal operand is division, not a regex.
 test('real structure() round-28: lexical-safe opener span, unified LIFO pairing, division after }', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r28', data: { title: '/r28', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r28', data: { title: '/r28', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -1004,7 +1049,7 @@ test('real structure() round-28: lexical-safe opener span, unified LIFO pairing,
 //     in the leaked attribute is not a real boundary.
 test('real structure() round-29: budget order-independence, opener-local & quote-consistent lossy recovery', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r29', data: { title: '/r29', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r29', data: { title: '/r29', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -1054,7 +1099,7 @@ test('real structure() round-29: budget order-independence, opener-local & quote
 //     `pattern={/">/}` regex in the leaked attribute is not the real close; the tag's real `>` is.
 test('real structure() round-30: glued budget LIFO, prose instantiation, opener-local & regex-safe recovery', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r30', data: { title: '/r30', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r30', data: { title: '/r30', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -1089,7 +1134,7 @@ test('real structure() round-30: glued budget LIFO, prose instantiation, opener-
 
 test('real structure() round-31: opener-provable roles only — no chunk-end/body-first-char guessing, recovery gated on opener lossiness', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r31', data: { title: '/r31', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r31', data: { title: '/r31', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -1135,7 +1180,7 @@ test('real structure() round-31: opener-provable roles only — no chunk-end/bod
 
 test('real structure() round-32: JSX boolean props are not TS prose, quota counts consistently, recovery is fully opener-local', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r32', data: { title: '/r32', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r32', data: { title: '/r32', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -1175,7 +1220,7 @@ test('real structure() round-32: JSX boolean props are not TS prose, quota count
 
 test('real structure() round-33: per-closer-interval quota, opener-local expression/bracket recovery, lexical-safe desync', async () => {
   const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r33', data: { title: '/r33', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
+    const index = await buildIndex({ url: '/r33', data: { title: '/r33', description: undefined, structuredData: structure(raw) } } as Parameters<typeof buildIndex>[0]);
     return initAdvancedSearch({ language: 'english', indexes: [index] });
   };
   const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
@@ -1208,78 +1253,52 @@ test('real structure() round-33: per-closer-interval quota, opener-local express
   assert.ok((await hits(cmt, 'RIGHTCMT32')) > 0, 'clean comment-attr trailing body lost');
 });
 
-test('real structure() round-34: sentinel-encoded escaped quotes distinguish leak from legit trailing-space attr', async () => {
-  const oramaFor = async (raw: string) => {
-    const index = await buildIndex({ url: '/r34', data: { title: '/r34', description: undefined, getText: async () => raw } } as unknown as Parameters<typeof buildIndex>[0]);
-    return initAdvancedSearch({ language: 'english', indexes: [index] });
-  };
-  const hits = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).length;
-  const summaries = async (raw: string, q: string) => (await (await oramaFor(raw)).search(q)).map((r) => r.content ?? '');
-
-  // The unresolvable P1-4 case, now split by encodeEscapedQuotes running BEFORE structure(): the escaped
-  // quote becomes a sentinel so the leaked string stays balanced, scanTag lands on the REAL `>`, and the
-  // whole opener (needle and all) is stripped — while the LEGIT trailing-space attribute (no backslash)
-  // keeps its close-quote and its body survives. Both single- and double-quote leaks; both directions.
-  const dq = '<$Panel title="a \\" > DQLEAK34">LEFTDQ34 body\n\n## H\n\nRIGHTDQ34\n\n</$Panel>';
-  assert.equal(await hits(dq, 'DQLEAK34'), 0, 'double-quote dropped-quote leak survived (needle entered index)');
-  assert.ok((await hits(dq, 'LEFTDQ34')) > 0, 'double-quote leak: opener intro body lost');
-  assert.ok((await hits(dq, 'RIGHTDQ34')) > 0, 'double-quote leak: trailing body lost');
-
-  const sq = "<$Panel title='a \\' > SQLEAK34'>LEFTSQ34 body\n\n## H\n\nRIGHTSQ34\n\n</$Panel>";
-  assert.equal(await hits(sq, 'SQLEAK34'), 0, 'single-quote dropped-quote leak survived (needle entered index)');
-  assert.ok((await hits(sq, 'LEFTSQ34')) > 0, 'single-quote leak: opener intro body lost');
-  assert.ok((await hits(sq, 'RIGHTSQ34')) > 0, 'single-quote leak: trailing body lost');
-
-  // Legit attribute VALUE ending in a literal space — byte-identical to the leak BEFORE encoding, now
-  // distinct (no backslash → no sentinel → the real close-quote stands). The intro carries a body `">`
-  // so the OLD quote-leak recovery branch over-recovered and ate the intro (`LEFTLEGIT*34`) — RED on old
-  // head. The body's own `">` must survive too. Both quote styles.
-  const legitD = '<$Panel a="1 " >LEFTLEGITD34 text "> RIGHTLEGITD34\n\n## H\n\nt\n\n</$Panel>';
-  assert.ok((await hits(legitD, 'LEFTLEGITD34')) > 0, 'legit double-quote trailing-space attr: intro body wrongly stripped');
-  assert.ok((await hits(legitD, 'RIGHTLEGITD34')) > 0, 'legit double-quote trailing-space attr: trailing body lost');
-  const legitS = "<$Panel a='1 ' >LEFTLEGITS34 text '> RIGHTLEGITS34\n\n## H\n\nt\n\n</$Panel>";
-  assert.ok((await hits(legitS, 'LEFTLEGITS34')) > 0, 'legit single-quote trailing-space attr: intro body wrongly stripped');
-  assert.ok((await hits(legitS, 'RIGHTLEGITS34')) > 0, 'legit single-quote trailing-space attr: trailing body lost');
-
-  // A legit prose quote (`\"…\"`) must round-trip through the sentinel unchanged, and NO sentinel code
-  // point (U+E000/U+E001) may ever appear in a served summary.
-  const prose = 'prefix a \\"quoted phrase\\" QUOTEPROSE34 tail';
-  const proseHits = (await summaries(prose, 'QUOTEPROSE34')).filter((r) => r.includes('QUOTEPROSE34'));
-  assert.ok(proseHits.length > 0, 'legit prose quote sample produced no content hit');
-  for (const r of proseHits) {
-    assert.ok(!/[]/.test(r), `sentinel code point leaked into the index: ${JSON.stringify(r.slice(0, 60))}`);
-    assert.ok(r.includes('"quoted phrase"'), `legit prose quote lost its characters: ${JSON.stringify(r.slice(0, 60))}`);
-  }
-});
-
 const DOCS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../content/docs');
 
-function mdxFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) return mdxFiles(full);
-    return e.name.endsWith('.mdx') ? [full] : [];
-  });
+// Build the SAME index the production /api/search route builds. The production route
+// consumes Fumadocs' BUILD-COMPILED `page.data.structuredData` — remarkStructure run
+// inside the MDX compile on the real AST — so we load those exact compiled objects from
+// the build output (`build/server/assets/*.js`) and drive the production buildIndex over
+// them, then hand the records to Orama. This is the ONLY faithful production oracle: the
+// exported `structure(readFileSync(...))` uses remark() WITHOUT the mdxjs extension, so it
+// mis-parses frontmatter as a heading and drops every `<Card>`/`<Callout>` body — feeding
+// that here would hide real data loss (EVE round-35 P1-1). Requires a prior build; under
+// REQUIRE_BUILT_INDEX (verify/CI) a missing build is a hard failure, else the caller skips.
+const COMPILED_ASSETS = path.resolve(DOCS_DIR, '../../build/server/assets');
+
+type CompiledStructuredData = { contents: { heading?: string; content: string }[]; headings: { id: string; content: string }[] };
+
+function compiledPages(): { url: string; title: string; structuredData: CompiledStructuredData }[] {
+  if (!existsSync(COMPILED_ASSETS)) return [];
+  const pages: { url: string; title: string; structuredData: CompiledStructuredData }[] = [];
+  for (const file of readdirSync(COMPILED_ASSETS)) {
+    if (!file.endsWith('.js')) continue;
+    const src = readFileSync(path.join(COMPILED_ASSETS, file), 'utf8');
+    const sd = /var structuredData = (\{[\s\S]*?\n\});/.exec(src);
+    if (!sd) continue; // not a compiled doc module
+    const structuredData = new Function(`return ${sd[1]}`)() as CompiledStructuredData;
+    const fm = /var frontmatter = (\{[\s\S]*?\n\});/.exec(src);
+    const title = (fm ? (new Function(`return ${fm[1]}`)() as { title?: string }).title : undefined) ?? file;
+    pages.push({ url: '/' + file, title, structuredData });
+  }
+  return pages;
 }
 
-// Build the SAME index the production /api/search route builds: feed each real
-// MDX file through structure() (fumadocs' extractor) + the production buildIndex,
-// then hand the records to Orama via initAdvancedSearch — the exact engine
-// createFromSource() uses. `source` itself can't load here (it relies on Vite's
-// import.meta.glob), so we reconstruct page-shaped inputs and drive buildIndex
-// directly. This exercises the real sanitizer→Orama wiring, not just the string.
-async function productionSearch() {
-  const pages = mdxFiles(DOCS_DIR).map((file) => {
-    const raw = readFileSync(file, 'utf8');
-    const url = '/' + path.relative(DOCS_DIR, file).replace(/\.mdx$/, '');
-    return { url, data: { title: url, description: undefined, getText: async () => raw } };
-  });
-  const indexes = await Promise.all(pages.map((p) => buildIndex(p as unknown as Parameters<typeof buildIndex>[0])));
+async function productionSearch(): Promise<SearchServer | null> {
+  const pages = compiledPages();
+  if (pages.length === 0) {
+    if (process.env.REQUIRE_BUILT_INDEX) assert.fail('REQUIRE_BUILT_INDEX set but no compiled structuredData under build/server/assets — run `pnpm build` first');
+    return null;
+  }
+  const indexes = await Promise.all(
+    pages.map((p) => buildIndex({ url: p.url, data: { title: p.title, description: undefined, structuredData: p.structuredData } } as unknown as Parameters<typeof buildIndex>[0])),
+  );
   return initAdvancedSearch({ language: 'english', indexes });
 }
 
-test('production index: underscored identifiers stay searchable, corrupted forms miss', async () => {
+test('production index: underscored identifiers stay searchable, corrupted forms miss', async (t) => {
   const server = await productionSearch();
+  if (!server) return t.skip('run `pnpm build` (or `pnpm verify`) first — no compiled structuredData');
 
   // Real Orama queries: the true identifier hits, the underscore-stripped
   // corruption the old sanitizer produced returns nothing.
@@ -1291,13 +1310,44 @@ test('production index: underscored identifiers stay searchable, corrupted forms
   }
 });
 
-test('production index: result summaries carry no markup', async () => {
+// EVE round-35 P1-1: the production oracle must consume Fumadocs' BUILD-COMPILED
+// structuredData, so it catches the two data-loss modes round-34's `structure(getText('raw'))`
+// introduced. `structure()` (remark without the mdxjs extension) parses a doc's YAML
+// frontmatter as a Setext heading and drops every component body — feeding it here would ship
+// a search index whose headings are `title: … description: …` garbage and whose `<Card>` /
+// `<Callout>` bodies are gone. Against the real compiled index: component bodies ARE indexed
+// and NO frontmatter line ever became a heading.
+test('production index: component bodies indexed, frontmatter never a heading', async (t) => {
   const server = await productionSearch();
+  if (!server) return t.skip('run `pnpm build` (or `pnpm verify`) first — no compiled structuredData');
 
-  // Every returned summary must be clean prose — no backticks, no HTML entities,
-  // no serialized MDX/JSX tags. (Orama's own <mark> highlight is added at query
-  // time and is not doc content, so exclude it before scanning.)
-  const leaky = /`|&#x?[0-9a-fA-F]+;|<\/?[A-Za-z][^>]*>/;
+  // `<Card>` body text from content/docs/index.mdx — present only if Fumadocs' structural
+  // component-body extraction survived into the index (dropped by the raw `structure()` path).
+  for (const phrase of ['Browse workspaces', 'Stream thinking']) {
+    const hits = await server.search(phrase);
+    assert.ok(hits.length > 0, `component body "${phrase}" missing from the index (frontmatter/raw structure() would drop it)`);
+  }
+  // No served summary is a raw YAML frontmatter line — the tell of frontmatter mis-parsed as a
+  // heading/content chunk (`title: Introduction`, `description: …`).
+  for (const q of ['Introduction', 'description', 'title']) {
+    for (const r of await server.search(q)) {
+      const summary = (r.content ?? '').replace(/<\/?mark>/g, '');
+      assert.ok(!/^\s*(title|description):\s/.test(summary), `frontmatter leaked as a content chunk: ${JSON.stringify(summary.slice(0, 60))}`);
+    }
+  }
+});
+
+test('production index: result summaries carry no markup', async (t) => {
+  const server = await productionSearch();
+  if (!server) return t.skip('run `pnpm build` (or `pnpm verify`) first — no compiled structuredData');
+
+  // Every returned summary must be clean prose — no backticks, no HTML entities, no serialized
+  // MDX/JSX COMPONENT tags. A bare `<name>` / `<sha>` / `<version>` is legit searchable prose
+  // (the docs discuss the `/v1/models/<name>` endpoint, the `<sha>` placeholder), so the guard
+  // matches only real tag residue: a `</X>` closer, a self-closing `/>`, or an opening tag
+  // carrying attributes (`<X …>`) — never a bare single-word comparison. (Orama's own <mark>
+  // highlight is added at query time and is not doc content, so exclude it before scanning.)
+  const leaky = /`|&#x?[0-9a-fA-F]+;|<\/[A-Za-z]|<[A-Za-z][\w.:$-]*\s[^>]*>|\/>/;
   for (const q of ['MACARON_CODEX_TRANSPORT', 'permission_request', 'render_ui', 'relay', 'launcher']) {
     for (const r of await server.search(q)) {
       const summary = (r.content ?? '').replace(/<\/?mark>/g, '');
@@ -1313,14 +1363,15 @@ test('production index: result summaries carry no markup', async () => {
 // word "step" is real content); it is that the *serialized tag itself never
 // entered the index*: no result summary contains the literal tag markup, and the
 // tag as a contiguous token is absent.
-test('production index: serialized MDX tags never enter the index', async () => {
+test('production index: serialized MDX tags never enter the index', async (t) => {
   const server = await productionSearch();
+  if (!server) return t.skip('run `pnpm build` (or `pnpm verify`) first — no compiled structuredData');
 
   for (const tag of ['</Step>', '</Steps>', '<Tabs', '</Tab>', '<Callout', '<TypeTable']) {
     for (const r of await server.search(tag)) {
-      const summary = r.content ?? '';
+      const summary: string = r.content ?? '';
       assert.ok(!summary.includes(tag), `result for "${tag}" contains the literal tag: ${summary.slice(0, 100)}`);
-      assert.ok(!/<\/?[A-Za-z][^>]*>/.test(summary.replace(/<\/?mark>/g, '')), `result for "${tag}" contains tag markup`);
+      assert.ok(!/<\/[A-Za-z]|<[A-Za-z][\w.:$-]*\s[^>]*>|\/>/.test(summary.replace(/<\/?mark>/g, '')), `result for "${tag}" contains tag markup`);
     }
   }
 });
@@ -1360,7 +1411,7 @@ test('built /api/search: real Orama client honours the contract', async (t) => {
       assert.ok(Array.isArray(corrupted) && corrupted.length === 0, `built index: corrupted "${id.replace(/_/g, '')}" must miss`);
       for (const r of hits) {
         const summary = (r.content ?? '').replace(/<\/?mark>/g, '');
-        assert.ok(!/`|&#x?[0-9a-fA-F]+;|<\/?[A-Za-z][^>]*>/.test(summary), `built index summary leaked markup: ${summary.slice(0, 100)}`);
+        assert.ok(!/`|&#x?[0-9a-fA-F]+;|<\/[A-Za-z]|<[A-Za-z][\w.:$-]*\s[^>]*>|\/>/.test(summary), `built index summary leaked markup: ${summary.slice(0, 100)}`);
       }
     }
     // Tag-shaped query: may match the natural word ("step"), but no served summary

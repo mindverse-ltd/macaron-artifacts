@@ -4941,6 +4941,7 @@ textarea:focus, select:focus, input:focus {
 .ti-collapsed-head:hover { color: var(--text); }
 .ti-collapsed-head.err { color: var(--bad, #c5392f); }
 .ti-collapsed-dot { color: var(--good, #4d8f5b); font-size: 11px; flex-shrink: 0; }
+.ti-collapsed-head:not(.err) > .ti-collapsed-dot > svg { position: relative; top: -1px; }
 .ti-collapsed-head.err .ti-collapsed-dot { color: var(--bad, #c5392f); }
 .ti-collapsed-summary { font-weight: 500; }
 .ti-collapsed-hint {

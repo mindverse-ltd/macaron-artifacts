@@ -6,24 +6,21 @@ import { compressReplayGap, createReplayTimeline, replayFrame } from '../src/lib
 const user = (text: string, timestamp: string): Message => ({ role: 'user', timestamp, blocks: [{ kind: 'text', text }] });
 const assistant = (text: string, timestamp: string): Message => ({ role: 'assistant', timestamp, blocks: [{ kind: 'text', text }] });
 
-test('smoothly reveals assistant text inside its replay interval', () => {
+test('reveals complete assistant text at its event timestamp', () => {
   const timeline = createReplayTimeline([user('go', '2026-01-01T00:00:00.000Z'), assistant('abcdefghij', '2026-01-01T00:00:01.000Z')]);
   assert.deepEqual(replayFrame(timeline, 0), [timeline[0]!.message]);
-  const halfway = replayFrame(timeline, 850);
-  assert.equal(halfway.length, 2);
-  assert.equal(halfway[1]!.blocks[0]!.kind, 'text');
-  assert.equal((halfway[1]!.blocks[0] as { kind: 'text'; text: string }).text, 'abcde');
+  assert.deepEqual(replayFrame(timeline, 999), [timeline[0]!.message]);
   assert.deepEqual(replayFrame(timeline, 1_000), timeline.map((entry) => entry.message));
 });
 
-test('finishes intermediate and final streaming text at their recorded event times', () => {
+test('reveals intermediate and final text only at their recorded event times', () => {
   const messages = [user('go', '2026-01-01T00:00:00.000Z'), assistant('intermediate text', '2026-01-01T00:00:00.100Z'), assistant('final response', '2026-01-01T00:00:01.000Z')];
   const timeline = createReplayTimeline(messages, 'exact');
-  assert.equal(timeline[1]!.revealStart, 0);
   assert.equal(timeline[1]!.end, 100);
   assert.equal(timeline[2]!.end, 1_000);
-  assert.equal(replayFrame(timeline, 99).length, 2);
+  assert.deepEqual(replayFrame(timeline, 99), messages.slice(0, 1));
   assert.deepEqual(replayFrame(timeline, 100).slice(0, 2), messages.slice(0, 2));
+  assert.deepEqual(replayFrame(timeline, 999), messages.slice(0, 2));
   assert.deepEqual(replayFrame(timeline, 1_000), messages);
 });
 

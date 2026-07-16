@@ -12,7 +12,6 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../lib/api';
-import { resolveApiUrl } from '../lib/apiBase';
 import { authedFetch } from '../lib/auth';
 import { useToast } from './Toast';
 
@@ -67,7 +66,7 @@ export function FileTile({
     let url = '';
     let cancelled = false;
     const raw = `/api/files/${encodeURIComponent(project)}/raw?path=${encodeURIComponent(path)}`;
-    authedFetch(resolveApiUrl(raw))
+    authedFetch(raw)
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`http ${r.status}`))))
       .then((b) => { if (cancelled) return; url = URL.createObjectURL(b); setImageUrl(url); })
       .catch(() => { if (!cancelled) setImageUrl(''); });

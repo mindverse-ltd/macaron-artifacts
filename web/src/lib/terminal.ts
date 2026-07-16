@@ -8,7 +8,6 @@
 // fetch()+getReader() (see openEventStream) so its token rides a header too —
 // never a `?token=` query param that would leak into logs/referrers.
 import { authedFetch } from './auth';
-import { resolveApiUrl } from './apiBase';
 
 const TERMINAL_PREFIX = 'term:';
 
@@ -33,7 +32,9 @@ function base(project: string, sid: string): string {
 }
 
 export function terminalStreamUrl(project: string, sid: string, cols: number, rows: number): string {
-  return resolveApiUrl(`${base(project, sid)}/stream?cols=${cols}&rows=${rows}`);
+  // Path only — openEventStream's authedFetch retargets /api paths at the
+  // configured server, so resolution happens in exactly one place.
+  return `${base(project, sid)}/stream?cols=${cols}&rows=${rows}`;
 }
 
 // Keystrokes must arrive in order. Chain each input POST behind the previous

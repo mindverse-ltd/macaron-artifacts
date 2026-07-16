@@ -128,7 +128,7 @@ export function Terminal({ project, sid, focused }: { project: string; sid: stri
         else if (msg.type === 'error') term?.write(`\r\n\x1b[31m${msg.error || 'error'}\x1b[0m\r\n`);
       });
       // Reconnects are useful while the PTY is alive; exit/[DONE] are terminal
-      // states, so close the EventSource above to avoid respawning a shell.
+      // states, so close the stream above to avoid respawning a shell.
 
       const doFit = () => {
         cancelAnimationFrame(raf);

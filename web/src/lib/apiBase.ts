@@ -62,4 +62,3 @@ export function resolveApiUrl(input: string): string {
   if (!input.startsWith('/api') && !input.startsWith('/relay')) return input;
   return base + input;
 }
-

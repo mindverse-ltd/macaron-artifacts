@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hostedTarget } from './hosted-target.ts';
+import { hostedTarget, HANDOFF_KEY } from './hosted-target.ts';
 
 // hostedTarget turns buildTarget's `<origin>/?token=` into a same-origin hosted
 // route + a one-time handoff. The server/token ride in the HANDOFF (stashed
@@ -39,4 +39,12 @@ test('route is a bare relative path — no token/server ever on the URL', () => 
   const { route } = hostedTarget('https://tunnel.test/?token=secret', 'codex');
   assert.equal(route, '/app/codex');
   assert.ok(!route.includes('secret') && !route.includes('server') && !route.includes('?'), route);
+});
+
+// Cross-workspace contract: the web bundle reads this exact sessionStorage key
+// (web/src/lib/auth.ts pins the same literal in web/test/apiBase.test.ts). If
+// either side renames it, its own tests fail instead of hosted mode silently
+// never consuming the handoff.
+test('HANDOFF_KEY matches the literal the web bundle consumes', () => {
+  assert.equal(HANDOFF_KEY, 'macaron_connect_handoff');
 });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { getApiBase } from '../lib/apiBase';
 import { assetUrl } from '../lib/assetBase';
 import {
   Check,
@@ -249,10 +250,14 @@ export function Sidebar() {
           onClick: async () => {
             try {
               const { token } = await api.createShare(w.project, s.sessionId);
-              // Build from the browser's origin + app base so it works over
-              // LAN/tunnel and under the hosted /app/ subpath, not just the
-              // server's 127.0.0.1 root bind.
-              const url = `${window.location.origin}${assetUrl('/')}#/share/${token}`;
+              // A recipient needs an origin that serves the UI AND answers
+              // /api/public: hosted mode (api base set) must use the server's
+              // own origin — a docs-origin /app link has no server bound and
+              // can never resolve. Local/tunnel keeps the browser's origin +
+              // app base so it works over LAN/tunnel, not just the server's
+              // 127.0.0.1 root bind.
+              const server = getApiBase();
+              const url = server ? `${server}/#/share/${token}` : `${window.location.origin}${assetUrl('/')}#/share/${token}`;
               await navigator.clipboard.writeText(url);
               toast('share link copied');
             } catch (err) {

@@ -31,11 +31,6 @@ export function clearToken(): void {
   try { sessionStorage.removeItem(tokenKey()); } catch { /* private mode */ }
 }
 
-export function authHeaders(): Record<string, string> {
-  const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
-
 // fetch wrapper that injects the token and re-gates the UI on 401 (expired /
 // wrong token). Every call site that hits our own server uses this.
 export async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {

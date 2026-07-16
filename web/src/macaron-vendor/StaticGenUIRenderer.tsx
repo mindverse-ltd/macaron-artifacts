@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, type RefOb
 import { GenUIRenderer, type GenUIRendererFlushMode, type GenUIRenderPhase } from "partial-react";
 import { createImportMapResolver, esmShFallback, extractBareModuleSpecifiers, hasImportMapEntry, literalImportMap, prepareRendererImportMap } from "partial-react/import-map";
 import { createTsxCompiler } from "partial-react/compiler";
+import { assetUrl } from "../lib/assetBase";
 
 // --- stubs replacing @/components/GenUIStyleScope and useAppStoreBridge ---
 // Our preview doesn't use UnoCSS scope isolation (we use UnoCSS runtime globally)
@@ -85,10 +86,10 @@ const hasLocalNodeModulePackage = (packageName: string) => {
 // files re-export from window.__macaron_* globals (set in main.tsx), so user
 // code, our vendored components, and partial-react all share one React.
 const BASE_IMPORTS: Record<string, string> = (() => {
-  // origin + Vite base, so shims resolve under /app/ when hosted (BASE_URL
-  // '/app/') and at root locally. The import map needs absolute URLs.
+  // origin + Vite base (via assetUrl), so shims resolve under /app/ when
+  // hosted and at root locally. The import map needs absolute URLs.
   const origin = typeof location !== 'undefined' ? location.origin : '';
-  const prefix = origin + import.meta.env.BASE_URL.replace(/\/$/, '');
+  const prefix = origin + assetUrl('');
   return {
     react: prefix + '/genui-shim/react.mjs',
     'react/jsx-runtime': prefix + '/genui-shim/react-jsx-runtime.mjs',

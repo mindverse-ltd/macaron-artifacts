@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { getApiBase } from '../lib/apiBase';
+import { assetUrl } from '../lib/assetBase';
 import {
   Check,
   ChevronDown,
@@ -248,9 +250,14 @@ export function Sidebar() {
           onClick: async () => {
             try {
               const { token } = await api.createShare(w.project, s.sessionId);
-              // Build the URL from the browser's own origin so it works over
-              // LAN/tunnel, not just the server's 127.0.0.1 bind.
-              const url = `${window.location.origin}/#/share/${token}`;
+              // A recipient needs an origin that serves the UI AND answers
+              // /api/public: hosted mode (api base set) must use the server's
+              // own origin — a docs-origin /app link has no server bound and
+              // can never resolve. Local/tunnel keeps the browser's origin +
+              // app base so it works over LAN/tunnel, not just the server's
+              // 127.0.0.1 root bind.
+              const server = getApiBase();
+              const url = server ? `${server}/#/share/${token}` : `${window.location.origin}${assetUrl('/')}#/share/${token}`;
               await navigator.clipboard.writeText(url);
               toast('share link copied');
             } catch (err) {
@@ -342,7 +349,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar-v2">
       <Link className="sb-brand" to="/">
-        <img className="sb-logo" src="/mindlab-symbol.svg" alt="" />
+        <img className="sb-logo" src={assetUrl('/mindlab-symbol.svg')} alt="" />
         <div>
           <div className="sb-brand-name">Macaron Artifacts</div>
           <div className="sb-brand-sub">Presented by Mind Lab</div>

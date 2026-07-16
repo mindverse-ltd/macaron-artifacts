@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Check, Circle, Plus, X, Settings } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { assetUrl } from '../lib/assetBase';
 import { codexApi, type CodexThread, type CodexWorkspace } from './api';
 import {
   getCanvasSids,
@@ -135,7 +136,7 @@ export function CodexSidebar() {
   return (
     <aside className="cx-sidebar">
       <Link className="cx-sb-brand" to="/">
-        <img className="cx-sb-logo" src="/mindlab-symbol.svg" alt="" />
+        <img className="cx-sb-logo" src={assetUrl('/mindlab-symbol.svg')} alt="" />
         <div>
           <div className="cx-sb-brand-name">Macaron Artifacts</div>
           <div className="cx-sb-brand-sub">Presented by Mind Lab</div>

@@ -25,13 +25,14 @@ SRC_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Codex prunes/regenerates it on version sync, killing our node_modules +
 # web/dist + server/dist and leaving a listening server pointing at
 # nothing. Claude Code (~/.claude/plugins/cache/…) and Kimi Code
-# (~/.kimi-code/plugins/cache/…) caches have the same class of behavior.
+# (~/.kimi-code/plugins/… — installs run from a managed copy that gets
+# replaced on plugin update) have the same class of behavior.
 # Detect any of them and rsync source into a stable
 # runtime dir under $HOME, then run install/build/launch from there.
 DIR="$SRC_DIR"
 _needs_mirror=0
 case "$SRC_DIR" in
-  *"/.codex/plugins/cache/"*|*"/.claude/plugins/cache/"*|*"/.kimi-code/plugins/cache/"*) _needs_mirror=1 ;;
+  *"/.codex/plugins/cache/"*|*"/.claude/plugins/cache/"*|*"/.kimi-code/plugins/"*) _needs_mirror=1 ;;
 esac
 if [ "$_needs_mirror" = 1 ]; then
   # Version key: pull from package.json so parallel major bumps get

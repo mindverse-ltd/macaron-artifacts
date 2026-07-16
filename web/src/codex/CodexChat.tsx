@@ -16,6 +16,7 @@ import { sendCodexMessage, startCodexThread, subscribeCodexLive, type CodexStrea
 import { CodexComposer, type ComposerImage } from './CodexComposer';
 import { notify } from '../lib/notify';
 import { useReplay } from '../components/ReplayControls';
+import { formatDuration } from '../lib/thinkingVerbs';
 
 // GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
 // import so the default codex bundle stays small. First render_ui in a
@@ -32,7 +33,7 @@ type Item =
   | { id: string; kind: 'user'; text: string; images?: ComposerImage[] }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'reasoning'; text: string }
-  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; isError?: boolean }
+  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }
   // GenUI render_ui tool call. Codex hands us the full `code` at
   // tool_use time (arguments are already aggregated by the CLI), so we
   // render immediately — no pending phase in practice. The tool_result
@@ -67,9 +68,10 @@ function toolInputToCmd(name: string, input: unknown): string {
 
 function historyToItems(detail: SessionDetail): Item[] {
   const out: Item[] = [];
+  const toolStartedAt = new Map<string, number>();
   let seq = 0;
   const next = () => `h-${seq++}`;
-  const walk = (blocks: Block[], role: Message['role']) => {
+  const walk = (blocks: Block[], role: Message['role'], timestamp?: string) => {
     for (const b of blocks) {
       if (b.kind === 'text' && b.text.trim()) {
         if (role === 'user') out.push({ id: next(), kind: 'user', text: b.text });
@@ -88,6 +90,7 @@ function historyToItems(detail: SessionDetail): Item[] {
           });
         } else {
           out.push({ id: b.id, kind: 'tool', name: b.name, input: b.input });
+          if (timestamp) toolStartedAt.set(b.id, Date.parse(timestamp));
         }
       } else if (b.kind === 'tool_result') {
         const target = [...out].reverse().find(
@@ -95,7 +98,12 @@ function historyToItems(detail: SessionDetail): Item[] {
             (it.kind === 'tool' && it.result === undefined && (b.toolUseId ? it.id === b.toolUseId : true))
             || (it.kind === 'genui' && it.toolUseId === b.toolUseId),
         );
-        if (target?.kind === 'tool') target.result = b.text;
+        if (target?.kind === 'tool') {
+          target.result = b.text;
+          const startedAt = toolStartedAt.get(target.id);
+          const finishedAt = timestamp ? Date.parse(timestamp) : NaN;
+          if (startedAt !== undefined && Number.isFinite(startedAt) && Number.isFinite(finishedAt) && finishedAt >= startedAt) target.durationMs = finishedAt - startedAt;
+        }
         else if (target?.kind === 'genui') {
           const flagged = b.text.startsWith('Rendered inline, but the TSX has issues');
           if (flagged) { target.status = 'error'; target.error = b.text; }
@@ -103,7 +111,7 @@ function historyToItems(detail: SessionDetail): Item[] {
       }
     }
   };
-  for (const m of detail.messages) walk(m.blocks, m.role);
+  for (const m of detail.messages) walk(m.blocks, m.role, m.timestamp);
   return out;
 }
 
@@ -220,7 +228,7 @@ function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
         <span className="cx-tool-glyph">{toolGlyph(it.name)}</span>
         <span className="cx-tool-name">{it.name}</span>
         <span className={'cx-tool-status' + (it.isError ? ' err' : '')}>
-          {running ? 'running…' : it.isError ? 'failed' : 'done'}
+          {running ? 'running…' : it.isError ? 'failed' : 'done'}{it.durationMs != null ? ` · ${formatDuration(it.durationMs)}` : ''}
         </span>
       </div>
       <div className="cx-tool-cmd">{cmd}</div>

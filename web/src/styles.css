@@ -601,6 +601,13 @@ textarea:focus, select:focus, input:focus {
 .replay-controls { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .replay-button { width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .replay-button:hover { background: var(--surface-2); color: var(--text); }
+.replay-settings { position: relative; }
+.replay-settings > summary { list-style: none; }
+.replay-settings > summary::-webkit-details-marker { display: none; }
+.replay-settings-menu { position: absolute; z-index: 20; top: 34px; left: 0; width: 210px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-lg); display: grid; gap: 6px; }
+.replay-settings-menu label { color: var(--text-2); font-size: 11px; font-weight: 600; }
+.replay-settings-menu select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.replay-settings-menu span { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .replay-controls input[type='range'] { width: clamp(72px, 12vw, 150px); accent-color: var(--accent); }
 .replay-count { color: var(--muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
 .session-replay-bar { display: flex; justify-content: flex-end; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface); }

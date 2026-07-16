@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Message } from '@macaron/shared';
-import { createReplayTimeline, replayFrame } from '../src/lib/replay';
+import { compressReplayGap, createReplayTimeline, replayFrame } from '../src/lib/replay';
 
 const user = (text: string, timestamp: string): Message => ({ role: 'user', timestamp, blocks: [{ kind: 'text', text }] });
 const assistant = (text: string, timestamp: string): Message => ({ role: 'assistant', timestamp, blocks: [{ kind: 'text', text }] });
@@ -16,9 +16,16 @@ test('smoothly reveals assistant text inside its replay interval', () => {
   assert.deepEqual(replayFrame(timeline, 1_000), timeline.map((entry) => entry.message));
 });
 
-test('caps long event gaps while preserving non-text event boundaries', () => {
+test('offers exact, logarithmic, and compact replay timing', () => {
+  assert.equal(compressReplayGap(60_000, 'exact'), 60_000);
+  assert.equal(compressReplayGap(60_000, 'compact'), 2_000);
+  assert.equal(Math.round(compressReplayGap(60_000, 'natural')), 8_802);
+  assert.equal(compressReplayGap(1_000, 'natural'), 1_000);
+});
+
+test('compact timing caps long event gaps while preserving non-text event boundaries', () => {
   const messages: Message[] = [user('go', '2026-01-01T00:00:00.000Z'), { role: 'assistant', timestamp: '2026-01-01T00:01:00.000Z', blocks: [{ kind: 'tool_use', id: '1', name: 'Read', input: {} }] }];
-  const timeline = createReplayTimeline(messages);
+  const timeline = createReplayTimeline(messages, 'compact');
   assert.equal(timeline[1]!.end, 2_000);
   assert.equal(replayFrame(timeline, 1_999).length, 1);
   assert.deepEqual(replayFrame(timeline, 2_000), messages);

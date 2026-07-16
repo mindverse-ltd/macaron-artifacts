@@ -1488,12 +1488,17 @@ body {
 .cx-plan-steps { padding: 6px 0; }
 .cx-plan-step {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 4px 12px;
   color: var(--cx-text);
 }
 .cx-plan-step-glyph { font-family: ui-monospace, Menlo, monospace; }
+.cx-plan-step-glyph > svg {
+  display: block;
+}
+.cx-plan-step.completed .cx-plan-step-glyph,
+.cx-plan-step.inProgress .cx-plan-step-glyph { position: relative; top: -1px; }
 .cx-plan-step.completed { color: var(--cx-muted); text-decoration: line-through; }
 .cx-plan-step.inProgress { font-weight: 600; }
 .cx-plan-step.inProgress .cx-plan-step-glyph { color: var(--cx-code-strong); }

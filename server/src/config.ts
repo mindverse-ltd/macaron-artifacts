@@ -21,7 +21,7 @@ export const OFFICIAL_HOSTED_ORIGINS = ['https://artifacts.macaron.im'];
 // origins first, then any official ones not already listed. `*` in the explicit
 // list still wins (reflect-any, dev only).
 export function buildAllowedOrigins(explicit: string[], allowHosted: boolean): string[] {
-  const out = [...explicit];
+  const out = [...new Set(explicit)];
   if (allowHosted) for (const o of OFFICIAL_HOSTED_ORIGINS) if (!out.includes(o)) out.push(o);
   return out;
 }

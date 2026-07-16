@@ -43,8 +43,6 @@ async function printVersion() {
 
 const readValue = (i, flag) => {
   const v = args[i + 1];
-  // Reject only a missing or flag-like next token; an empty value passes here
-  // (matching `--flag=`) and, for --port, is caught by the range check below.
   if (v === undefined || v.startsWith('-')) throw new Error(`${flag} requires a value`);
   return v;
 };
@@ -57,9 +55,14 @@ try {
     const inline = eq === -1 ? null : a.slice(eq + 1);
     if (flag === '--help' || flag === '-h') { printHelp(); process.exit(0); }
     if (flag === '--version' || flag === '-v') { await printVersion(); process.exit(0); }
-    if (flag === '--allow-hosted') { process.env.MACARON_ALLOW_HOSTED = '1'; continue; }
+    if (flag === '--allow-hosted') {
+      if (inline !== null) throw new Error(`${flag} does not take a value`);
+      process.env.MACARON_ALLOW_HOSTED = '1';
+      continue;
+    }
     if (flag === '--allow-origin') {
-      const origin = inline ?? readValue(i, flag);
+      const origin = (inline ?? readValue(i, flag)).trim();
+      if (!origin) throw new Error(`${flag} requires a non-empty value`);
       const cur = process.env.MACARON_ALLOWED_ORIGINS;
       process.env.MACARON_ALLOWED_ORIGINS = cur ? `${cur},${origin}` : origin;
       if (inline === null) i++;

@@ -21,7 +21,9 @@ test('predicts render_ui generation from code size and streams it until the reco
   assert.equal(replayFrame(timeline, 999).length, 1);
   const halfway = replayFrame(timeline, 3_000);
   assert.equal(halfway.length, 2);
-  assert.equal(((halfway[1]!.blocks[0] as Extract<Message['blocks'][number], { kind: 'tool_use' }>).input as { code: string }).code.length, 320);
+  const halfwayInput = (halfway[1]!.blocks[0] as Extract<Message['blocks'][number], { kind: 'tool_use' }>).input as { code: string; _replayStreaming: boolean };
+  assert.equal(halfwayInput.code.length, 320);
+  assert.equal(halfwayInput._replayStreaming, true);
   assert.deepEqual(replayFrame(timeline, 5_000), messages);
 });
 

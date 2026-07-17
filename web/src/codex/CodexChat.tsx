@@ -38,7 +38,7 @@ type Item =
   // tool_use time (arguments are already aggregated by the CLI), so we
   // render immediately — no pending phase in practice. The tool_result
   // (checkGenUI diagnostics) may flip `status` to 'error' with details.
-  | { id: string; kind: 'genui'; toolUseId: string; code: string; status: 'ready' | 'error'; error?: string }
+  | { id: string; kind: 'genui'; toolUseId: string; code: string; status: 'ready' | 'error'; streaming?: boolean; error?: string }
   // Codex-native plan card (turn/plan/updated). One per thread, replaced in
   // place as new plan snapshots arrive.
   | { id: string; kind: 'plan'; steps: Array<{ step: string; status: CodexPlanStatus }>; explanation?: string | null }
@@ -80,13 +80,15 @@ function historyToItems(detail: SessionDetail): Item[] {
         out.push({ id: next(), kind: 'reasoning', text: b.text });
       } else if (b.kind === 'tool_use') {
         if (isRenderUiTool(b.name)) {
-          const code = String((b.input as { code?: unknown } | null)?.code || '');
+           const input = b.input as { code?: unknown; _replayStreaming?: boolean } | null;
+           const code = String(input?.code || '');
           out.push({
             id: `genui-${b.id}`,
             kind: 'genui',
             toolUseId: b.id,
-            code,
-            status: 'ready',
+             code,
+             status: 'ready',
+             streaming: input?._replayStreaming,
           });
         } else {
           out.push({ id: b.id, kind: 'tool', name: b.name, input: b.input });
@@ -255,7 +257,7 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
         {it.status === 'error' && <span className="cx-genui-status err">diagnostics failed</span>}
       </div>
       <Suspense fallback={<div className="cx-genui-loading">Loading GenUI runtime…</div>}>
-        <GenuiPreview code={it.code} done />
+        <GenuiPreview code={it.code} done={!it.streaming} />
       </Suspense>
       {it.status === 'error' && it.error && (
         <details className="cx-genui-details">

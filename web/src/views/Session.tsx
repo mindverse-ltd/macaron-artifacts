@@ -192,7 +192,7 @@ export function flatten(messages: Message[]): Item[] {
         } else if (isRenderUITool(b.name)) {
           // Claude writes the TSX directly into the tool_use input.code field;
           // jsonl persists it. We use that as the rendered code immediately.
-          const input = (b.input || {}) as { code?: string; prompt?: string };
+          const input = (b.input || {}) as { code?: string; prompt?: string; _replayStreaming?: boolean };
           const code = typeof input.code === 'string' ? input.code : '';
           const prompt = code
             ? `${code.split('\n')[0] || ''} … (${code.length} chars)`
@@ -208,7 +208,7 @@ export function flatten(messages: Message[]): Item[] {
             toolUseId,
             prompt,
             code: code || undefined,
-            status: code ? 'ready' : 'pending',
+            status: code && !input._replayStreaming ? 'ready' : 'pending',
           };
           out.push(it);
           const pending = { item: it as PairedTool, ts: m.timestamp };

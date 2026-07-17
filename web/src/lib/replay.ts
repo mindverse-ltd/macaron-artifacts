@@ -61,5 +61,5 @@ function getRenderUICode(message: Message): string | undefined {
 }
 
 function withRenderUICode(message: Message, code: string): Message {
-  return { ...message, blocks: message.blocks.map((block) => block.kind === 'tool_use' && (block.name === 'mcp:macaron/render_ui' || block.name.endsWith('__render_ui')) ? { ...block, input: { ...(block.input as Record<string, unknown>), code } } : block) };
+  return { ...message, blocks: message.blocks.map((block) => block.kind === 'tool_use' && (block.name === 'mcp:macaron/render_ui' || block.name.endsWith('__render_ui')) ? { ...block, input: { ...(block.input as Record<string, unknown>), code, _replayStreaming: true } } : block) };
 }

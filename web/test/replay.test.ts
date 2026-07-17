@@ -14,7 +14,7 @@ test('reveals complete assistant text at its event timestamp', () => {
 });
 
 test('predicts render_ui generation from code size and streams it until the recorded timestamp', () => {
-  const code = 'x'.repeat(640); // 160 estimated tokens at 50 tokens/second.
+  const code = Array.from({ length: 20 }, () => 'x'.repeat(31)).join('\n') + '\n'; // 640 chars, 160 estimated tokens at 50 tokens/second.
   const messages: Message[] = [user('go', '2026-01-01T00:00:00.000Z'), { role: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', blocks: [{ kind: 'tool_use', id: '1', name: 'mcp__macaron__render_ui', input: { code } }] }];
   const timeline = createReplayTimeline(messages, 'exact');
   assert.equal(timeline[1]!.start, 1_800);
@@ -22,7 +22,9 @@ test('predicts render_ui generation from code size and streams it until the reco
   const halfway = replayFrame(timeline, 3_400);
   assert.equal(halfway.length, 2);
   const halfwayInput = (halfway[1]!.blocks[0] as Extract<Message['blocks'][number], { kind: 'tool_use' }>).input as { code: string; _replayStreaming: boolean };
-  assert.equal(halfwayInput.code.length, 320);
+  // Partial frames snap to the next line boundary so partial-react never sees half an identifier.
+  assert.equal(halfwayInput.code.length, 352);
+  assert.ok(halfwayInput.code.endsWith('\n'));
   assert.equal(halfwayInput._replayStreaming, true);
   assert.deepEqual(replayFrame(timeline, 5_000), messages);
 });
@@ -32,7 +34,7 @@ test('streams render_ui before its paired text becomes due', () => {
   // at message completion, so the paired text's end ≈ the render_ui end while
   // the back-calculated stream starts far earlier. The frame must include the
   // streaming render_ui even though the paired text is not due yet.
-  const code = 'x'.repeat(640);
+  const code = Array.from({ length: 20 }, () => 'x'.repeat(31)).join('\n') + '\n';
   const messages: Message[] = [
     user('go', '2026-01-01T00:00:00.000Z'),
     { role: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', blocks: [{ kind: 'text', text: '先说一句' }] },

@@ -49,12 +49,21 @@ export function replayFrame(timeline: ReplayTimelineEntry[], position: number): 
       // text 之后成对落盘），反推的 streaming 起点却远早于两者。若遇到未到时间
       // 的 text 就 break，streaming 窗口内永远轮不到这条 render_ui 出现。
       const progress = (position - entry.start) / (entry.end - entry.start);
-      visible.push(withRenderUICode(entry.message, entry.renderUICode.slice(0, Math.max(1, Math.floor(entry.renderUICode.length * progress)))));
+      visible.push(withRenderUICode(entry.message, partialCodeAt(entry.renderUICode, progress)));
     }
     // end 单调递增，未到时间的普通消息之后也不会到时间，继续扫描只为找到
     // start 更早的 streaming render_ui。
   }
   return visible;
+}
+
+// 任意字符位置截断会把标识符切成半截，partial 编译基本必挂；按行边界截断
+// 后 partial-react 才能逐行 salvage 出越来越多的内容。
+function partialCodeAt(code: string, progress: number): string {
+  const target = Math.max(1, Math.floor(code.length * Math.min(1, progress)));
+  if (target >= code.length) return code;
+  const newline = code.indexOf('\n', target);
+  return code.slice(0, newline === -1 ? code.length : newline + 1);
 }
 
 function getRenderUICode(message: Message): string | undefined {

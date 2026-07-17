@@ -42,6 +42,13 @@ codex plugin marketplace add https://github.com/mindverse-ltd/macaron-artifacts
 codex plugin add macaron@macaron
 ```
 
+Requires **codex-cli ≥ 0.142.0** — older releases can't resolve a plugin rooted at the marketplace root ([openai/codex#28771](https://github.com/openai/codex/pull/28771)) and fail with ``plugin `macaron` was not found in marketplace `macaron` ``. Note that re-running `marketplace add` does **not** refresh an already-added marketplace; if you hit that error on a supported CLI, the cached clone is stale — remove and re-add it:
+
+```bash
+codex plugin marketplace remove macaron
+codex plugin marketplace add https://github.com/mindverse-ltd/macaron-artifacts
+```
+
 ### Kimi Code
 
 In a Kimi Code session, install from the GitHub URL, then reload to activate:

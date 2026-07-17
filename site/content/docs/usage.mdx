@@ -14,7 +14,7 @@ A WebUI that installs on Claude Code, Codex, and Kimi Code — run all three at 
 ### Claude Code
 
 ```
-/plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
+/plugin marketplace add https://github.com/mindverse-ltd/macaron-artifacts
 /plugin install macaron@macaron
 ```
 
@@ -23,16 +23,18 @@ Then open it in a session with `/macaron`.
 ### Codex
 
 ```bash
-codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
+codex plugin marketplace add https://github.com/mindverse-ltd/macaron-artifacts
 codex plugin add macaron@macaron
 ```
 
 Then say `open macaron web ui` in a session to open it.
 
+Requires **codex-cli ≥ 0.142.0** — older releases can't resolve a plugin rooted at the marketplace root ([openai/codex#28771](https://github.com/openai/codex/pull/28771)) and fail with ``plugin `macaron` was not found in marketplace `macaron` ``. Re-running `marketplace add` does **not** refresh an already-added marketplace; on a supported CLI, fix a stale cache with `codex plugin marketplace remove macaron` + re-add.
+
 ### Kimi Code
 
 ```
-/plugins install https://github.com/MindLab-Research/macaron-artifacts
+/plugins install https://github.com/mindverse-ltd/macaron-artifacts
 /reload
 ```
 
@@ -43,13 +45,13 @@ Then open it in a session with `/macaron:macaron`.
 The published tarball ships the prebuilt server + web bundles as three independent packages — `mcc` (Claude WebUI, port `7878`), `mcx` (Codex WebUI, port `7979`), and `mkx` (Kimi WebUI, port `7980`). Launch any of them in one command:
 
 ```bash
-bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@<sha>   # Claude → http://localhost:7878
-bunx mcx@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcx@<sha>   # Codex  → http://localhost:7979
-bunx mkx@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mkx@<sha>   # Kimi   → http://localhost:7980
+bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+bunx mcx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+bunx mkx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
 
-npx mcc@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@<sha>    # Claude → http://localhost:7878
-npx mcx@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcx@<sha>    # Codex  → http://localhost:7979
-npx mkx@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mkx@<sha>    # Kimi   → http://localhost:7980
+npx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha>    # Claude → http://localhost:7878
+npx mcx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@<sha>    # Codex  → http://localhost:7979
+npx mkx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@<sha>    # Kimi   → http://localhost:7980
 ```
 
 The commands are pinned to this build's commit; swap in any other commit on `main` to pull that build. Each launcher boots the same server with `MACARON_ENGINE` set (`codex` / `kimi`; unset = Claude) and its own default port. All bins accept `--host` / `--port`; run `--help` for all flags.
@@ -86,4 +88,4 @@ Open `/plugins`, select `macaron` on the **Installed** tab, and press `Enter` to
 
 ## Feedback
 
-[github.com/MindLab-Research/macaron-artifacts/issues](https://github.com/MindLab-Research/macaron-artifacts/issues)
+[github.com/mindverse-ltd/macaron-artifacts/issues](https://github.com/mindverse-ltd/macaron-artifacts/issues)

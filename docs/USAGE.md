@@ -26,6 +26,8 @@ codex plugin add macaron@macaron
 
 Open it in a session with `open macaron web ui`.
 
+Requires **codex-cli ≥ 0.142.0** — older releases can't resolve a plugin rooted at the marketplace root ([openai/codex#28771](https://github.com/openai/codex/pull/28771)) and fail with ``plugin `macaron` was not found in marketplace `macaron` ``. Re-running `marketplace add` does **not** refresh an already-added marketplace; on a supported CLI, fix a stale cache with `codex plugin marketplace remove macaron` + re-add.
+
 ### Kimi Code
 
 ```

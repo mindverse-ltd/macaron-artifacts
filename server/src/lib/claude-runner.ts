@@ -177,47 +177,55 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
           // canUseTool: pause the SDK, ask the client, resume once decided.
           // A promise is registered under a random id; the client's POST to
           // /permission-decision looks the id up and resolves it.
-          // NOTE: when permissionMode === 'bypassPermissions' (and
-          // allowDangerouslySkipPermissions is true), the SDK does NOT invoke
-          // this callback — every tool auto-approves. That's the intended
-          // "yolo" UX.
-          canUseTool: async (toolName: string, input: Record<string, unknown>) => {
-            // Remembered rules: if a prior "Session"/"Always" decision already
-            // covers every part of this call, auto-approve silently — no card,
-            // no round-trip. Empty/unknown key sets never match, so this can
-            // only ever skip a prompt the user already answered.
-            const { keys, label } = computeRuleKeys(toolName, input);
-            if (isAllowed(currentSid, opts.cwd, keys)) {
-              return { behavior: 'allow', updatedInput: input };
-            }
-            const id = randomUUID();
-            const decision = await new Promise<
-              { decision: 'allow'; mode?: PermissionMode; scope?: 'once' | 'session' | 'always' } | { decision: 'deny'; reason?: string }
-            >((resolve) => {
-              registerPending(id, resolve);
-              push({ kind: 'permission_request', id, toolName, input, ...(label ? { suggestion: { label } } : {}) });
-            });
-            if (decision.decision === 'allow') {
-              if (decision.scope === 'session') rememberSession(currentSid, keys);
-              // A persist failure must not strand the callback: the user already
-              // clicked Allow, so log and proceed rather than leaving the SDK's
-              // pending promise (and their tool call) hung forever.
-              else if (decision.scope === 'always') {
-                try { await rememberProject(opts.cwd, keys); } catch (e) { console.error('[permission-rules] persist failed:', e); }
+          //
+          // OMITTED in bypassPermissions mode: setting canUseTool unconditionally
+          // makes the SDK append `--permission-prompt-tool stdio` to the CLI
+          // argv, which then wins over `--allow-dangerously-skip-permissions`
+          // for any tool not in `allowedTools`. Since we only allowlist
+          // mcp__macaron__render_ui there, Bash/Edit/Write/Read were still
+          // routing back through this callback and firing permission cards —
+          // completely defeating the "Bypass all" UX. Dropping the callback in
+          // bypass mode lets the CLI truly bypass everything, matching the
+          // user's expectation.
+          ...(effectivePermissionMode === 'bypassPermissions' ? {} : {
+            canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+              // Remembered rules: if a prior "Session"/"Always" decision already
+              // covers every part of this call, auto-approve silently — no card,
+              // no round-trip. Empty/unknown key sets never match, so this can
+              // only ever skip a prompt the user already answered.
+              const { keys, label } = computeRuleKeys(toolName, input);
+              if (isAllowed(currentSid, opts.cwd, keys)) {
+                return { behavior: 'allow', updatedInput: input };
               }
-              push({ kind: 'permission_resolved', id, decision: 'allow' });
-              // A `mode` rides along when the plan-approval panel exits plan
-              // mode: setMode(session) switches how subsequent edits are
-              // gated (acceptEdits = auto, default = ask each time).
-              return {
-                behavior: 'allow',
-                updatedInput: input,
-                ...(decision.mode ? { updatedPermissions: [{ type: 'setMode', mode: decision.mode, destination: 'session' }] } : {}),
-              };
-            }
-            push({ kind: 'permission_resolved', id, decision: 'deny' });
-            return { behavior: 'deny', message: decision.reason || 'denied by user', interrupt: false };
-          },
+              const id = randomUUID();
+              const decision = await new Promise<
+                { decision: 'allow'; mode?: PermissionMode; scope?: 'once' | 'session' | 'always' } | { decision: 'deny'; reason?: string }
+              >((resolve) => {
+                registerPending(id, resolve);
+                push({ kind: 'permission_request', id, toolName, input, ...(label ? { suggestion: { label } } : {}) });
+              });
+              if (decision.decision === 'allow') {
+                if (decision.scope === 'session') rememberSession(currentSid, keys);
+                // A persist failure must not strand the callback: the user already
+                // clicked Allow, so log and proceed rather than leaving the SDK's
+                // pending promise (and their tool call) hung forever.
+                else if (decision.scope === 'always') {
+                  try { await rememberProject(opts.cwd, keys); } catch (e) { console.error('[permission-rules] persist failed:', e); }
+                }
+                push({ kind: 'permission_resolved', id, decision: 'allow' });
+                // A `mode` rides along when the plan-approval panel exits plan
+                // mode: setMode(session) switches how subsequent edits are
+                // gated (acceptEdits = auto, default = ask each time).
+                return {
+                  behavior: 'allow',
+                  updatedInput: input,
+                  ...(decision.mode ? { updatedPermissions: [{ type: 'setMode', mode: decision.mode, destination: 'session' }] } : {}),
+                };
+              }
+              push({ kind: 'permission_resolved', id, decision: 'deny' });
+              return { behavior: 'deny', message: decision.reason || 'denied by user', interrupt: false };
+            },
+          }),
           ...(opts.envOverrides ? { env: opts.envOverrides } : {}),
         },
       });

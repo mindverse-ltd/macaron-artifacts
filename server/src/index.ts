@@ -1,13 +1,15 @@
 import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { AUTH_TOKEN, HOST, PORT, WEB_DIST } from './config.js';
+import { AUTH_TOKEN, ALLOWED_ORIGINS, HOST, PORT, WEB_DIST } from './config.js';
 import { makeAuthHook, redactTokenInUrl, resolveToken, setArmedToken } from './lib/auth.js';
+import { makeCorsHook } from './lib/cors.js';
 import { warmSettingsCache } from './lib/settings-store.js';
 import { warmWorktreeCache } from './lib/worktree-store.js';
 import { warmPermissionRulesCache } from './lib/permission-rules.js';
 import { warmShareCache } from './lib/share-store.js';
 import { warmCodexConfigCache } from './lib/codex-config.js';
+import { warmKimiConfigCache } from './lib/kimi-config.js';
 import { warmLabelsCache } from './lib/label-store.js';
 import { warmSchedulesCache } from './lib/schedule-store.js';
 import { startScheduler } from './lib/scheduler.js';
@@ -33,6 +35,7 @@ import { registerMcpRoutes } from './routes/mcp.js';
 import { registerConfigFileRoutes } from './routes/config-files.js';
 import { registerRelayRoutes } from './routes/relay.js';
 import { registerCodexRoutes } from './routes/codex.js';
+import { registerKimiRoutes } from './routes/kimi.js';
 import { registerGitRoutes } from './routes/git.js';
 import { registerShareRoutes } from './routes/share.js';
 import { registerSearchRoutes } from './routes/search.js';
@@ -97,8 +100,15 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 // the network. resolveToken auto-generates one when bound to a non-loopback
 // host with no token set; seed it into the module-level armed slot so the hook
 // and a later tunnel-start share one live secret.
-const { token: authToken, generated: authGenerated } = resolveToken(HOST, AUTH_TOKEN);
+const { token: authToken, generated: authGenerated } = resolveToken(HOST, AUTH_TOKEN, ALLOWED_ORIGINS.length > 0);
 setArmedToken(authToken);
+// CORS/LNA must run before auth so a token-less OPTIONS preflight is answered
+// (and short-circuited) instead of being 401'd by the auth hook. Registered
+// unconditionally: with an empty allowlist (the default) it emits no CORS
+// headers but still 403s any cross-origin request before it can route — a
+// gate an off-by-config `if` would silently drop. Same-origin and no-Origin
+// CLI requests pass through untouched.
+app.addHook('onRequest', makeCorsHook(ALLOWED_ORIGINS));
 app.addHook('onRequest', makeAuthHook());
 
 await app.register(async (instance) => {
@@ -121,6 +131,7 @@ await app.register(async (instance) => {
   await registerSessionRoutes(instance);
   await registerWorktreeRoutes(instance);
   await registerCodexRoutes(instance);
+  await registerKimiRoutes(instance);
   await registerGitRoutes(instance);
   await registerShareRoutes(instance);
   await registerSearchRoutes(instance);
@@ -140,12 +151,15 @@ if (existsSync(WEB_DIST)) {
     // MACARON_ENGINE=codex can steer `/` to codex.html instead.
     index: false,
   });
-  // Two SPA entries live side-by-side in web/dist: index.html (claude) and
-  // codex.html. The env decides which one is the SPA fallback for `/` and
-  // any deep-link URL, so `mcc` boots the claude UI and `mcx` boots codex
-  // from the same server binary. Static assets (JS/CSS/wasm chunks) come
-  // from the shared /assets/ folder and are shared between entries.
-  const spaEntry = process.env.MACARON_ENGINE === 'codex' ? 'codex.html' : 'index.html';
+  // Three SPA entries live side-by-side in web/dist: index.html (claude),
+  // codex.html and kimi.html. The env decides which one is the SPA fallback
+  // for `/` and any deep-link URL, so `mcc` boots the claude UI, `mcx` boots
+  // codex and `mkx` boots kimi from the same server binary. Static assets
+  // (JS/CSS/wasm chunks) come from the shared /assets/ folder and are shared
+  // between entries.
+  const spaEntry =
+    process.env.MACARON_ENGINE === 'kimi' ? 'kimi.html' :
+    process.env.MACARON_ENGINE === 'codex' ? 'codex.html' : 'index.html';
   // Explicit root — fastify-static's `index: false` refuses `/`, so own it here.
   app.get('/', (_req, reply) => reply.sendFile(spaEntry));
   app.setNotFoundHandler((req, reply) => {
@@ -167,6 +181,7 @@ try {
   await warmWorktreeCache();
   await warmPermissionRulesCache();
   await warmCodexConfigCache();
+  await warmKimiConfigCache();
   await warmLabelsCache();
   await warmSchedulesCache();
   await warmCodexTitlesCache();
@@ -175,11 +190,12 @@ try {
   await app.listen({ host: HOST, port: PORT });
   app.log.info(`macaron server listening on http://${HOST}:${PORT}`);
   if (authGenerated) {
-    app.log.warn(`bound to non-loopback host ${HOST} with no MACARON_AUTH_TOKEN — generated one for this run.`);
+    app.log.warn(`API reachable beyond a local peer (non-loopback bind or cross-origin enabled) with no MACARON_AUTH_TOKEN — generated one for this run.`);
     // The token is a live credential — keep it out of the structured log (which may be
-    // shipped off-box) and print the connection string straight to stdout so the operator
-    // can still grab it from their own terminal on first launch.
-    console.log(`connect from another device with: http://${HOST}:${PORT}/?token=${authToken}`);
+    // shipped off-box) and out of any URL (URLs leak via history/referrer/proxy logs).
+    // Print the address and the token on separate lines straight to stdout so the operator
+    // can grab them from their own terminal and paste the token into the UI's login screen.
+    console.log(`connect another device to: http://${HOST}:${PORT}/  ·  access token: ${authToken}`);
   } else if (authToken) {
     app.log.info('server auth enabled (MACARON_AUTH_TOKEN) — remote requests require the token.');
   }

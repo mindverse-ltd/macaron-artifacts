@@ -340,10 +340,34 @@ export function Settings() {
             </label>
           ))}
 
-          {settings.customProviders.length === 0 && (
+          {settings.customProviders.length === 0 && !editing && (
             <p className="muted" style={{ padding: '10px 4px' }}>
               No custom providers yet. Click "+ Add provider" to add one.
             </p>
+          )}
+
+          {editing && (
+            <div className="prov-editor-inline">
+              <h3 className="prov-editor-title">
+                {editing.id === null ? 'Add provider' : 'Edit provider'}
+              </h3>
+              <ProviderForm
+                draft={editing.draft}
+                existingConfigured={editing.existingConfigured}
+                isNew={editing.id === null}
+                onChange={(patch) =>
+                  setEditing((cur) => (cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur))
+                }
+              />
+              <div className="settings-actions">
+                <button className="primary" onClick={save} disabled={busy}>
+                  {busy ? 'Saving…' : editing.id === null ? 'Create' : 'Save'}
+                </button>
+                <button className="ghost" onClick={() => setEditing(null)} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -456,29 +480,6 @@ export function Settings() {
         </label>
       </div>
 
-      {editing && (
-        <div className="settings-section prov-editor">
-          <h2 className="sec-title">
-            {editing.id === null ? 'Add provider' : 'Edit provider'}
-          </h2>
-          <ProviderForm
-            draft={editing.draft}
-            existingConfigured={editing.existingConfigured}
-            isNew={editing.id === null}
-            onChange={(patch) =>
-              setEditing((cur) => (cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur))
-            }
-          />
-          <div className="settings-actions">
-            <button className="primary" onClick={save} disabled={busy}>
-              {busy ? 'Saving…' : editing.id === null ? 'Create' : 'Save'}
-            </button>
-            <button className="ghost" onClick={() => setEditing(null)} disabled={busy}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
@@ -533,11 +534,10 @@ function RemoteAccess() {
   const status = state?.status ?? 'stopped';
   const live = status === 'running' && state?.url;
   const starting = status === 'starting';
-  // The tunnel arms an access token; fold it into the shared URL as ?token= so
-  // the first load unlocks itself (consumeTokenFromUrl strips it after storing).
-  const shareUrl = live && state?.url
-    ? (state.token ? `${state.url}/?token=${encodeURIComponent(state.token)}` : state.url)
-    : '';
+  // The share URL carries NO token — a URL leaks via history/referrer/proxy logs.
+  // Opening it lands on the AuthGate login screen; the operator pastes the token
+  // (shown below) there. Never fold the credential into the link.
+  const shareUrl = (live && state?.url) || '';
 
   return (
     <div className="settings-section">
@@ -599,7 +599,7 @@ function RemoteAccess() {
               </div>
               <div className="settings-hint">
                 {state.token
-                  ? <><strong>This link embeds an access token</strong> — anyone you share it with can drive your Claude Code sessions. Share it only with people you trust, and stop the tunnel when you're done.</>
+                  ? <>This server requires an access token: <code>{state.token}</code>. Share it <strong>separately</strong> from the URL (never in the link) with people you trust, and stop the tunnel when you're done.</>
                   : <><strong>This server already requires its access token.</strong> Share the URL together with that token, and stop the tunnel when you're done.</>}
               </div>
             </div>
@@ -653,7 +653,7 @@ function ProviderForm({
           id="p-model"
           className="settings-input"
           value={draft.model}
-          placeholder="e.g. macaron-0.6, claude-opus-4-7"
+          placeholder="e.g. provider-model-id"
           onChange={(e) => onChange({ model: e.target.value })}
         />
       </div>

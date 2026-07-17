@@ -49,9 +49,16 @@ const compilerOptions: ts.CompilerOptions = {
 // $macaron/chat is a runtime shim (.mjs, no .tsx source to map via FACADE_PATHS), so declare
 // its types ambiently — user TSX importing sendUserMessage gets real signature checking
 // instead of a TS2307.
+// NOTE: this file must stay a SCRIPT (no top-level import/export) — inside a module file
+// `declare module "x"` becomes an augmentation of an existing module instead of creating
+// one, and the TS2307 comes back. The runtime shim also installs sendUserMessage on
+// window, so a top-level (script-scoped) `interface Window` merge covers TSX that writes
+// `window.sendUserMessage(...)` instead of the preferred import — no `declare global`
+// wrapper (which would require module-ifying the file) needed.
 const AMBIENT_DECLARATIONS =
   `declare module "https://*";\ndeclare module "http://*";\n` +
-  `declare module "$macaron/chat" {\n  export function sendUserMessage(prompt: string): void;\n}\n`;
+  `declare module "$macaron/chat" {\n  export function sendUserMessage(prompt: string): void;\n}\n` +
+  `interface Window {\n  sendUserMessage(prompt: string): void;\n}\n`;
 
 const toDiag = (d: ts.Diagnostic): GenUIDiagnostic => {
   const message = diagnosticMessage(ts, d);

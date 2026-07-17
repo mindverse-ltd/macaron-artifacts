@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
 import type { SessionDetail, Message, Block, CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import { codexApi } from './api';
+import { basename } from '../lib/api';
 import type { CodexRuntimeOverride } from './api';
 import { sendCodexMessage, startCodexThread, subscribeCodexLive, type CodexStreamEvent } from './stream';
 import { CodexComposer, type ComposerImage } from './CodexComposer';
@@ -259,7 +260,7 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
 }
 
 function PlanCard({ it }: { it: Extract<Item, { kind: 'plan' }> }) {
-  const glyph = (s: CodexPlanStatus): ReactNode => (s === 'completed' ? <CheckSquare size={14} aria-hidden="true" /> : s === 'inProgress' ? <CircleDot size={14} aria-hidden="true" /> : <Square size={14} aria-hidden="true" />);
+  const glyph = (s: CodexPlanStatus): ReactNode => (s === 'completed' ? <CheckSquare size={13} aria-hidden="true" /> : s === 'inProgress' ? <CircleDot size={13} aria-hidden="true" /> : <Square size={13} aria-hidden="true" />);
   const statusLabel = (s: CodexPlanStatus): string => (s === 'completed' ? 'completed' : s === 'inProgress' ? 'in progress' : 'pending');
   return (
     <div className="cx-plan">
@@ -611,7 +612,7 @@ export function CodexChat(props: CodexChatProps = {}) {
 
   const title = isNew
     ? 'New thread'
-    : detail?.cwd?.split('/').filter(Boolean).pop() || 'Thread';
+    : detail?.title || basename(detail?.cwd || '') || sid.slice(0, 8);
 
   return (
     <div className={'cx-main' + (hideBar ? ' tile' : '')}>

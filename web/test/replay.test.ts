@@ -27,6 +27,27 @@ test('predicts render_ui generation from code size and streams it until the reco
   assert.deepEqual(replayFrame(timeline, 5_000), messages);
 });
 
+test('streams render_ui before its paired text becomes due', () => {
+  // Real Claude transcripts flush a text block and its tool_use block together
+  // at message completion, so the paired text's end ≈ the render_ui end while
+  // the back-calculated stream starts far earlier. The frame must include the
+  // streaming render_ui even though the paired text is not due yet.
+  const code = 'x'.repeat(640);
+  const messages: Message[] = [
+    user('go', '2026-01-01T00:00:00.000Z'),
+    { role: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', blocks: [{ kind: 'text', text: '先说一句' }] },
+    { role: 'assistant', timestamp: '2026-01-01T00:00:05.010Z', blocks: [{ kind: 'tool_use', id: '1', name: 'mcp__macaron__render_ui', input: { code } }] },
+  ];
+  const timeline = createReplayTimeline(messages, 'exact');
+  const mid = replayFrame(timeline, 3_000);
+  assert.equal(mid.length, 2); // user + streaming render_ui; paired text not yet visible
+  assert.equal((mid[1]!.blocks[0] as { kind: string }).kind, 'tool_use');
+  const midInput = (mid[1]!.blocks[0] as Extract<Message['blocks'][number], { kind: 'tool_use' }>).input as { code: string; _replayStreaming: boolean };
+  assert.equal(midInput._replayStreaming, true);
+  assert.ok(midInput.code.length > 0 && midInput.code.length < code.length);
+  assert.equal(replayFrame(timeline, 5_010).length, 3);
+});
+
 test('does not mock streaming for non-render_ui tools', () => {
   const messages: Message[] = [user('go', '2026-01-01T00:00:00.000Z'), { role: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', blocks: [{ kind: 'tool_use', id: '1', name: 'Read', input: { code: 'x'.repeat(640) } }] }];
   const timeline = createReplayTimeline(messages, 'exact');

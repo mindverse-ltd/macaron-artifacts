@@ -45,11 +45,14 @@ export function replayFrame(timeline: ReplayTimelineEntry[], position: number): 
       continue;
     }
     if (entry.renderUICode && position >= entry.start) {
+      // 不能在此 break：render_ui 的落盘时间 ≈ 同一 message 的文本块（工具调用在
+      // text 之后成对落盘），反推的 streaming 起点却远早于两者。若遇到未到时间
+      // 的 text 就 break，streaming 窗口内永远轮不到这条 render_ui 出现。
       const progress = (position - entry.start) / (entry.end - entry.start);
       visible.push(withRenderUICode(entry.message, entry.renderUICode.slice(0, Math.max(1, Math.floor(entry.renderUICode.length * progress)))));
-      continue;
     }
-    break;
+    // end 单调递增，未到时间的普通消息之后也不会到时间，继续扫描只为找到
+    // start 更早的 streaming render_ui。
   }
   return visible;
 }

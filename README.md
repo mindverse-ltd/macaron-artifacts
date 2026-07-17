@@ -10,6 +10,10 @@ The plugin bundle includes the official **`genui-builder` skill** so supported a
 
 ---
 
+## Platform Support
+
+Macaron Artifacts currently targets Linux and macOS. Native Windows environments may have compatibility issues; use Linux, macOS, or WSL for the most reliable experience.
+
 ## Install
 
 The repo doubles as its own plugin marketplace. Use the full https URL — the `owner/repo` shorthand may clone over SSH, which fails without a GitHub SSH key.

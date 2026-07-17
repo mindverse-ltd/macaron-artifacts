@@ -13,6 +13,25 @@ test('reveals complete assistant text at its event timestamp', () => {
   assert.deepEqual(replayFrame(timeline, 1_000), timeline.map((entry) => entry.message));
 });
 
+test('predicts render_ui generation from code size and streams it until the recorded timestamp', () => {
+  const code = 'x'.repeat(640); // 160 estimated tokens at 40 tokens/second.
+  const messages: Message[] = [user('go', '2026-01-01T00:00:00.000Z'), { role: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', blocks: [{ kind: 'tool_use', id: '1', name: 'mcp__macaron__render_ui', input: { code } }] }];
+  const timeline = createReplayTimeline(messages, 'exact');
+  assert.equal(timeline[1]!.start, 1_000);
+  assert.equal(replayFrame(timeline, 999).length, 1);
+  const halfway = replayFrame(timeline, 3_000);
+  assert.equal(halfway.length, 2);
+  assert.equal(((halfway[1]!.blocks[0] as Extract<Message['blocks'][number], { kind: 'tool_use' }>).input as { code: string }).code.length, 320);
+  assert.deepEqual(replayFrame(timeline, 5_000), messages);
+});
+
+test('does not mock streaming for non-render_ui tools', () => {
+  const messages: Message[] = [user('go', '2026-01-01T00:00:00.000Z'), { role: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', blocks: [{ kind: 'tool_use', id: '1', name: 'Read', input: { code: 'x'.repeat(640) } }] }];
+  const timeline = createReplayTimeline(messages, 'exact');
+  assert.equal(replayFrame(timeline, 4_999).length, 1);
+  assert.deepEqual(replayFrame(timeline, 5_000), messages);
+});
+
 test('reveals intermediate and final text only at their recorded event times', () => {
   const messages = [user('go', '2026-01-01T00:00:00.000Z'), assistant('intermediate text', '2026-01-01T00:00:00.100Z'), assistant('final response', '2026-01-01T00:00:01.000Z')];
   const timeline = createReplayTimeline(messages, 'exact');

@@ -23,7 +23,7 @@ export const ALLOWED_ORIGINS = (process.env.MACARON_ALLOWED_ORIGINS || '')
 // win for ops-driven / one-shot invocations.
 export const MACARON_API_BASE = process.env.MACARON_API_BASE || '';
 export const MACARON_API_KEY = process.env.MACARON_API_KEY || '';
-export const MACARON_MODEL = process.env.MACARON_MODEL || 'macaron-0.6';
+export const MACARON_MODEL = process.env.MACARON_MODEL || '';
 
 export const HOME = os.homedir();
 export const CLAUDE_PROJECTS = path.join(HOME, '.claude', 'projects');

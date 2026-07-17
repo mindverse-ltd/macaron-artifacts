@@ -21,9 +21,9 @@ Options:
   --help, -h        Show this help
 
 Environment:
-  MACARON_API_BASE   Macaron API endpoint
-  MACARON_API_KEY    Macaron API key
-  MACARON_MODEL      Model id (default: macaron-0.6)
+  MACARON_API_BASE   Custom provider API endpoint
+  MACARON_API_KEY    Custom provider API key
+  MACARON_MODEL      Custom provider model id
   MACARON_LOG_LEVEL  Log level (default: info)`);
 }
 

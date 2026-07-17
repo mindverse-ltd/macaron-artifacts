@@ -390,7 +390,13 @@ export async function readSessionSummary(filePath: string): Promise<SessionSumma
           try {
             const o = JSON.parse(line);
             foldTitleFields(o, titleFields);
-            if (o.cwd) summary.cwd = o.cwd;
+            // Only backfill cwd from the tail when the head didn't find one.
+            // The head's cwd is the session's REAL working directory. Later
+            // lines can carry other cwds (a nested subagent / cwd-changing
+            // hook), and overwriting on those was corrupting the workspace's
+            // canonical cwd — resolveProjectCwd would then pick a sibling
+            // subdirectory as the whole workspace's cwd on new-session POSTs.
+            if (!summary.cwd && o.cwd) summary.cwd = o.cwd;
             if (!summary.gitBranch && o.gitBranch) summary.gitBranch = o.gitBranch;
           } catch {
             /* skip malformed line */

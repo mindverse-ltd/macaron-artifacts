@@ -4,7 +4,9 @@ export type ReplayTiming = 'exact' | 'natural' | 'compact';
 
 export type ReplayTimelineEntry = { message: Message; start: number; end: number; renderUICode?: string };
 
-const RENDER_UI_TOKENS_PER_SECOND = 40;
+// Historical jsonl has no token-level timing, so the stream start is
+// back-calculated from the recorded tool_use completion time at this rate.
+const RENDER_UI_TOKENS_PER_SECOND = 50;
 const CHARS_PER_TOKEN = 4;
 
 function timestamp(message: Message): number | undefined {

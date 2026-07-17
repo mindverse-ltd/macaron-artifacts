@@ -168,6 +168,9 @@ importers:
 
   server:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^1.2.1
+        version: 1.2.1(zod@4.4.3)
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.196
         version: 0.3.202(@anthropic-ai/sdk@0.110.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
@@ -402,6 +405,11 @@ importers:
         version: 7.3.6(@types/node@22.20.0)(jiti@2.7.0)(tsx@4.23.0)
 
 packages:
+
+  '@agentclientprotocol/sdk@1.2.1':
+    resolution: {integrity: sha512-jwYUdOQR7tc+Zfch53VL4JJyUNK/46q03uUTYb+PjECsmnNl94XFXOfYLJ8RBpMNidXd1rpOAVgb0vqD98xImA==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
@@ -2948,7 +2956,7 @@ packages:
     version: 0.0.1
 
   partial-tsx@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@2c005567d2f7b564eae1bc40d1d7a10ab23a1b47:
-    resolution: {integrity: sha512-10DVQtkhvVLLdsveOsdTti/uFpKoHyoifCougBmkwkCxbGCGnd5M6tmfSKQfOlaCtpEyaBzu+0AmkNY5XHgSBQ==, tarball: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@2c005567d2f7b564eae1bc40d1d7a10ab23a1b47}
+    resolution: {tarball: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@2c005567d2f7b564eae1bc40d1d7a10ab23a1b47}
     version: 0.0.1
 
   path-key@3.1.1:
@@ -3657,6 +3665,10 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@agentclientprotocol/sdk@1.2.1(zod@4.4.3)':
+    dependencies:
+      zod: 4.4.3
 
   '@antfu/install-pkg@1.1.0':
     dependencies:

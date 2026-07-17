@@ -174,6 +174,16 @@ elif [ -n "$(find "$DIR/web/src" "$DIR/server/src" "$DIR/shared/src" \
   needs_build=1
 fi
 
+# A `pnpm bundle` / prepack run leaves dist/index.js as a self-contained bun
+# bundle that inlines server sources. tsc's incremental build only re-emits
+# changed files and never overwrites that entry, so a stale bundle would be
+# served forever ("build succeeded" but nothing changed). Detect the bundle
+# marker (__require shim) and force a full tsc re-emit.
+if grep -q '__require' "$SERVER_DIST" 2>/dev/null; then
+  rm -f "$DIR/server/tsconfig.tsbuildinfo"
+  needs_build=1
+fi
+
 if [ "$needs_build" = 1 ]; then
   echo "[macaron] building (~30s)…" >&2
   if ! (cd "$DIR" && "$_PNPM" run build 2>&1); then

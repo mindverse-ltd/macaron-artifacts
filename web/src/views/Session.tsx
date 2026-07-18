@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
+import { useReplay } from '../components/ReplayControls';
 import { sessionToMarkdown, type Diagnostic } from '@macaron/shared';
 import {
   api,
@@ -192,7 +193,7 @@ export function flatten(messages: Message[]): Item[] {
         } else if (isRenderUITool(b.name)) {
           // Claude writes the TSX directly into the tool_use input.code field;
           // jsonl persists it. We use that as the rendered code immediately.
-          const input = (b.input || {}) as { code?: string; prompt?: string };
+          const input = (b.input || {}) as { code?: string; prompt?: string; _replayStreaming?: boolean };
           const code = typeof input.code === 'string' ? input.code : '';
           const prompt = code
             ? `${code.split('\n')[0] || ''} … (${code.length} chars)`
@@ -208,7 +209,7 @@ export function flatten(messages: Message[]): Item[] {
             toolUseId,
             prompt,
             code: code || undefined,
-            status: code ? 'ready' : 'pending',
+            status: code && !input._replayStreaming ? 'ready' : 'pending',
           };
           out.push(it);
           const pending = { item: it as PairedTool, ts: m.timestamp };
@@ -642,12 +643,14 @@ function ToolItem({ id, name, input, result, durationMs, isError, diagnostics }:
 function ThinkingIndicator({
   assistantLen,
   outputTokens,
+  activity,
 }: {
   assistantLen: number;
   // Authoritative cumulative output_tokens from the SDK's message_delta
   // usage stream. -1 = no signal yet (Macaron path or pre-first-delta); in
   // that case we fall back to the CLI's len/4 English estimate.
   outputTokens: number;
+  activity: readonly unknown[];
 }) {
   const startRef = useRef(Date.now());
   const verbRef = useRef<string>(THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)]!);
@@ -662,8 +665,6 @@ function ThinkingIndicator({
     outputTokens >= 0 ? outputTokens : Math.round(assistantLen / 4);
 
   useEffect(() => {
-    startRef.current = Date.now();
-    setNow(Date.now());
     setDisplayTokens(0);
     const clockId = window.setInterval(() => setNow(Date.now()), 500);
     const frameId = window.setInterval(
@@ -679,6 +680,11 @@ function ThinkingIndicator({
       window.clearInterval(easeId);
     };
   }, []);
+
+  useEffect(() => {
+    startRef.current = Date.now();
+    setNow(Date.now());
+  }, [activity]);
 
   const elapsedMs = Math.max(0, now - startRef.current);
   const tokens = displayTokens;
@@ -717,10 +723,12 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   // and just tack an error banner on top.
   const [lastGoodCode, setLastGoodCode] = useState('');
   const [runtimeError, setRuntimeError] = useState('');
+  const [hasRendered, setHasRendered] = useState(false);
 
   const onRendered = useCallback((rendered: string) => {
     setLastGoodCode(rendered);
     setRuntimeError('');
+    setHasRendered(true);
   }, []);
   const onError = useCallback((err: Error) => {
     setRuntimeError(err.message || String(err));
@@ -729,6 +737,7 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   const displayCode = code || lastGoodCode;
   const toolError = it.status === 'error' ? (it.error || 'unknown error') : '';
   const banner = toolError || runtimeError;
+  const waitingForFirstFrame = !hasRendered && !banner;
 
   if (!displayCode) {
     if (toolError) {
@@ -751,16 +760,23 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
           Newer render failed — showing last good frame. {banner}
         </div>
       )}
-      <StaticGenUIRenderer
-        code={displayCode}
-        active
-        streaming={streaming}
-        preserveStateOnUpdate={streaming}
-        flushMode="immediate"
-        onRendered={onRendered}
-        onError={onError}
-        className="ti-genui-renderer macaron-genui-scope"
-      />
+      {waitingForFirstFrame && <div className="ti-genui-pending">generating UI…</div>}
+      <div
+        data-genui-render-state={hasRendered ? 'ready' : 'pending'}
+        aria-hidden={!hasRendered}
+        style={!hasRendered ? { height: 0, overflow: 'hidden', visibility: 'hidden' } : undefined}
+      >
+        <StaticGenUIRenderer
+          code={displayCode}
+          active
+          streaming={streaming}
+          preserveStateOnUpdate={streaming}
+          flushMode="immediate"
+          onRendered={onRendered}
+          onError={onError}
+          className="ti-genui-renderer macaron-genui-scope"
+        />
+      </div>
     </div>
   );
 }
@@ -1941,7 +1957,8 @@ export function Session(props: SessionProps = {}) {
     };
   }, [commitSnapshot, fetchSnapshot, isPending, liveSubscriptionGen, sid, onPendingConsumed]);
 
-  const rawItems = useMemo(() => (data ? flatten(data.messages) : []), [data]);
+  const replay = useReplay(data?.replayMessages ?? data?.messages ?? [], isNew || sending || polling || handoffPending);
+  const rawItems = useMemo(() => flatten(replay.messages), [replay.messages]);
   // Collapse consecutive read-only tool operations (Read / Grep / Glob /
   // cat / grep / ls / …) into a single summary badge, mirroring Claude
   // Code CLI's `⏺ Searching for N patterns, reading M files, listing K
@@ -2630,6 +2647,7 @@ export function Session(props: SessionProps = {}) {
             {data?.gitBranch && <span className="sess-branch">{data.gitBranch}</span>}
           </div>
           <div className="session-bar-right">
+            {replay.controls}
             {!isNew && (
               <button
                 className="ghost small"
@@ -2654,6 +2672,7 @@ export function Session(props: SessionProps = {}) {
           </div>
         </div>
       )}
+      {hideBar && replay.controls && <div className="session-replay-bar">{replay.controls}</div>}
 
       {/*
         flex-direction: column-reverse on .thread. DOM order must be newest →
@@ -2661,7 +2680,7 @@ export function Session(props: SessionProps = {}) {
         button, banners, error/empty placeholders) goes at the END of the DOM.
       */}
       <div className="thread tui" ref={threadRef}>
-        {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} />}
+        {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} activity={liveTurn} />}
         {/* Suggested follow-ups from the throwaway cache-hit query. Rendered
             ABOVE liveTurn in DOM (so BELOW it visually — column-reverse)
             i.e. just above the input area, right under the latest reply.

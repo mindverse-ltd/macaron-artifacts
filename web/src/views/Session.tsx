@@ -708,8 +708,24 @@ function ThinkingIndicator({
   );
 }
 
+// Prepend `import React from 'react'` when the model writes `React.foo`
+// (React.forwardRef, React.CSSProperties, React.useCallback, …) without
+// the default import. TS check flags 'refers to a UMD global' AND the
+// browser runtime throws ReferenceError on the bare identifier — both
+// break the render. Named-imports-only is the prompt-side guidance, this
+// is the belt for when the model ignores it.
+function ensureReactImport(src: string): string {
+  if (!/\bReact\.\w/.test(src)) return src;
+  if (/^\s*import\s+React\b/m.test(src)) return src;
+  const named = src.match(/^(\s*)import\s*\{([^}]*)\}\s*from\s*(['"]react['"])/m);
+  if (named && !/^\s*import\s+React\s*,/m.test(src)) {
+    return src.replace(named[0], `${named[1]}import React, {${named[2]}} from ${named[3]}`);
+  }
+  return `import React from 'react';\n${src}`;
+}
+
 function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
-  const code = it.code || '';
+  const code = it.code ? ensureReactImport(it.code) : '';
   const streaming = it.status === 'pending' && Boolean(code);
 
   // Remember the most recent code that actually rendered so a subsequent

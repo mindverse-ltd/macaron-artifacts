@@ -289,7 +289,7 @@ export function flatten(messages: Message[]): Item[] {
 export function toolHeader(name: string, input: any): string {
   if (!input || typeof input !== 'object') return '';
   if (name === 'Bash') {
-    return String(input.command || '').replace(/\s+/g, ' ').slice(0, 240);
+    return String(input.description || input.command || '').replace(/\s+/g, ' ').slice(0, 240);
   }
   if (name === 'Read' || name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
     const p = String(input.file_path || '');

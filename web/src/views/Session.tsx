@@ -669,10 +669,17 @@ function ThinkingIndicator({
     };
   }, []);
 
+  // Reset the elapsed clock only when a new *structural* block appears
+  // (tool_use / tool_result / new text block) — not on every text delta,
+  // which streams as an appended tail of the SAME block and produced a
+  // constant `activity` reference change that reset the timer several
+  // times per second (visible as seconds counting up then flipping back
+  // to 0-2s again and again). Length changes are the cheap proxy for
+  // "the turn just entered a new phase, restart the phase clock".
   useEffect(() => {
     startRef.current = Date.now();
     setNow(Date.now());
-  }, [activity]);
+  }, [activity.length]);
 
   const elapsedMs = Math.max(0, now - startRef.current);
   const tokens = displayTokens;

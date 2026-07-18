@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
+import { useReplay } from '../components/ReplayControls';
 import { sessionToMarkdown } from '@macaron/shared';
 import {
   api,
@@ -192,7 +193,7 @@ export function flatten(messages: Message[]): Item[] {
         } else if (isRenderUITool(b.name)) {
           // Claude writes the TSX directly into the tool_use input.code field;
           // jsonl persists it. We use that as the rendered code immediately.
-          const input = (b.input || {}) as { code?: string; prompt?: string };
+          const input = (b.input || {}) as { code?: string; prompt?: string; _replayStreaming?: boolean };
           const code = typeof input.code === 'string' ? input.code : '';
           const prompt = code
             ? `${code.split('\n')[0] || ''} … (${code.length} chars)`
@@ -208,7 +209,7 @@ export function flatten(messages: Message[]): Item[] {
             toolUseId,
             prompt,
             code: code || undefined,
-            status: code ? 'ready' : 'pending',
+            status: code && !input._replayStreaming ? 'ready' : 'pending',
           };
           out.push(it);
           const pending = { item: it as PairedTool, ts: m.timestamp };
@@ -1938,7 +1939,8 @@ export function Session(props: SessionProps = {}) {
     };
   }, [commitSnapshot, fetchSnapshot, isPending, liveSubscriptionGen, sid, onPendingConsumed]);
 
-  const rawItems = useMemo(() => (data ? flatten(data.messages) : []), [data]);
+  const replay = useReplay(data?.replayMessages ?? data?.messages ?? [], isNew || sending || polling || handoffPending);
+  const rawItems = useMemo(() => flatten(replay.messages), [replay.messages]);
   // Collapse consecutive read-only tool operations (Read / Grep / Glob /
   // cat / grep / ls / …) into a single summary badge, mirroring Claude
   // Code CLI's `⏺ Searching for N patterns, reading M files, listing K
@@ -2620,6 +2622,7 @@ export function Session(props: SessionProps = {}) {
             {data?.gitBranch && <span className="sess-branch">{data.gitBranch}</span>}
           </div>
           <div className="session-bar-right">
+            {replay.controls}
             {!isNew && (
               <button
                 className="ghost small"
@@ -2644,6 +2647,7 @@ export function Session(props: SessionProps = {}) {
           </div>
         </div>
       )}
+      {hideBar && replay.controls && <div className="session-replay-bar">{replay.controls}</div>}
 
       {/*
         flex-direction: column-reverse on .thread. DOM order must be newest →

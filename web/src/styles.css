@@ -782,6 +782,13 @@ textarea:focus, select:focus, input:focus {
   word-break: break-all;
   min-width: 0;
 }
+.ti-tool-sub {
+  color: var(--muted);
+  font-size: 12px;
+  padding-left: 15px;
+  margin-top: 1px;
+  word-break: break-word;
+}
 .ti-tool-out {
   display: flex;
   gap: 6px;

@@ -4,7 +4,7 @@
 export function toolHeader(name: string, input: any): string {
   if (!input || typeof input !== 'object') return '';
   if (name === 'Bash') {
-    return String(input.description || input.command || '').replace(/\s+/g, ' ').slice(0, 240);
+    return String(input.command || input.description || '').replace(/\s+/g, ' ').slice(0, 240);
   }
   if (name === 'Read' || name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
     const p = String(input.file_path || '');
@@ -17,4 +17,12 @@ export function toolHeader(name: string, input: any): string {
   if (name === 'WebFetch' || name === 'WebSearch') return String(input.url || input.query || '');
   const s = JSON.stringify(input);
   return s.length > 200 ? s.slice(0, 200) + '…' : s;
+}
+
+// Secondary gray line shown under the header. Currently only Bash: its human-written
+// `description` complements the raw command on the main line. Empty = nothing to show.
+export function toolSubHeader(name: string, input: any): string {
+  if (!input || typeof input !== 'object') return '';
+  if (name === 'Bash' && input.command) return String(input.description || '').replace(/\s+/g, ' ').slice(0, 240);
+  return '';
 }

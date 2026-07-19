@@ -46,7 +46,7 @@ import { useConfirm } from '../components/Confirm';
 import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
-import { toolHeader } from '../lib/toolHeader';
+import { toolHeader, toolSubHeader } from '../lib/toolHeader';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
@@ -571,6 +571,7 @@ const PREVIEW_LINES = 2;
 function ToolItem({ id, name, input, result, durationMs, isError }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }) {
   const [open, setOpen] = useState(false);
   const header = toolHeader(name, input);
+  const subHeader = toolSubHeader(name, input);
   const resultText = (result ?? '').replace(/\n+$/, '');
   const allLines = resultText ? resultText.split('\n') : [];
   const previewLines = open ? allLines : allLines.slice(0, PREVIEW_LINES);
@@ -588,6 +589,7 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
         )}
         {durationMs != null && <span className="ti-tool-dur">{formatDuration(durationMs)}</span>}
       </div>
+      {subHeader && <div className="ti-tool-sub">{subHeader}</div>}
       {result !== undefined && allLines.length > 0 && (
         <div className="ti-tool-out">
           <span className="ti-rail">└</span>

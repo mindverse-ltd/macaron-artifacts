@@ -4,7 +4,7 @@
 export function toolHeader(name: string, input: any): string {
   if (!input || typeof input !== 'object') return '';
   if (name === 'Bash') {
-    return String(input.command || input.description || '').replace(/\s+/g, ' ').slice(0, 240);
+    return String(input.description || input.command || '').replace(/\s+/g, ' ').slice(0, 240);
   }
   if (name === 'Read' || name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
     const p = String(input.file_path || '');
@@ -19,10 +19,16 @@ export function toolHeader(name: string, input: any): string {
   return s.length > 200 ? s.slice(0, 200) + '…' : s;
 }
 
-// Secondary gray line shown under the header. Currently only Bash: its human-written
-// `description` complements the raw command on the main line. Empty = nothing to show.
-export function toolSubHeader(name: string, input: any): string {
-  if (!input || typeof input !== 'object') return '';
-  if (name === 'Bash' && input.command) return String(input.description || '').replace(/\s+/g, ' ').slice(0, 240);
-  return '';
+// The raw shell script of a Bash tool call, shown (syntax-highlighted) at the top of the
+// expanded body — the header only carries the terse `description`. Empty for non-Bash.
+export function bashCommand(name: string, input: any): string {
+  if (name !== 'Bash' || !input || typeof input !== 'object') return '';
+  return String(input.command || '');
+}
+
+// A tool row is expandable when it has output beyond the inline preview OR a Bash script
+// worth revealing — the latter makes a no-output Bash call (e.g. a backgrounded command)
+// still expandable so its script is reachable. `previewLines` = lines shown collapsed.
+export function isToolExpandable(command: string, outputLineCount: number, previewLines: number): boolean {
+  return outputLineCount > previewLines || !!command;
 }

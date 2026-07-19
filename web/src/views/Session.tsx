@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
+import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
 import { useReplay } from '../components/ReplayControls';
 import { sessionToMarkdown } from '@macaron/shared';
@@ -46,7 +46,7 @@ import { useConfirm } from '../components/Confirm';
 import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
-import { toolHeader, toolSubHeader } from '../lib/toolHeader';
+import { toolHeader, bashCommand, isToolExpandable } from '../lib/toolHeader';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
@@ -568,14 +568,21 @@ function SubagentItem({
 
 const PREVIEW_LINES = 2;
 
+// Bash input scripts render through the same Shiki block the chat markdown uses, so the
+// heavy highlighter stays in its lazy chunk and out of the Session view's default bundle.
+const BashScript = lazy(loadShikiStreamCodeBlock);
+
 function ToolItem({ id, name, input, result, durationMs, isError }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }) {
   const [open, setOpen] = useState(false);
   const header = toolHeader(name, input);
-  const subHeader = toolSubHeader(name, input);
+  const command = bashCommand(name, input);
   const resultText = (result ?? '').replace(/\n+$/, '');
   const allLines = resultText ? resultText.split('\n') : [];
   const previewLines = open ? allLines : allLines.slice(0, PREVIEW_LINES);
   const extra = Math.max(0, allLines.length - PREVIEW_LINES);
+  // Expandable if there's overflow output OR a Bash script to reveal (even with no output).
+  const expandable = isToolExpandable(command, allLines.length, PREVIEW_LINES);
+  const expandLabel = extra > 0 ? `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)` : 'expand';
 
   return (
     <div className="ti-tool" data-item-id={id}>
@@ -589,19 +596,26 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
         )}
         {durationMs != null && <span className="ti-tool-dur">{formatDuration(durationMs)}</span>}
       </div>
-      {subHeader && <div className="ti-tool-sub">{subHeader}</div>}
+      {open && command && (
+        <div className="ti-tool-input">
+          <span className="ti-rail">└</span>
+          <Suspense fallback={<pre className="chat-code-plain">{command}</pre>}>
+            <BashScript code={command} language="bash" streaming={false} />
+          </Suspense>
+        </div>
+      )}
       {result !== undefined && allLines.length > 0 && (
         <div className="ti-tool-out">
           <span className="ti-rail">└</span>
           <div className="ti-tool-body">
             {previewLines.length > 0 && <pre>{previewLines.join('\n')}</pre>}
-            {extra > 0 && (
-              <button className="ti-expand" onClick={() => setOpen((v) => !v)}>
-                {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)`}
-              </button>
-            )}
           </div>
         </div>
+      )}
+      {expandable && (
+        <button className="ti-expand ti-tool-toggle" onClick={() => setOpen((v) => !v)}>
+          {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : expandLabel}
+        </button>
       )}
     </div>
   );

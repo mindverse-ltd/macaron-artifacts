@@ -59,6 +59,12 @@ before(() => {
     const r = spawnSync(cmd, args, { cwd, stdio: 'inherit' });
     assert.equal(r.status, 0, `${cmd} ${args.join(' ')} failed in ${cwd}`);
   };
+  // @macaron/shared must be built first — both the server bundle and the web
+  // build resolve it from its dist (a clean CI checkout has none). Mirrors the
+  // order the root `prepack` runs in.
+  if (!existsSync(path.join(repoRoot, 'shared', 'dist', 'index.js'))) {
+    run('pnpm', ['--filter', '@macaron/shared', 'build'], repoRoot);
+  }
   if (!existsSync(path.join(repoRoot, 'server', 'dist', 'index.js'))) {
     run('bun', ['build', 'src/index.ts', '--target=node', '--format=esm', '--outfile=dist/index.js', '--packages=external'], path.join(repoRoot, 'server'));
   }

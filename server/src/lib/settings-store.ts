@@ -310,9 +310,19 @@ export async function setActiveProvider(id: string): Promise<boolean> {
   }
   // An explicit selection retires the boot launch override: the user is
   // choosing this provider's isolated credentials/config over the launch env.
-  launchOverride = false;
+  // Persist transactionally — a failed write must leave the cached provider
+  // AND launchOverride untouched so UI and routing stay in agreement.
+  const prevId = s.activeProviderId;
+  const prevOverride = launchOverride;
   s.activeProviderId = id;
-  await persist();
+  launchOverride = false;
+  try {
+    await persist();
+  } catch (e) {
+    s.activeProviderId = prevId;
+    launchOverride = prevOverride;
+    throw e;
+  }
   return true;
 }
 

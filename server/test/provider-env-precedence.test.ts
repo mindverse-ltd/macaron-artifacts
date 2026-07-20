@@ -10,6 +10,9 @@ import { mkdtempSync } from 'node:fs';
 process.env.HOME = mkdtempSync(path.join(os.tmpdir(), 'macaron-env-'));
 
 const store = await import('../src/lib/settings-store.js');
+// Import the real launcher parser (guarded to not boot the server on import)
+// for a genuine CLI-form → warmSettingsCache() → routed-model integration.
+const { parseArgs } = await import('../../bin/mcc.mjs');
 
 // The launch override is captured once per warmSettingsCache() call from the
 // ambient env, so each test sets env then re-warms to simulate a fresh boot.
@@ -88,4 +91,65 @@ test('selecting a custom provider clears the launch override and restores isolat
   assert.ok(env);
   assert.match(env!.ANTHROPIC_BASE_URL, /\/relay\/anthropic\//); // relay isolation restored
   assert.equal((await store.readPublicSettings()).activeProviderId, p.id); // UI shows the provider
+});
+
+// ---- Finding 1: setActiveProvider() is transactional --------------------
+
+test('a failed provider-selection persist restores cached provider and launchOverride', async () => {
+  const p = await seedCustomActive();
+  await boot({ base: 'https://mint.macaron.im', model: 'Macaron-V1-Venti' });
+  assert.equal((await store.readPublicSettings()).activeProviderId, store.SYSTEM_PROVIDER_ID);
+
+  // Force persist() to fail: replace the config file with a directory so
+  // writeFile(CONFIG_PATH) throws EISDIR. The cache mutation must roll back.
+  const fs = await import('node:fs');
+  const cfg = path.join(process.env.HOME!, '.claude', 'macaron-config.json');
+  fs.rmSync(cfg, { force: true });
+  fs.mkdirSync(cfg, { recursive: true });
+  try {
+    await assert.rejects(() => store.setActiveProvider(p.id));
+    // Cache + override must be untouched: still System/pass-through.
+    assert.equal((await store.readPublicSettings()).activeProviderId, store.SYSTEM_PROVIDER_ID);
+    const { model, env } = store.getActiveProviderEnv();
+    assert.equal(model, 'Macaron-V1-Venti');
+    assert.equal(env, null); // still pass-through, NOT the custom relay
+  } finally {
+    fs.rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+// ---- Finding 2: real launcher-to-boot integration -----------------------
+
+for (const [label, argv] of [
+  ['spaced', ['--model', 'Macaron-V1-Venti']],
+  ['inline', ['--model=Macaron-V1-Venti']],
+] as const) {
+  test(`launcher ${label} --model boots System and routes the CLI model`, async () => {
+    await seedCustomActive(); // a stale persisted provider that must be overridden
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_MODEL;
+    let exited: number | null = null;
+    await parseArgs([...argv], (code: number) => { exited = code; });
+    assert.equal(exited, null); // no --help/--version short-circuit
+    assert.equal(process.env.ANTHROPIC_MODEL, 'Macaron-V1-Venti'); // CLI form propagated to env
+    await store.warmSettingsCache(); // boot picks up the launch override
+    assert.equal((await store.readPublicSettings()).activeProviderId, store.SYSTEM_PROVIDER_ID);
+    const { model, env } = store.getActiveProviderEnv();
+    assert.equal(model, 'Macaron-V1-Venti'); // routed model is the CLI model, not the stored one
+    assert.equal(env, null);
+  });
+}
+
+// ---- Finding 3: base-URL-only pass-through uses default Claude auth ------
+
+test('base-URL-only launch (no creds/model) passes through to the default Claude auth path', async () => {
+  await seedCustomActive();
+  await boot({ base: 'https://mint.macaron.im' }); // no token, no model
+  // Accepted behavior: base URL alone is a launch override → System pass-through.
+  // The SDK inherits the ambient env untouched (env: null), so auth falls to the
+  // user's existing/default ~/.claude Claude Code login — we set no credentials.
+  const { model, env } = store.getActiveProviderEnv();
+  assert.equal(model, undefined); // no ambient model → SDK default
+  assert.equal(env, null); // no relay, no injected CLAUDE_CONFIG_DIR/token
+  assert.equal((await store.readPublicSettings()).activeProviderId, store.SYSTEM_PROVIDER_ID);
 });

@@ -3,8 +3,8 @@
 // approach — same UX, no CLI stdout parsing, typed events, no IPC buffering.
 
 import { randomUUID } from 'node:crypto';
-import { query, type SDKMessage, type PermissionMode, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { macaronMcpServer } from './macaron-mcp.js';
+import type { SDKMessage, PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { getMacaronMcpServer } from './macaron-mcp.js';
 import { registerPending } from './permission-registry.js';
 import { computeRuleKeys, isAllowed, rememberSession, rememberProject } from './permission-rules.js';
 import type { CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
@@ -146,6 +146,10 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
       // so by the time we get here `opts.permissionMode` already reflects
       // the user's picked mode for this session.
       const effectivePermissionMode: PermissionMode = opts.permissionMode ?? 'default';
+      // Lazy-import the Claude SDK so the shared bundle only pulls it in when a
+      // Claude run actually starts — the codex/kimi launchers never install it.
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+      const macaronMcpServer = await getMacaronMcpServer();
       const stream = query({
         prompt: buildPromptInput(opts),
         options: {
@@ -372,6 +376,8 @@ export type FollowupOptions = {
 // incrementally with partial-json (Allow.ARR) so chips appear as they stream.
 // Parsing lives client-side — here we only relay text, never interpret it.
 export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string> {
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
+  const macaronMcpServer = await getMacaronMcpServer();
   const stream = query({
     prompt: FOLLOWUP_PROMPT,
     options: {

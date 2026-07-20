@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 // while the foreign groups 404, and (4) a real first turn POSTed through its own
 // runner drives its lazy-imported SDK — mcc streams meta/delta/done off a local
 // Anthropic stub, mcx/mkx reach their own SDK and surface the deterministic
-// downstream failure of a `/bin/false` engine binary — with NO ERR_MODULE_NOT_FOUND
+// downstream failure of a stub engine binary that exits non-zero — with NO ERR_MODULE_NOT_FOUND
 // anywhere in the stream. That last case is the point: routes 200/404 never touch
 // the runner imports, so only a posted turn proves the own SDK actually loads.
 // No synthetic import probes — the tarball IS the artifact.
@@ -31,7 +31,7 @@ const ACP = '@agentclientprotocol/sdk';
 // (200) and a foreign route (404) to prove route gating, plus how to POST a real
 // first turn through its own runner: the endpoint to hit and the SSE event that
 // proves the own SDK's lazy import resolved (`done` off the Anthropic stub for
-// claude; the runner-level `error` a `/bin/false` engine binary yields for the
+// claude; the runner-level `error` a non-zero-exit stub engine binary yields for the
 // spawn-based codex/kimi — either way the runner ran, so the import loaded).
 const LAUNCHERS = {
   claude: { dir: '.', bin: 'mcc', engineEnv: undefined as string | undefined, own: CLAUDE, foreign: [CODEX, ACP], ownRoute: '/api/workspaces', foreignRoute: '/api/codex/sessions', turnRoute: '/api/workspaces/probe/sessions', expect: 'done' as 'done' | 'error' },
@@ -229,7 +229,7 @@ async function postTurn(port: number, route: string, cwd: string): Promise<strin
 // True when a first-turn SSE stream proves the runner's own lazy SDK import
 // resolved: no module-resolution error, plus the engine-specific success signal
 // (claude streams the stub delta+done; codex/kimi reach their runner and report
-// the deterministic `/bin/false` downstream failure). The negative control below
+// the deterministic stub-binary downstream failure). The negative control below
 // removes the own SDK and asserts this flips to false — the module error appears.
 const MODULE_ERR = /ERR_MODULE_NOT_FOUND|Cannot find package|Cannot find module/;
 function firstTurnProvesOwnSdk(turn: string, expect: 'done' | 'error'): boolean {
@@ -255,10 +255,16 @@ for (const [engine, l] of Object.entries(LAUNCHERS)) {
 
     // (2)-(3) Boots through the installed bin; own route answers, foreign 404s.
     // For claude, route the SDK at a local Anthropic stub so its first turn
-    // completes deterministically offline; codex/kimi spawn a `/bin/false`
-    // engine binary so their first turn reaches the own SDK then fails downstream.
+    // completes deterministically offline; codex/kimi spawn a stub engine binary
+    // that exits non-zero so their first turn reaches the own SDK then fails downstream.
     const stub = engine === 'claude' ? await startAnthropicStub() : null;
-    const falseBin = spawnSync('sh', ['-c', 'command -v false'], { encoding: 'utf8' }).stdout.trim() || '/bin/false';
+    // A real on-disk executable that exits non-zero — NOT the `false` builtin
+    // (`command -v false` prints just "false" on CI, which detectKimiBinary's
+    // existsSync() rejects, so the runner reports "CLI not found" before ever
+    // reaching its SDK import and the whole probe is void). Writing our own
+    // guarantees detection passes, the SDK loads, then the spawn fails downstream.
+    const falseBin = path.join(dest, 'engine-false');
+    writeFileSync(falseBin, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const extraEnv: Record<string, string> =
       engine === 'claude' ? { ANTHROPIC_BASE_URL: stub!.url, ANTHROPIC_AUTH_TOKEN: 'stub', ANTHROPIC_API_KEY: 'stub' } :
       // Force the SDK transport (not the default app-server bridge) so the POST

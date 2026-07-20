@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { test, before } from 'node:test';
@@ -11,8 +12,13 @@ import assert from 'node:assert/strict';
 // under node_modules/.bin exactly as `npx mcx@…` gets it), boot through that
 // installed bin, and assert (1) only its own engine SDK landed in node_modules,
 // (2) the server reaches "listening", (3) its own engine route group answers
-// while the foreign groups 404, and (4) a first turn through its own runner path
-// resolves its own SDK. No synthetic import probes — the tarball IS the artifact.
+// while the foreign groups 404, and (4) a real first turn POSTed through its own
+// runner drives its lazy-imported SDK — mcc streams meta/delta/done off a local
+// Anthropic stub, mcx/mkx reach their own SDK and surface the deterministic
+// downstream failure of a `/bin/false` engine binary — with NO ERR_MODULE_NOT_FOUND
+// anywhere in the stream. That last case is the point: routes 200/404 never touch
+// the runner imports, so only a posted turn proves the own SDK actually loads.
+// No synthetic import probes — the tarball IS the artifact.
 
 const repoRoot = path.resolve(import.meta.dirname, '../..');
 
@@ -21,19 +27,28 @@ const CODEX = '@openai/codex-sdk';
 const ACP = '@agentclientprotocol/sdk';
 
 // engine → launcher dir, bin name, own SDK, foreign SDKs, an own-engine route
-// (200) and a foreign route (404) to prove route gating from the installed bin.
+// (200) and a foreign route (404) to prove route gating, plus how to POST a real
+// first turn through its own runner: the endpoint to hit and the SSE event that
+// proves the own SDK's lazy import resolved (`done` off the Anthropic stub for
+// claude; the runner-level `error` a `/bin/false` engine binary yields for the
+// spawn-based codex/kimi — either way the runner ran, so the import loaded).
 const LAUNCHERS = {
-  claude: { dir: '.', bin: 'mcc', engineEnv: undefined as string | undefined, own: CLAUDE, foreign: [CODEX, ACP], ownRoute: '/api/workspaces', foreignRoute: '/api/codex/sessions' },
-  codex: { dir: 'mcx', bin: 'mcx', engineEnv: 'codex', own: CODEX, foreign: [CLAUDE, ACP], ownRoute: '/api/codex/config', foreignRoute: '/api/workspaces' },
-  kimi: { dir: 'mkx', bin: 'mkx', engineEnv: 'kimi', own: ACP, foreign: [CLAUDE, CODEX], ownRoute: '/api/kimi/threads', foreignRoute: '/api/workspaces' },
+  claude: { dir: '.', bin: 'mcc', engineEnv: undefined as string | undefined, own: CLAUDE, foreign: [CODEX, ACP], ownRoute: '/api/workspaces', foreignRoute: '/api/codex/sessions', turnRoute: '/api/workspaces/probe/sessions', expect: 'done' as 'done' | 'error' },
+  codex: { dir: 'mcx', bin: 'mcx', engineEnv: 'codex', own: CODEX, foreign: [CLAUDE, ACP], ownRoute: '/api/codex/config', foreignRoute: '/api/workspaces', turnRoute: '/api/codex/threads', expect: 'error' as 'done' | 'error' },
+  kimi: { dir: 'mkx', bin: 'mkx', engineEnv: 'kimi', own: ACP, foreign: [CLAUDE, CODEX], ownRoute: '/api/kimi/threads', foreignRoute: '/api/workspaces', turnRoute: '/api/kimi/threads', expect: 'error' as 'done' | 'error' },
 } as const;
 
 // These tests pack + install real tarballs, so they need `npm` and a populated
-// package cache. Skip deterministically (never fail) when the toolchain isn't
-// there — e.g. a fully offline sandbox with a cold cache — so the clean-checkout
-// suite stays green. MACARON_SKIP_PACK_TESTS=1 forces the skip.
+// package cache. Locally we skip deterministically (never fail) when the
+// toolchain isn't there — e.g. a fully offline sandbox with a cold cache — so
+// the clean-checkout suite stays green; MACARON_SKIP_PACK_TESTS=1 forces it.
+// Under CI the coverage is MANDATORY: the skip env is ignored and a missing
+// toolchain is a hard failure, so a green pipeline can never hide absent pack
+// coverage (the whole point of this suite).
+const CI = !!process.env.CI;
 const npmOk = spawnSync('npm', ['--version'], { encoding: 'utf8' }).status === 0;
-const SKIP = process.env.MACARON_SKIP_PACK_TESTS === '1' || !npmOk;
+if (CI) assert.ok(npmOk, 'CI requires npm for mandatory pack coverage, but `npm --version` failed');
+const SKIP = !CI && (process.env.MACARON_SKIP_PACK_TESTS === '1' || !npmOk);
 
 // Build the shared bundles ONCE, then stage them into mcx/mkx (their prepack
 // does the same) so all three tarballs are self-contained. Done in `before` so a
@@ -79,9 +94,9 @@ function install(tarball: string): string {
 
 // Boot the installed bin and resolve once it logs "listening" (with its chosen
 // port) or exits early. Returns { ok, port, output, kill }.
-function boot(consumer: string, bin: string, engineEnv: string | undefined): Promise<{ ok: boolean; port: number; output: string; kill: () => void }> {
+function boot(consumer: string, bin: string, engineEnv: string | undefined, extraEnv: Record<string, string> = {}): Promise<{ ok: boolean; port: number; output: string; kill: () => void }> {
   const port = 20000 + Math.floor(Math.random() * 20000);
-  const env = { ...process.env };
+  const env = { ...process.env, ...extraEnv };
   delete env.MACARON_ENGINE;
   if (engineEnv) env.MACARON_ENGINE = engineEnv;
   env.MACARON_PORT = String(port);
@@ -105,6 +120,79 @@ async function httpStatus(port: number, route: string): Promise<number> {
   return res ? res.status : 0;
 }
 
+// A deterministic local Anthropic endpoint. The claude-agent-sdk's spawned CLI
+// probes /v1/models etc. at startup (any 2xx satisfies them) then streams
+// POST /v1/messages; we answer with a minimal valid message-stream SSE carrying
+// STUB_TEXT so mcc's first turn resolves to a real delta+done without a network.
+const STUB_TEXT = 'macaron-isolation-ok';
+function startAnthropicStub(): Promise<{ url: string; close: () => void }> {
+  const sse = (obj: unknown) => `event: ${(obj as { type: string }).type}\ndata: ${JSON.stringify(obj)}\n\n`;
+  const messageObj = () => ({ id: 'msg_stub', type: 'message', role: 'assistant', model: 'stub', content: [{ type: 'text', text: STUB_TEXT }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+  const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && /\/messages$/.test((req.url || '').split('?')[0])) {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        let streaming = true;
+        try { streaming = !!JSON.parse(raw || '{}').stream; } catch { /* default to streaming */ }
+        if (!streaming) {
+          // Non-streaming path: a single JSON message object.
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(messageObj()));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write(sse({ type: 'message_start', message: { ...messageObj(), content: [], stop_reason: null } }));
+        res.write(sse({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }));
+        res.write(sse({ type: 'ping' }));
+        res.write(sse({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: STUB_TEXT } }));
+        res.write(sse({ type: 'content_block_stop', index: 0 }));
+        res.write(sse({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } }));
+        res.write(sse({ type: 'message_stop' }));
+        res.end();
+      });
+      return;
+    }
+    // Every startup probe just needs any 2xx.
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const p = typeof addr === 'object' && addr ? addr.port : 0;
+      resolve({ url: `http://127.0.0.1:${p}`, close: () => server.close() });
+    });
+  });
+}
+
+// POST a real first turn and drain the SSE reply until `done` (or timeout),
+// returning the raw stream text. This is the ONLY probe that drives a runner's
+// lazy SDK import — routes 200/404 never reach it.
+async function postTurn(port: number, route: string, cwd: string): Promise<string> {
+  const res = await fetch(`http://127.0.0.1:${port}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'hi', cwd }),
+  }).catch(() => null);
+  if (!res?.body) return '';
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let out = '';
+  const deadline = new Promise<void>((r) => setTimeout(r, 30_000));
+  const read = (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += dec.decode(value, { stream: true });
+      if (out.includes('"type":"done"') || out.includes('[DONE]')) break;
+    }
+  })();
+  await Promise.race([read, deadline]);
+  try { await reader.cancel(); } catch { /* already closed */ }
+  return out;
+}
+
 // True if `node_modules/<pkg>` exists in the consumer install.
 function installed(consumer: string, pkg: string): boolean {
   return existsSync(path.join(consumer, 'node_modules', ...pkg.split('/')));
@@ -121,15 +209,40 @@ for (const [engine, l] of Object.entries(LAUNCHERS)) {
     for (const f of l.foreign) assert.ok(!installed(consumer, f), `${l.bin} must NOT install foreign SDK ${f}`);
 
     // (2)-(3) Boots through the installed bin; own route answers, foreign 404s.
-    const b = await boot(consumer, l.bin, l.engineEnv);
+    // For claude, route the SDK at a local Anthropic stub so its first turn
+    // completes deterministically offline; codex/kimi spawn a `/bin/false`
+    // engine binary so their first turn reaches the own SDK then fails downstream.
+    const stub = engine === 'claude' ? await startAnthropicStub() : null;
+    const falseBin = spawnSync('sh', ['-c', 'command -v false'], { encoding: 'utf8' }).stdout.trim() || '/bin/false';
+    const extraEnv: Record<string, string> =
+      engine === 'claude' ? { ANTHROPIC_BASE_URL: stub!.url, ANTHROPIC_AUTH_TOKEN: 'stub', ANTHROPIC_API_KEY: 'stub' } :
+      engine === 'codex' ? { MACARON_CODEX_PATH: falseBin } :
+      { MACARON_KIMI_PATH: falseBin };
+    const b = await boot(consumer, l.bin, l.engineEnv, extraEnv);
     try {
       assert.ok(b.ok, `${l.bin} did not reach listening:\n${b.output}`);
       const eng = await fetch(`http://127.0.0.1:${b.port}/api/engine`).then((r) => r.json()).catch(() => null);
       assert.equal(eng?.engine, engine, `/api/engine should report ${engine}`);
       assert.equal(await httpStatus(b.port, l.ownRoute), 200, `${l.bin} own route ${l.ownRoute} should answer 200`);
       assert.equal(await httpStatus(b.port, l.foreignRoute), 404, `${l.bin} foreign route ${l.foreignRoute} should be absent (404)`);
+
+      // (4) POST a real first turn: this is what actually drives the runner's
+      // lazy `import('<own-sdk>')`. A missing/broken own SDK would surface as
+      // ERR_MODULE_NOT_FOUND in the stream instead of the engine's own output.
+      const turn = await postTurn(b.port, l.turnRoute, consumer);
+      assert.doesNotMatch(turn, /ERR_MODULE_NOT_FOUND|Cannot find package|Cannot find module/, `${l.bin} first turn must not fail to import its own SDK:\n${turn}`);
+      if (l.expect === 'done') {
+        assert.match(turn, /"type":"delta"/, `${l.bin} first turn should stream a delta from the Anthropic stub:\n${turn}`);
+        assert.match(turn, new RegExp(STUB_TEXT), `${l.bin} first turn should carry the stub text:\n${turn}`);
+        assert.match(turn, /"type":"done"/, `${l.bin} first turn should reach done:\n${turn}`);
+      } else {
+        // The own SDK loaded and spawned `/bin/false`, whose non-zero exit the
+        // runner surfaces as an error/done — proving the runner path ran.
+        assert.match(turn, /"type":"error"|"type":"done"/, `${l.bin} first turn should reach its runner and report the downstream failure:\n${turn}`);
+      }
     } finally {
       b.kill();
+      stub?.close();
       await fs.rm(dest, { recursive: true, force: true }).catch(() => {});
       await fs.rm(consumer, { recursive: true, force: true }).catch(() => {});
     }

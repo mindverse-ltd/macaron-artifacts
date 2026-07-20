@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,6 +49,17 @@ const mcc = path.join(repoRoot, 'bin', 'mcc.mjs');
 
 test('mcc lists --model in --help', () => {
   const result = runLauncher(mcc, ['--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /--model <model>/);
+});
+
+// Package managers expose the bin as a symlink (node_modules/.bin/mcc). The
+// main-module guard must resolve symlinks or the installed bin silently no-ops.
+test('mcc invoked through a package-style symlink still prints --help', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mcc-bin-'));
+  const link = path.join(dir, 'mcc');
+  symlinkSync(mcc, link);
+  const result = runLauncher(link, ['--help']);
   assert.equal(result.status, 0);
   assert.match(result.stdout, /--model <model>/);
 });

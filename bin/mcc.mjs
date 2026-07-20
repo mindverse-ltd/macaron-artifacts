@@ -6,6 +6,7 @@
 // Keep it types-only: --packages=external would externalize any runtime code it
 // gains into a bare import the published tarball can't resolve.
 import { readFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
@@ -98,7 +99,20 @@ export async function parseArgs(argv, onExit = (code) => process.exit(code)) {
 }
 
 // Only parse + boot the server when run as the CLI, not when imported by a test.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// Package managers expose the bin as a symlink (node_modules/.bin/mcc), so
+// process.argv[1] is the symlink path while import.meta.url is realpath-resolved
+// — resolve both through realpath before comparing, or the installed bin no-ops.
+function isMain() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   try {
     await parseArgs(args);
   } catch (e) {

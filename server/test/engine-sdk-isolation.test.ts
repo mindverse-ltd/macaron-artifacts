@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, writeFileSync, cpSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync, cpSync, rmSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -84,15 +84,22 @@ before(() => {
 function pack(dir: string, dest: string): string {
   const launcher = path.join(repoRoot, dir);
   const stage = mkdtempSync(path.join(os.tmpdir(), 'macaron-stage-'));
-  cpSync(path.join(launcher, 'package.json'), path.join(stage, 'package.json'));
-  for (const rel of ['bin', 'README.md']) cpSync(path.join(launcher, rel), path.join(stage, rel), { recursive: true });
-  cpSync(path.join(repoRoot, 'server', 'dist', 'index.js'), path.join(stage, 'server', 'dist', 'index.js'));
-  cpSync(path.join(repoRoot, 'web', 'dist'), path.join(stage, 'web', 'dist'), { recursive: true });
-  const r = spawnSync('npm', ['pack', '--ignore-scripts', '--pack-destination', dest], { cwd: stage, encoding: 'utf8' });
-  assert.equal(r.status, 0, `npm pack failed for ${dir}:\n${r.stderr}`);
-  const tgz = readdirSync(dest).find((f) => f.endsWith('.tgz'));
-  assert.ok(tgz, `no tarball produced for ${dir}`);
-  return path.join(dest, tgz);
+  try {
+    cpSync(path.join(launcher, 'package.json'), path.join(stage, 'package.json'));
+    for (const rel of ['bin', 'README.md']) cpSync(path.join(launcher, rel), path.join(stage, rel), { recursive: true });
+    cpSync(path.join(repoRoot, 'server', 'dist', 'index.js'), path.join(stage, 'server', 'dist', 'index.js'));
+    cpSync(path.join(repoRoot, 'web', 'dist'), path.join(stage, 'web', 'dist'), { recursive: true });
+    const r = spawnSync('npm', ['pack', '--ignore-scripts', '--pack-destination', dest], { cwd: stage, encoding: 'utf8' });
+    assert.equal(r.status, 0, `npm pack failed for ${dir}:\n${r.stderr}`);
+    const tgz = readdirSync(dest).find((f) => f.endsWith('.tgz'));
+    assert.ok(tgz, `no tarball produced for ${dir}`);
+    return path.join(dest, tgz);
+  } finally {
+    // The stage dir is scratch — the tarball already lives in `dest`. Remove it
+    // on every path (success, pack failure, or a thrown assertion) so repeated
+    // runs never leak macaron-stage-* under the tmpdir.
+    rmSync(stage, { recursive: true, force: true });
+  }
 }
 
 // Install `tarball` as the sole dependency of a fresh consumer project, so its
@@ -330,3 +337,22 @@ for (const [engine, l] of Object.entries(LAUNCHERS)) {
     }
   });
 }
+
+// Proves pack() leaks no per-run stage dir — on the success path AND when it
+// throws mid-stage. Counts macaron-stage-* under tmpdir before/after each case;
+// the delta must be zero either way, so the `finally` rmSync is load-bearing.
+test('pack() removes its macaron-stage-* dir on both success and failure', { timeout: 60_000, skip: SKIP && 'npm/package cache unavailable' }, () => {
+  const stageDirs = () => readdirSync(os.tmpdir()).filter((f) => f.startsWith('macaron-stage-'));
+  const dest = mkdtempSync(path.join(os.tmpdir(), 'macaron-pack-cleanup-'));
+  try {
+    const before = stageDirs().length;
+    pack('mcx', dest); // success path
+    assert.equal(stageDirs().length, before, 'a successful pack() must leave no stage dir behind');
+    // Failure path: a non-existent launcher dir makes the first cpSync throw
+    // after mkdtemp, exercising the `finally` cleanup on the error path.
+    assert.throws(() => pack('does-not-exist', dest));
+    assert.equal(stageDirs().length, before, 'a failed pack() must still remove its stage dir');
+  } finally {
+    rmSync(dest, { recursive: true, force: true });
+  }
+});

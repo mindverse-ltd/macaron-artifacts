@@ -17,6 +17,7 @@ function printHelp() {
 Options:
   --host <host>          Bind address (default: 127.0.0.1)
   --port <port>          Port (default: 7878)
+  --model <model>        Default model for new sessions (sets ANTHROPIC_MODEL)
   --allow-origin <url>   Allow a hosted WebUI on this origin to drive the server
                          cross-origin (repeatable; appends to MACARON_ALLOWED_ORIGINS)
   --allow-hosted         Allow the official hosted WebUI (https://artifacts.macaron.im)
@@ -72,6 +73,11 @@ try {
       process.env[flag === '--host' ? 'MACARON_HOST' : 'MACARON_PORT'] = inline ?? readValue(i, flag);
       // Advance past the consumed value only for the space form (inline === null).
       // `--flag=` (inline='') already has its value, so it must NOT skip the next arg.
+      if (inline === null) i++;
+      continue;
+    }
+    if (flag === '--model') {
+      process.env.ANTHROPIC_MODEL = inline ?? readValue(i, flag);
       if (inline === null) i++;
       continue;
     }

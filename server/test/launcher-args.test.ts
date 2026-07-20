@@ -41,3 +41,24 @@ for (const launcher of launchers) {
     assert.match(result.stderr, /--allow-hosted does not take a value/);
   });
 }
+
+// --model is mcc-only (Claude launch model → ANTHROPIC_MODEL, mirrors `claude --model X`).
+const mcc = path.join(repoRoot, 'bin', 'mcc.mjs');
+
+test('mcc lists --model in --help', () => {
+  const result = runLauncher(mcc, ['--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /--model <model>/);
+});
+
+test('mcc rejects --model with no value', () => {
+  const result = runLauncher(mcc, ['--model']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--model requires a value/);
+});
+
+test('mcc rejects --model swallowing the next flag as its value', () => {
+  const result = runLauncher(mcc, ['--model', '--port']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--model requires a value/);
+});

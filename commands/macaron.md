@@ -13,6 +13,18 @@ Run exactly this and nothing else. `MACARON_ENGINE=claude` and `MACARON_PORT=787
 MACARON_ENGINE=claude MACARON_PORT=7878 bash "${CLAUDE_PLUGIN_ROOT}/start.sh"
 ```
 
+**Zero-config provider (relay operators):** if the user's shell has any of the following env vars set when `/macaron` runs, the server upserts them as a saved provider at boot and auto-selects it (unless the user has already picked a non-`system` provider manually). Same env-var contract works for the `claude` CLI, so a single copy-paste snippet on a relay's docs page bootstraps both flows:
+
+```
+MACARON_PROVIDER_ENDPOINT  or  ANTHROPIC_BASE_URL             (required)
+MACARON_PROVIDER_TOKEN     or  ANTHROPIC_AUTH_TOKEN | ANTHROPIC_API_KEY  (required)
+MACARON_PROVIDER_MODEL     or  ANTHROPIC_MODEL                (default: macaron-v1-venti)
+MACARON_PROVIDER_NAME                                         (default: derived from endpoint host, e.g. "Mint (env)")
+MACARON_DISABLE_ENV_PROVIDER_SEED=1                           (escape hatch — skip the whole thing)
+```
+
+Provider id is `sha1(endpoint + model)`, so re-running the same snippet upserts the same row instead of piling up duplicates. Later env changes (e.g. rotated key) refresh in place on the next `/macaron`.
+
 After the server prints `Macaron WebUI (engine=claude): http://localhost:7878`, run `open "http://localhost:7878"` to launch the browser, then quote the URL verbatim to the user (don't paraphrase it) and briefly summarize what's there:
 
 - **Dashboard** — all workspaces from `~/.claude/projects`, sorted by last activity

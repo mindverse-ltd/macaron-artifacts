@@ -51,6 +51,22 @@ test('mcc lists --model in --help', () => {
   assert.match(result.stdout, /--model <model>/);
 });
 
+// A parsed --model must be consumed as the flag's own value (not swallow the
+// next arg) and then fall through to the post-loop port check. Pairing it with
+// an invalid --port makes the process exit deterministically at that check
+// WITHOUT booting the server — proving both the spaced and inline forms parse.
+test('mcc accepts a spaced --model value and reaches port validation', () => {
+  const result = runLauncher(mcc, ['--model', 'Macaron-V1-Venti', '--port', 'nope']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Invalid port: nope/);
+});
+
+test('mcc accepts an inline --model=value and reaches port validation', () => {
+  const result = runLauncher(mcc, ['--model=Macaron-V1-Venti', '--port', 'nope']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Invalid port: nope/);
+});
+
 test('mcc rejects --model with no value', () => {
   const result = runLauncher(mcc, ['--model']);
   assert.equal(result.status, 1);

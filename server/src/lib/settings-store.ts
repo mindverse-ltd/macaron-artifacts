@@ -86,6 +86,18 @@ const CONFIG_PATH = path.join(HOME, '.claude', 'macaron-config.json');
 
 let cache: Settings | null = null;
 
+// Launch override: a pasted `mcc` env block (ANTHROPIC_BASE_URL) or `--model`
+// (ANTHROPIC_MODEL) at boot is a "run against these params now" intent that
+// forces System/pass-through, regardless of the persisted provider. Captured
+// once at warm so the effective route and the UI agree on ONE active id.
+// Cleared the moment the user picks a provider — that's an explicit choice to
+// use its isolated credentials/config instead of the launch env.
+let launchOverride = false;
+// Effective active provider id: launch override collapses to System.
+function effectiveActiveId(s: Settings): string {
+  return launchOverride ? SYSTEM_PROVIDER_ID : s.activeProviderId;
+}
+
 function seedMacaronProvider(): CustomProvider {
   return {
     id: randomUUID(),
@@ -209,6 +221,10 @@ export async function readSettings(): Promise<Settings> {
 
 export async function warmSettingsCache(): Promise<void> {
   await readSettings();
+  // Capture launch override once at boot: a pasted ANTHROPIC_BASE_URL or an
+  // ambient ANTHROPIC_MODEL (e.g. `mcc --model X`) forces System/pass-through
+  // until the user explicitly selects a provider.
+  launchOverride = Boolean(process.env.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_MODEL);
   // Persist any migration/defaults on first boot so the file exists.
   await persist();
 }
@@ -218,7 +234,7 @@ export async function readPublicSettings(): Promise<PublicSettings> {
   const envBase = process.env.ANTHROPIC_BASE_URL || '';
   const usingRelay = Boolean(envBase);
   return {
-    activeProviderId: s.activeProviderId,
+    activeProviderId: effectiveActiveId(s),
     builtins: [
       {
         id: SYSTEM_PROVIDER_ID,
@@ -292,6 +308,9 @@ export async function setActiveProvider(id: string): Promise<boolean> {
   if (id !== SYSTEM_PROVIDER_ID && !s.customProviders.some((p) => p.id === id)) {
     return false;
   }
+  // An explicit selection retires the boot launch override: the user is
+  // choosing this provider's isolated credentials/config over the launch env.
+  launchOverride = false;
   s.activeProviderId = id;
   await persist();
   return true;
@@ -348,7 +367,7 @@ export function getActiveProviderRaw():
   | { id: string; name: string; endpoint: string; model: string; apiKey: string }
   | null {
   const s = cache ?? makeDefaults();
-  if (s.activeProviderId === SYSTEM_PROVIDER_ID) return null;
+  if (effectiveActiveId(s) === SYSTEM_PROVIDER_ID) return null;
   const p = s.customProviders.find((x) => x.id === s.activeProviderId);
   if (!p) return null;
   return { id: p.id, name: p.name, endpoint: p.endpoint, model: p.model, apiKey: p.apiKey };
@@ -383,11 +402,11 @@ export function getActiveProviderEnv(): {
   env: Record<string, string> | null;
 } {
   const s = cache ?? makeDefaults();
-  // Launch-time override: a pasted `ANTHROPIC_BASE_URL` (with `mcc` env block /
-  // `--model`) is an explicit "run against these params now" intent and must
-  // win over a stale persisted custom-provider selection. Fall through to the
-  // pass-through path so the SDK subprocess inherits the ambient env untouched.
-  if (s.activeProviderId === SYSTEM_PROVIDER_ID || process.env.ANTHROPIC_BASE_URL) {
+  // Boot launch override (ANTHROPIC_BASE_URL or `--model`) collapses to
+  // System/pass-through, matching the id readPublicSettings()/UI report — one
+  // contract for both routing and display. A later explicit selection clears
+  // it (see setActiveProvider). System also lands here.
+  if (effectiveActiveId(s) === SYSTEM_PROVIDER_ID) {
     // Pass-through: inherit process.env unchanged (ANTHROPIC_BASE_URL /
     // ANTHROPIC_AUTH_TOKEN the user exported in their shell). Honor an
     // ambient ANTHROPIC_MODEL too so `mcc --model X` (which sets it) picks

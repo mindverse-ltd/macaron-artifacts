@@ -2,7 +2,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 
 // Isolate HOME before importing settings-store: CONFIG_PATH is captured at
 // module load from ~/.claude/macaron-config.json, so a temp HOME keeps these
@@ -50,6 +50,43 @@ test('System launch with no ambient model yields undefined', async () => {
   assert.equal(env, null);
 });
 
+test('System launch follows the model in user settings.json', async () => {
+  const settingsPath = path.join(process.env.HOME!, '.claude', 'settings.json');
+  writeFileSync(settingsPath, JSON.stringify({ model: 'macaron-settings-model' }));
+  try {
+    await boot({});
+    const { model, env } = store.getActiveProviderEnv();
+    assert.equal(model, 'macaron-settings-model');
+    assert.equal(env, null);
+  } finally {
+    rmSync(settingsPath, { force: true });
+  }
+});
+
+test('an explicit launch model still takes precedence over settings.json', async () => {
+  const settingsPath = path.join(process.env.HOME!, '.claude', 'settings.json');
+  writeFileSync(settingsPath, JSON.stringify({ model: 'settings-model' }));
+  try {
+    await boot({ model: 'launch-model' });
+    assert.equal(store.getActiveProviderEnv().model, 'launch-model');
+  } finally {
+    rmSync(settingsPath, { force: true });
+  }
+});
+
+test('invalid settings.json does not break provider resolution', async () => {
+  const settingsPath = path.join(process.env.HOME!, '.claude', 'settings.json');
+  writeFileSync(settingsPath, '{not-json');
+  try {
+    await boot({});
+    const { model, env } = store.getActiveProviderEnv();
+    assert.equal(model, undefined);
+    assert.equal(env, null);
+  } finally {
+    rmSync(settingsPath, { force: true });
+  }
+});
+
 test('active custom provider builds a relay env override', async () => {
   await boot({});
   await seedCustomActive();
@@ -57,6 +94,28 @@ test('active custom provider builds a relay env override', async () => {
   assert.equal(model, 'stored-model');
   assert.ok(env);
   assert.match(env!.ANTHROPIC_BASE_URL, /\/relay\/anthropic\//);
+});
+
+test('custom provider without a model follows user settings.json', async () => {
+  const settingsPath = path.join(process.env.HOME!, '.claude', 'settings.json');
+  writeFileSync(settingsPath, JSON.stringify({ model: 'macaron-settings-model' }));
+  try {
+    await boot({});
+    const p = await store.addProvider({
+      name: 'Stored without model',
+      endpoint: 'https://api.example.com/v1',
+      model: '',
+      apiKey: 'sk-test',
+    });
+    await store.setActiveProvider(p.id);
+
+    const { model, env } = store.getActiveProviderEnv();
+    assert.equal(model, 'macaron-settings-model');
+    assert.ok(env);
+    assert.equal(env!.ANTHROPIC_MODEL, 'macaron-settings-model');
+  } finally {
+    rmSync(settingsPath, { force: true });
+  }
 });
 
 test('base-URL launch overrides a stale persisted custom provider (route + UI agree)', async () => {

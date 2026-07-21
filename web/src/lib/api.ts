@@ -16,6 +16,7 @@ export type {
   CreatePrRequest,
   CreatePrResult,
   FileSearchResponse,
+  FileContentSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirEntry,
@@ -63,6 +64,7 @@ import type {
   CreatePrRequest,
   CreatePrResult,
   FileSearchResponse,
+  FileContentSearchResponse,
   SavedCommand,
   SavedCommandsResponse,
   DirListing,
@@ -80,6 +82,7 @@ import type {
   SkillDetail,
   Schedule,
   ScheduleInput,
+  SessionKind,
   SchedulesResponse,
   CommandsResponse,
   AgentsResponse,
@@ -130,11 +133,17 @@ export type PublicCustomProvider = {
   model: string;
   configured: boolean;
 };
+export type DefaultPermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'plan'
+  | 'bypassPermissions';
+
 export type PublicSettings = {
   activeProviderId: string;
   builtins: PublicBuiltinProvider[];
   customProviders: PublicCustomProvider[];
-  yoloMode: boolean;
+  defaultPermissionMode: DefaultPermissionMode;
   followupSuggestions: boolean;
 };
 
@@ -187,6 +196,7 @@ async function req<T>(url: string, init: RequestInit): Promise<T> {
 
 export const api = {
   health: () => getJSON<HealthResponse>('/api/health'),
+  engine: () => getJSON<{ engine: SessionKind }>('/api/engine'),
   analytics: (window: string) =>
     getJSON<AnalyticsResponse>(`/api/analytics?window=${encodeURIComponent(window)}`),
   settings: () => getJSON<PublicSettings>('/api/settings'),
@@ -224,11 +234,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ providerId }),
     }),
-  setYoloMode: (enabled: boolean) =>
-    req<PublicSettings>('/api/settings/yolo', {
+  setDefaultPermissionMode: (mode: DefaultPermissionMode) =>
+    req<PublicSettings>('/api/settings/permission-mode', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify({ mode }),
     }),
   setFollowupSuggestions: (enabled: boolean) =>
     req<PublicSettings>('/api/settings/followups', {
@@ -287,7 +297,7 @@ export const api = {
   configFiles: () => getJSON<{ files: ConfigFileMeta[] }>('/api/config-files'),
   configFile: (id: ConfigFileId) => getJSON<ConfigFile>(`/api/config-files/${id}`),
   saveConfigFile: async (id: ConfigFileId, content: string): Promise<ConfigFile> => {
-    const r = await fetch(`/api/config-files/${id}`, {
+    const r = await authedFetch(`/api/config-files/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
@@ -301,12 +311,13 @@ export const api = {
     return r.json() as Promise<ConfigFile>;
   },
   workspaces: () => getJSON<WorkspacesResponse>('/api/workspaces'),
-  createProject: (input: { name?: string; gitUrl?: string }) =>
+  createProject: (input: { name?: string; gitUrl?: string; parent?: string }) =>
     req<{ project: string; cwd: string; name: string }>('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     }),
+  defaultProjectParent: () => getJSON<{ path: string }>('/api/projects/default-parent'),
   searchMessages: (q: string, limit = 30) =>
     getJSON<MessageSearchResponse>(
       `/api/search/messages?q=${encodeURIComponent(q)}&limit=${limit}`,
@@ -315,6 +326,13 @@ export const api = {
     getJSON<DirListing>(`/api/fs/dirs?path=${encodeURIComponent(path ?? '')}`),
   workspace: (project: string) =>
     getJSON<WorkspaceDetailResponse>(`/api/workspaces/${encodeURIComponent(project)}`),
+  // Forget a workspace: remove every session jsonl + drop the cwd registry
+  // entry. Does NOT touch the actual project directory on disk.
+  deleteWorkspace: async (project: string): Promise<{ removedSessions: number; unregistered: boolean }> => {
+    const r = await authedFetch(`/api/workspaces/${encodeURIComponent(project)}`, { method: 'DELETE' });
+    if (!r.ok) throw new HttpError(r.status, await r.text());
+    return r.json();
+  },
   // Read-only hooks view. Pass an encoded project to include that workspace's
   // project + local settings.json; omit it for user-scope hooks only.
   hooks: (project?: string) =>
@@ -324,6 +342,10 @@ export const api = {
   searchFiles: (project: string, q: string, limit = 50) =>
     getJSON<FileSearchResponse>(
       `/api/workspaces/${encodeURIComponent(project)}/files?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+  searchFileContent: (project: string, q: string, limit = 100) =>
+    getJSON<FileContentSearchResponse>(
+      `/api/workspaces/${encodeURIComponent(project)}/files/content?q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
   session: (project: string, sid: string) =>
     getJSON<SessionDetail>(
@@ -556,6 +578,15 @@ export function basename(p: string): string {
   if (!p) return '';
   const parts = p.split('/').filter(Boolean);
   return parts[parts.length - 1] || p;
+}
+
+// Single source of truth for a session row's display name, shared by the
+// sidebar, dashboard, workspace tiles and command palette so every surface
+// agrees. Priority: user/native title (`label` for a manual rename, `title` for
+// the native ai-title/custom-title the server resolved) > first-prompt preview >
+// short sid. Both Claude and Codex populate `title`, so this is provider-neutral.
+export function sessionTitle(s: { label?: string; title?: string; preview?: string; sessionId: string }): string {
+  return s.label || s.title || s.preview || s.sessionId.slice(0, 8);
 }
 
 // Trigger a client-side download of `text` as a file named `name`. Used by the

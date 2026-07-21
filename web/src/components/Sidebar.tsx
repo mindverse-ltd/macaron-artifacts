@@ -1,6 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { api, basename, HttpError, type Workspace, type SessionListItem, type WorktreeInfo } from '../lib/api';
+import { getApiBase } from '../lib/apiBase';
+import { assetUrl } from '../lib/assetBase';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clipboard,
+  CopyPlus,
+  Crosshair,
+  GitMerge,
+  Link as LinkIcon,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Unlink,
+  X,
+} from 'lucide-react';
+import { api, basename, sessionTitle, HttpError, type Workspace, type SessionListItem, type WorktreeInfo } from '../lib/api';
 import { useToast } from './Toast';
 import { useConfirm } from './Confirm';
 import { ContextMenu, type MenuItem } from './ContextMenu';
@@ -13,6 +31,7 @@ import {
   toggleCanvasSid,
   focusCanvasSid,
   subscribeCanvas,
+  removeCanvasSid,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
 
@@ -22,7 +41,9 @@ function sessStatus(mtime: number): 'completed' | 'running' {
   return Date.now() - mtime < 60_000 ? 'running' : 'completed';
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: {
+  onNavigate?: () => void;
+} = {}) {
   const [workspaces, setWorkspaces] = useState<WsData[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<'connecting' | 'ok' | 'bad'>('connecting');
@@ -138,6 +159,7 @@ export function Sidebar() {
     const project = encodeClaudeProjectName(cwd);
     setPendingCwd(project, cwd);
     navigate(`/w/${encodeURIComponent(project)}`);
+    onNavigate?.();
   };
 
 
@@ -149,12 +171,12 @@ export function Sidebar() {
       y: e.clientY,
       items: [
         {
-          icon: '+',
+          icon: <Plus size={14} aria-hidden="true" />,
           label: 'New Session',
           onClick: () => navigate(`/w/${encodeURIComponent(w.project)}`),
         },
         {
-          icon: '📋',
+          icon: <Clipboard size={14} aria-hidden="true" />,
           label: 'Copy Path',
           onClick: () => {
             navigator.clipboard.writeText(w.cwd || w.project);
@@ -163,10 +185,36 @@ export function Sidebar() {
         },
         'separator',
         {
-          icon: '✕',
+          icon: <X size={14} aria-hidden="true" />,
           label: 'Delete Workspace',
           danger: true,
-          onClick: () => toast('delete not yet implemented'),
+          onClick: async () => {
+            const ok = await confirm({
+              title: 'Delete workspace?',
+              body: (
+                <>
+                  All <strong>{w.sessionCount}</strong> session{w.sessionCount === 1 ? '' : 's'} under <code>{w.name || w.project}</code> will be removed from Macaron
+                  (jsonl files under <code>~/.claude/projects/{w.project}/</code>).
+                  {' '}<strong>The project directory on disk stays put</strong>
+                  {w.cwd ? <> — <code>{w.cwd}</code> is not touched.</> : '.'}
+                  {' '}Can't be undone.
+                </>
+              ),
+              confirmLabel: `Delete ${w.sessionCount} session${w.sessionCount === 1 ? '' : 's'}`,
+              destructive: true,
+            });
+            if (!ok) return;
+            try {
+              const { removedSessions } = await api.deleteWorkspace(w.project);
+              toast(`Workspace deleted — removed ${removedSessions} session${removedSessions === 1 ? '' : 's'}`);
+              // If we were sitting on this workspace, bounce home so the
+              // dashboard doesn't keep polling a project that no longer exists.
+              if (activeProject === w.project) navigate('/');
+              loadData();
+            } catch (err) {
+              toast(`Delete failed: ${(err as Error).message}`);
+            }
+          },
         },
       ],
     });
@@ -175,7 +223,9 @@ export function Sidebar() {
   const startRename = (s: SessionListItem) => {
     renameDoneRef.current = false;
     setRenamingSid(s.sessionId);
-    setRenameDraft(s.label || '');
+    // Prefill with the current override (manual label or native title) so an
+    // edit tweaks the existing name rather than starting blank.
+    setRenameDraft(s.label || s.title || '');
   };
 
   const commitRename = async (project: string, sid: string) => {
@@ -197,7 +247,7 @@ export function Sidebar() {
     const wt = worktrees[s.sessionId];
     const items: MenuItem[] = [
         {
-          icon: '◎',
+          icon: <Crosshair size={14} aria-hidden="true" />,
           label: 'Focus Session',
           onClick: () =>
             navigate(
@@ -205,12 +255,12 @@ export function Sidebar() {
             ),
         },
         {
-          icon: '✎',
+          icon: <Pencil size={14} aria-hidden="true" />,
           label: 'Rename',
           onClick: () => startRename(s),
         },
         {
-          icon: '⊕',
+          icon: <CopyPlus size={14} aria-hidden="true" />,
           label: 'Duplicate',
           onClick: async () => {
             try {
@@ -226,14 +276,19 @@ export function Sidebar() {
           },
         },
         {
-          icon: '🔗',
+          icon: <LinkIcon size={14} aria-hidden="true" />,
           label: 'Copy share link',
           onClick: async () => {
             try {
               const { token } = await api.createShare(w.project, s.sessionId);
-              // Build the URL from the browser's own origin so it works over
-              // LAN/tunnel, not just the server's 127.0.0.1 bind.
-              const url = `${window.location.origin}/#/share/${token}`;
+              // A recipient needs an origin that serves the UI AND answers
+              // /api/public: hosted mode (api base set) must use the server's
+              // own origin — a docs-origin /app link has no server bound and
+              // can never resolve. Local/tunnel keeps the browser's origin +
+              // app base so it works over LAN/tunnel, not just the server's
+              // 127.0.0.1 root bind.
+              const server = getApiBase();
+              const url = server ? `${server}/#/share/${token}` : `${window.location.origin}${assetUrl('/')}#/share/${token}`;
               await navigator.clipboard.writeText(url);
               toast('share link copied');
             } catch (err) {
@@ -242,7 +297,7 @@ export function Sidebar() {
           },
         },
         {
-          icon: '🚫',
+          icon: <Unlink size={14} aria-hidden="true" />,
           label: 'Unshare',
           onClick: async () => {
             try {
@@ -256,7 +311,7 @@ export function Sidebar() {
     ];
     if (wt) {
       items.push('separator', {
-        icon: '⭱',
+        icon: <GitMerge size={14} aria-hidden="true" />,
         label: wt.dirty ? 'Merge worktree (commit first)' : 'Merge worktree → base',
         onClick: async () => {
           try {
@@ -268,7 +323,7 @@ export function Sidebar() {
           }
         },
       }, {
-        icon: '🗑',
+        icon: <Trash2 size={14} aria-hidden="true" />,
         label: 'Discard worktree',
         danger: true,
         onClick: async () => {
@@ -302,12 +357,16 @@ export function Sidebar() {
       });
     }
     items.push('separator', {
-          icon: '✕',
+          icon: <X size={14} aria-hidden="true" />,
           label: 'Delete Session',
           danger: true,
           onClick: async () => {
             try {
               await api.deleteSession(w.project, s.sessionId);
+              // Also unpin from the workspace canvas so the tile disappears
+              // — otherwise the tile keeps mounting a Session whose jsonl
+              // no longer exists (404s until manually unpinned).
+              removeCanvasSid(w.project, s.sessionId);
               toast(`deleted ${s.sessionId.slice(0, 8)}`);
               loadData();
             } catch (err) {
@@ -320,27 +379,30 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar-v2">
-      <Link className="sb-brand" to="/">
-        <img className="sb-logo" src="/mindlab-symbol.svg" alt="" />
+      <Link className="sb-brand" to="/" onClick={onNavigate}>
+        <img className="sb-logo" src={assetUrl('/mindlab-symbol.svg')} alt="" />
         <div>
-          <div className="sb-brand-name">Macaron</div>
-          <div className="sb-brand-sub">Claude Code plugin</div>
+          <div className="sb-brand-name">Macaron Artifacts</div>
+          <div className="sb-brand-sub">Presented by Mind Lab</div>
         </div>
       </Link>
 
       <button
         type="button"
         className="sb-search"
-        onClick={() => window.dispatchEvent(new CustomEvent('macaron:open-search'))}
-        title="Search Claude sessions (⌘K)"
+        onClick={() => {
+          onNavigate?.();
+          window.requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent('macaron:open-search'));
+          });
+        }}
+        title="Search Claude sessions"
       >
-        <span className="sb-search-icon">⌕</span>
+        <span className="sb-search-icon"><Search size={16} aria-hidden="true" /></span>
         <span className="sb-search-label">Search sessions</span>
-        <kbd className="sb-search-kbd">⌘K</kbd>
       </button>
-      <Link className={'sb-nav-link' + (location.pathname === '/board' ? ' active' : '')} to="/board">
-        <span className="sb-nav-icon">▦</span>
-        <span>Dispatch board</span>
+      <Link className={'sb-nav-link' + (location.pathname === '/examples' ? ' active' : '')} to="/examples" onClick={onNavigate}>
+        <span>Examples</span>
       </Link>
 
       <div className="sb-label">
@@ -348,21 +410,15 @@ export function Sidebar() {
         <div className="sb-label-actions">
           <button
             type="button"
-            className="sb-new-session"
-            onClick={() => setPickerOpen(true)}
-            title="New session in a folder..."
-            aria-label="New session in a folder"
-          >
-            📁
-          </button>
-          <button
-            type="button"
             className="sb-new-project"
-            onClick={() => setShowNewProject(true)}
+            onClick={() => {
+              onNavigate?.();
+              setShowNewProject(true);
+            }}
             title="New project (create dir or clone a repo)"
             aria-label="New project"
           >
-            +
+            + new
           </button>
         </div>
       </div>
@@ -378,22 +434,32 @@ export function Sidebar() {
             <div key={w.project} className={'sb-ws' + (isActive ? ' active' : '')}>
               <div
                 className="sb-ws-head"
-                onClick={() => {
-                  toggleExpand(w.project);
-                  navigate(`/w/${encodeURIComponent(w.project)}`);
-                }}
                 onContextMenu={(e) => wsMenu(w, e)}
               >
-                <span className="sb-arrow">{isExpanded ? '▾' : '▸'}</span>
-                <span className="sb-ws-name">{name}</span>
-                <span className="sb-spacer" />
-                {runCount > 0 && !isExpanded && (
-                  <span className="sb-badge sb-badge-running">{runCount}</span>
-                )}
                 <button
+                  type="button"
+                  className="sb-ws-main"
+                  aria-expanded={isExpanded}
+                  onClick={() => {
+                    toggleExpand(w.project);
+                    navigate(`/w/${encodeURIComponent(w.project)}`, {
+                      state: { keepClaudeDrawerOpen: true },
+                    });
+                  }}
+                >
+                  <span className="sb-arrow">{isExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</span>
+                  <span className="sb-ws-name">{name}</span>
+                  <span className="sb-spacer" />
+                  {runCount > 0 && !isExpanded && (
+                    <span className="sb-badge sb-badge-running">{runCount}</span>
+                  )}
+                </button>
+                <button
+                  type="button"
                   className="sb-dots"
                   onClick={(e) => wsMenu(w, e)}
                   title="Workspace actions"
+                  aria-label={`${name} actions`}
                 >
                   ···
                 </button>
@@ -407,49 +473,53 @@ export function Sidebar() {
                       <div
                         key={s.sessionId}
                         className={'sb-sess' + (pinned ? ' pinned' : '')}
-                        onClick={() => {
-                          // First click adds to canvas. Subsequent click on a
-                          // pinned row focuses it (and navigates so the URL
-                          // matches — canvas view handles the sid).
-                          if (!pinned) toggleCanvasSid(w.project, s.sessionId);
-                          else focusCanvasSid(w.project, s.sessionId);
-                          if (activeProject !== w.project) {
-                            navigate(`/w/${encodeURIComponent(w.project)}`);
-                          }
-                          // Ask the matching tile to scroll into view + focus
-                          // its composer. Custom event fires regardless of
-                          // whether the focused sid actually changed, so
-                          // re-clicking the same row still re-scrolls.
-                          window.dispatchEvent(
-                            new CustomEvent('macaron:focus-tile', {
-                              detail: { project: w.project, sid: s.sessionId },
-                            }),
-                          );
-                        }}
                         onContextMenu={(e) => sessMenu(w, s, e)}
                       >
-                        <span className={'sb-sess-dot sb-sess-dot-' + st} />
                         {renamingSid === s.sessionId ? (
-                          <input
-                            className="sb-sess-rename"
-                            value={renameDraft}
-                            autoFocus
-                            placeholder={s.preview || s.sessionId.slice(0, 8)}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => setRenameDraft(e.target.value)}
-                            onBlur={() => commitRename(w.project, s.sessionId)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') commitRename(w.project, s.sessionId);
-                              else if (e.key === 'Escape') {
-                                renameDoneRef.current = true;
-                                setRenamingSid('');
-                              }
-                            }}
-                          />
+                          <div className="sb-sess-main">
+                            <span className={'sb-sess-dot sb-sess-dot-' + st} />
+                            <input
+                              className="sb-sess-rename"
+                              value={renameDraft}
+                              autoFocus
+                              placeholder={s.preview || s.sessionId.slice(0, 8)}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => setRenameDraft(e.target.value)}
+                              onBlur={() => commitRename(w.project, s.sessionId)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') commitRename(w.project, s.sessionId);
+                                else if (e.key === 'Escape') {
+                                  renameDoneRef.current = true;
+                                  setRenamingSid('');
+                                }
+                              }}
+                            />
+                          </div>
                         ) : (
-                          <span className="sb-sess-name">
-                            {s.label || s.preview || s.sessionId.slice(0, 8)}
-                          </span>
+                          <button
+                            type="button"
+                            className="sb-sess-main"
+                            onClick={() => {
+                              // First click adds to canvas. Subsequent clicks
+                              // focus the existing tile.
+                              if (!pinned) toggleCanvasSid(w.project, s.sessionId);
+                              else focusCanvasSid(w.project, s.sessionId);
+                              if (activeProject !== w.project) {
+                                navigate(`/w/${encodeURIComponent(w.project)}`);
+                              }
+                              window.dispatchEvent(
+                                new CustomEvent('macaron:focus-tile', {
+                                  detail: { project: w.project, sid: s.sessionId },
+                                }),
+                              );
+                              onNavigate?.();
+                            }}
+                          >
+                            <span className={'sb-sess-dot sb-sess-dot-' + st} />
+                            <span className="sb-sess-name">
+                              {sessionTitle(s)}
+                            </span>
+                          </button>
                         )}
                         <button
                           type="button"
@@ -460,11 +530,12 @@ export function Sidebar() {
                             if (activeProject !== w.project) {
                               navigate(`/w/${encodeURIComponent(w.project)}`);
                             }
+                            onNavigate?.();
                           }}
                           title={pinned ? 'Remove from canvas' : 'Add to canvas'}
-                          aria-label={pinned ? 'Remove from canvas' : 'Add to canvas'}
+                          aria-label={`${pinned ? 'Remove' : 'Add'} ${sessionTitle(s)} ${pinned ? 'from' : 'to'} canvas`}
                         >
-                          {pinned ? '✓' : '+'}
+                          {pinned ? <Check size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
                         </button>
                       </div>
                     );
@@ -482,59 +553,31 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="sb-spacer-grow" />
+      <div className="sb-tools">
+        <Link className="sb-settings-link" to="/usage" onClick={onNavigate}>
+          <span>Usage</span>
+        </Link>
 
-      <Link className="sb-settings-link" to="/agents">
-        <span>🤖</span>
-        <span>Subagents</span>
-      </Link>
+        <button
+          type="button"
+          className="sb-settings-link sb-shortcuts-btn"
+          onClick={() => {
+            onNavigate?.();
+            window.requestAnimationFrame(() => {
+              window.dispatchEvent(new CustomEvent('macaron:shortcuts'));
+            });
+          }}
+          title="Keyboard shortcuts"
+        >
+          <span>Shortcuts</span>
+          <span className="sb-spacer" />
+          <kbd className="sb-shortcuts-kbd" aria-hidden="true">?</kbd>
+        </button>
 
-      <Link className="sb-settings-link" to="/hooks">
-        <span>⚡</span>
-        <span>Hooks</span>
-      </Link>
-
-      <Link className="sb-settings-link" to="/usage">
-        <span>📊</span>
-        <span>Usage</span>
-      </Link>
-
-      <Link className="sb-settings-link" to="/skills">
-        <span>▤</span>
-        <span>Skills</span>
-      </Link>
-
-      <Link className="sb-settings-link" to="/prompts">
-        <span>⌘</span>
-        <span>Prompts</span>
-      </Link>
-
-      <Link className="sb-settings-link" to="/schedules">
-        <span>⏰</span>
-        <span>Schedules</span>
-      </Link>
-
-      <Link className="sb-settings-link" to="/mcp">
-        <span>🧩</span>
-        <span>MCP servers</span>
-      </Link>
-
-      <button
-        type="button"
-        className="sb-settings-link sb-shortcuts-btn"
-        onClick={() => window.dispatchEvent(new CustomEvent('macaron:shortcuts'))}
-        title="Keyboard shortcuts"
-      >
-        <span aria-hidden="true">⌨</span>
-        <span>Shortcuts</span>
-        <span className="sb-spacer" />
-        <kbd className="sb-shortcuts-kbd" aria-hidden="true">?</kbd>
-      </button>
-
-      <Link className="sb-settings-link" to="/settings">
-        <span>⚙</span>
-        <span>Settings</span>
-      </Link>
+        <Link className="sb-settings-link" to="/settings" onClick={onNavigate}>
+          <span>Settings</span>
+        </Link>
+      </div>
 
       <footer className="sb-footer">
         <RateLimitMeters />
@@ -562,6 +605,7 @@ export function Sidebar() {
             setShowNewProject(false);
             loadData();
             navigate(`/w/${encodeURIComponent(project)}`);
+            onNavigate?.();
           }}
         />
       )}

@@ -19,6 +19,9 @@ import {
 } from '../lib/codex-store.js';
 import { groupWorkspaces } from '../lib/session-store.js';
 import { runCodex } from '../lib/codex-runner.js';
+import { runCodexAppServer } from '../lib/codex-app-server.js';
+import { respondCodexApproval } from '../lib/active-approvals.js';
+import type { CodexDecision } from '@macaron/shared';
 import { maybeGenerateCodexTitle } from '../lib/codex-title.js';
 import {
   CODEX_SYSTEM_PROVIDER_ID,
@@ -30,6 +33,7 @@ import {
   updateCodexRuntime,
   type CodexCustomProvider,
   type CodexRuntimeOptions,
+  type CodexRuntimeOverride,
 } from '../lib/codex-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
@@ -38,10 +42,39 @@ import type { AttachedImage } from '../lib/claude-runner.js';
 import type { SessionStreamEvent } from '@macaron/shared';
 
 type SidParams = { sid: string };
-type NewThreadBody = { text?: string; cwd?: string; images?: AttachedImage[] };
-type MessageBody = { text?: string; images?: AttachedImage[] };
+type NewThreadBody = { text?: string; cwd?: string; images?: AttachedImage[]; runtime?: CodexRuntimeOverride };
+type MessageBody = { text?: string; images?: AttachedImage[]; runtime?: CodexRuntimeOverride };
+
+// Known enum unions (must match @openai/codex-sdk's ModelReasoningEffort /
+// SandboxMode / ApprovalMode). A persisted override is client-controlled and
+// survives across turns, so an unknown or empty-string value here would wedge
+// every future turn in the workspace — validate and drop anything off-enum so
+// the field falls back to the global default instead.
+const EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
+const SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+const APPROVALS = new Set(['never', 'on-request', 'on-failure', 'untrusted']);
+
+// Pull the per-turn runtime override off a request body, keeping only the
+// fields the client actually sent and whose values are valid enum members.
+function pickRuntimeOverride(b: { runtime?: CodexRuntimeOverride } | undefined): CodexRuntimeOverride | undefined {
+  const r = b?.runtime;
+  if (!r || typeof r !== 'object') return undefined;
+  const o: CodexRuntimeOverride = {};
+  if (typeof r.reasoningEffort === 'string' && EFFORTS.has(r.reasoningEffort)) o.reasoningEffort = r.reasoningEffort;
+  if (typeof r.sandboxMode === 'string' && SANDBOXES.has(r.sandboxMode)) o.sandboxMode = r.sandboxMode;
+  if (typeof r.approvalPolicy === 'string' && APPROVALS.has(r.approvalPolicy)) o.approvalPolicy = r.approvalPolicy;
+  if (typeof r.webSearchEnabled === 'boolean') o.webSearchEnabled = r.webSearchEnabled;
+  return Object.keys(o).length ? o : undefined;
+}
 
 export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
+  // Transport selector. The app-server JSON-RPC bridge (MAC-8129) is the
+  // default — it's the only one that can stream native plan updates and pause
+  // for interactive approvals. Set MACARON_CODEX_TRANSPORT=sdk to fall back to
+  // the one-shot `codex exec` SDK path (no plan/approval surface).
+  const useAppServer = process.env.MACARON_CODEX_TRANSPORT !== 'sdk';
+  const runCodexTurn: typeof runCodex = (opts) => (useAppServer ? runCodexAppServer(opts) : runCodex(opts));
+
   // --- Threads -----------------------------------------------------------
 
   app.get('/api/codex/threads', async () => {
@@ -135,6 +168,9 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         else if (ev.kind === 'tool_use') relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
         else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
         else if (ev.kind === 'usage') relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
+        else if (ev.kind === 'codex_plan') relay({ type: 'codex_plan', steps: ev.steps, explanation: ev.explanation });
+        else if (ev.kind === 'codex_approval_request') relay({ type: 'codex_approval_request', id: ev.id, kind: ev.approval, command: ev.command, cwd: ev.cwd, reason: ev.reason, fileChanges: ev.fileChanges, grantRoot: ev.grantRoot, network: ev.network, available: ev.available });
+        else if (ev.kind === 'codex_approval_resolved') relay({ type: 'codex_approval_resolved', id: ev.id, decision: ev.decision });
         else if (ev.kind === 'message') relay({ type: 'event', event: 'system', subtype: ev.subtype });
         else if (ev.kind === 'error') relay({ type: 'error', error: ev.error });
         else if (ev.kind === 'done') {
@@ -171,7 +207,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     startSSE(reply);
     sseSend(reply, { type: 'starting', cwd });
     const abortController = new AbortController();
-    const stream = runCodex({ prompt: text, cwd, images, abortController });
+    const stream = runCodexTurn({ prompt: text, cwd, images, abortController, runtime: pickRuntimeOverride(req.body) });
     // pipeCodexToSSE owns the iteration, so wrap the runner to install the abort
     // under the sid once the first `session` event reveals it.
     const wrapped = (async function* () {
@@ -203,7 +239,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
       sseSend(reply, { type: 'meta', sessionId: sid, cwd });
       const abortController = new AbortController();
       registerRun(sid, abortController);
-      pipeCodexToSSE(reply, runCodex({ prompt: text, cwd, resume: sid, images, abortController }), sid, { cwd, text, hasImages: images.length > 0 });
+      pipeCodexToSSE(reply, runCodexTurn({ prompt: text, cwd, resume: sid, images, abortController, runtime: pickRuntimeOverride(req.body) }), sid, { cwd, text, hasImages: images.length > 0 });
     },
   );
 
@@ -211,6 +247,25 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     const ok = abortRun(params.sid);
     return reply.send({ ok, running: ok });
   });
+
+  // Answer a native app-server approval request (command / file / network).
+  // The runner parked the JSON-RPC server request; respondCodexApproval routes
+  // the decision back over its stdio pipe. Returns ok:false if the request was
+  // already resolved (turn ended, or the server cleared it) so the client can
+  // disable a stale card.
+  const DECISIONS: CodexDecision[] = ['accept', 'acceptForSession', 'decline', 'cancel'];
+  app.post<{ Params: SidParams; Body: { id?: string; decision?: string } }>(
+    '/api/codex/threads/:sid/approval',
+    async ({ params, body }, reply) => {
+      const id = String(body?.id || '').trim();
+      const decision = String(body?.decision || '') as CodexDecision;
+      if (!id || !DECISIONS.includes(decision)) {
+        return reply.status(400).send({ error: 'id and a valid decision are required' });
+      }
+      const ok = respondCodexApproval(params.sid, id, decision);
+      return reply.send({ ok });
+    },
+  );
 
   // SSE: reattach to a Codex turn. Replays the current snapshot (liveGet), then
   // forwards live events until the turn ends — so a browser refresh mid-turn
@@ -297,8 +352,6 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await readPublicCodexSettings());
   });
 
-  // --- Engine banner -----------------------------------------------------
-
   function pickCustomProviderPatch(b: Partial<CodexCustomProvider>): Partial<CodexCustomProvider> {
     const patch: Partial<CodexCustomProvider> = {};
     if (typeof b.name === 'string') patch.name = b.name;
@@ -314,9 +367,4 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     if (typeof b.autoCompactTokenLimit === 'number') patch.autoCompactTokenLimit = b.autoCompactTokenLimit;
     return patch;
   }
-
-
-  app.get('/api/engine', async () => ({
-    engine: process.env.MACARON_ENGINE === 'codex' ? 'codex' : 'claude',
-  }));
 }

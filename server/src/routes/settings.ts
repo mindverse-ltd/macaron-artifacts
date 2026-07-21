@@ -5,15 +5,23 @@ import {
   updateProvider,
   deleteProvider,
   setActiveProvider,
-  setYoloMode,
+  setDefaultPermissionMode,
   setFollowupSuggestionsEnabled,
+  type DefaultPermissionMode,
 } from '../lib/settings-store.js';
 
 type AddBody = { name?: string; endpoint?: string; model?: string; apiKey?: string };
 type UpdateBody = { name?: string; endpoint?: string; model?: string; apiKey?: string };
 type ActiveBody = { providerId?: string };
-type YoloBody = { enabled?: boolean };
+type PermissionModeBody = { mode?: DefaultPermissionMode };
 type FollowupsBody = { enabled?: boolean };
+
+const PERMISSION_MODES: readonly DefaultPermissionMode[] = [
+  'default',
+  'acceptEdits',
+  'plan',
+  'bypassPermissions',
+] as const;
 
 export async function registerSettingsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/settings', async () => await readPublicSettings());
@@ -79,16 +87,15 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
     }
   });
 
-  // Toggle YOLO mode (global bypassPermissions). When enabled, every SDK
-  // subprocess is launched with permissionMode='bypassPermissions' +
-  // allowDangerouslySkipPermissions=true, regardless of what the WebUI sends.
-  // Returns the full public settings so the client can update its UI.
-  app.put<{ Body: YoloBody }>('/api/settings/yolo', async (req, reply) => {
-    if (typeof req.body?.enabled !== 'boolean') {
-      return reply.status(400).send({ error: 'enabled (boolean) required' });
+  // Set the global default permission mode. New sessions initialise their
+  // per-session picker to this value; sessions may still override themselves.
+  app.put<{ Body: PermissionModeBody }>('/api/settings/permission-mode', async (req, reply) => {
+    const mode = req.body?.mode;
+    if (!mode || !(PERMISSION_MODES as readonly string[]).includes(mode)) {
+      return reply.status(400).send({ error: 'mode required — one of default|acceptEdits|plan|bypassPermissions' });
     }
     try {
-      await setYoloMode(req.body.enabled);
+      await setDefaultPermissionMode(mode);
       return await readPublicSettings();
     } catch (e) {
       return reply.status(500).send({ error: (e as Error).message });

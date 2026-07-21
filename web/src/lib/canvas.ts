@@ -6,13 +6,17 @@
 // (1–12) and rowSpan (1–20). Auto-flow places tiles in order; a resize
 // nudges the numbers, an animation smooths the transition.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { newTerminalSid } from './terminal';
+import { newFileSid } from './fileTile';
 
 export type TileGeom = { sid: string; colSpan: number; rowSpan: number };
 
 export const CANVAS_COLS = 12;
-export const DEFAULT_COL_SPAN = 6;   // half-width by default
+// New tiles fill the canvas end-to-end by default; users resize down when
+// they want two tiles side-by-side. Persisted layouts keep their per-tile
+// colSpan from localStorage, so this only affects freshly added tiles.
+export const DEFAULT_COL_SPAN = 12;
 export const DEFAULT_ROW_SPAN = 10;  // ~480px tall by default
 export const MIN_COL_SPAN = 3;
 export const MAX_COL_SPAN = 12;
@@ -134,6 +138,19 @@ export function addDraftSid(project: string): void {
   notify(project);
 }
 
+// Remove a sid from the canvas without adding it if absent. Used by callers
+// that already know they want it gone (e.g. sidebar's "Delete Session"
+// context menu — the session's jsonl is being deleted, so the pinned tile
+// must go too or it'd render a Session that 404s forever).
+export function removeCanvasSid(project: string, sid: string): void {
+  const cur = loadCanvas(project);
+  if (!cur.tiles.some((t) => t.sid === sid)) return;
+  const tiles = cur.tiles.filter((t) => t.sid !== sid);
+  const focusedSid = cur.focusedSid === sid ? tiles[0]?.sid || null : cur.focusedSid;
+  saveCanvas(project, { tiles, focusedSid });
+  notify(project);
+}
+
 export function focusCanvasSid(project: string, sid: string): void {
   const cur = loadCanvas(project);
   if (!cur.tiles.some((t) => t.sid === sid)) return;
@@ -167,33 +184,40 @@ export function useCanvas(project: string): {
   focus: (sid: string) => void;
   addDraft: () => void;
   addTerminal: () => void;
+  addFile: (path: string) => void;
   promoteDraft: (realSid: string) => void;
 } {
   const [state, setState] = useState<CanvasState>(() => loadCanvas(project));
+  const stateRef = useRef(state);
 
   useEffect(() => {
-    setState(loadCanvas(project));
+    const sync = () => {
+      const next = loadCanvas(project);
+      stateRef.current = next;
+      setState(next);
+    };
+    sync();
     let set = listeners.get(project);
     if (!set) {
       set = new Set();
       listeners.set(project, set);
     }
-    const cb = () => setState(loadCanvas(project));
-    set.add(cb);
+    set.add(sync);
     return () => {
-      set!.delete(cb);
+      set!.delete(sync);
       if (set!.size === 0) listeners.delete(project);
     };
   }, [project]);
 
   const update = useCallback(
     (patch: (cur: CanvasState) => CanvasState) => {
-      setState((cur) => {
-        const next = patch(cur);
-        saveCanvas(project, next);
-        notify(project);
-        return next;
-      });
+      const cur = stateRef.current;
+      const next = patch(cur);
+      if (next === cur) return;
+      stateRef.current = next;
+      saveCanvas(project, next);
+      setState(next);
+      notify(project);
     },
     [project],
   );
@@ -329,6 +353,25 @@ export function useCanvas(project: string): {
     }));
   }, [update]);
 
+  // Add a file tile at the front (or refocus if already on canvas). The
+  // sid is `file:<encoded path>`; Workspace routes it to <FileTile>.
+  const addFile = useCallback(
+    (path: string) => {
+      if (!path) return;
+      const sid = newFileSid(path);
+      update((cur) => {
+        if (cur.tiles.some((t) => t.sid === sid)) {
+          return cur.focusedSid === sid ? cur : { ...cur, focusedSid: sid };
+        }
+        return {
+          tiles: [{ sid, colSpan: DEFAULT_COL_SPAN, rowSpan: DEFAULT_ROW_SPAN }, ...cur.tiles],
+          focusedSid: sid,
+        };
+      });
+    },
+    [update],
+  );
+
   // Swap the draft sentinel for the real sessionId in place — keeps grid
   // position + focus intact so the tile the user was typing in stays put.
   const promoteDraft = useCallback(
@@ -365,6 +408,7 @@ export function useCanvas(project: string): {
     focus,
     addDraft,
     addTerminal,
+    addFile,
     promoteDraft,
   };
 }

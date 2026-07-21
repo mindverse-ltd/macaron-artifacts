@@ -12,10 +12,11 @@ export type Workspace = {
 
 // Which agent engine produced this session. `claude` = claude-agent-sdk
 // jsonl under ~/.claude/projects. `codex` = @openai/codex-sdk rollout files
-// under ~/.codex/sessions. Both are grouped by cwd into the same
-// Workspace list; the tile UI dispatches to the appropriate backend
-// route based on this discriminator.
-export type SessionKind = 'claude' | 'codex';
+// under ~/.codex/sessions. `kimi` = Kimi Code wire.jsonl + state.json under
+// ~/.kimi-code/sessions. All are grouped by cwd into the same Workspace
+// list; the tile UI dispatches to the appropriate backend route based on
+// this discriminator.
+export type SessionKind = 'claude' | 'codex' | 'kimi';
 
 export type SessionListItem = {
   kind: SessionKind;
@@ -27,8 +28,9 @@ export type SessionListItem = {
   // User-assigned human label, stored in a macaron sidecar (not in the
   // Claude-owned jsonl). Takes display precedence over `preview` when set.
   label?: string;
-  // Generated human-readable label. Codex-only for now (see codex-title.ts);
-  // the sidebar prefers it over `preview` when present.
+  // Native/generated human-readable title. Claude reads ai-title/custom-title
+  // records; Codex uses its persisted generated title; Kimi reads state.json.
+  // The UI prefers it over `preview` when present.
   title?: string;
   messageCount: number;
   messageCountSuffix?: string;
@@ -57,6 +59,7 @@ export type Message = {
   model?: string;
   timestamp?: string;
   uuid?: string;
+  sourceLine?: number;
 };
 
 // Token usage snapshot taken from the last assistant message's `usage`
@@ -90,7 +93,15 @@ export type SessionDetail = {
   project: string;
   cwd: string;
   gitBranch?: string;
+  // Legacy Macaron sidecar label, retained only so older renamed sessions
+  // display consistently until their next native rename migrates them.
+  label?: string;
+  // Native session title (custom-title / ai-title / lastPrompt / summary)
+  // resolved server-side, so the session header can show the same name the
+  // sidebar does. Undefined when the session has none.
+  title?: string;
   messages: Message[];
+  replayMessages?: Message[];
   truncated?: boolean;
   totalBytes?: number;
   latestUsage?: UsageSnapshot;
@@ -135,6 +146,13 @@ export type AnalyticsResponse = {
   window: string;
   since: number;
   until: number;
+  // Calendar-day bounds (YYYY-MM-DD) in the *server's* local timezone, matching
+  // the keys in `daily`. The web grid must build its date range from these
+  // strings rather than re-deriving days from `since`/`until` in the browser's
+  // timezone — otherwise a UTC server + LA browser disagree on the day boundary
+  // and whole days go missing from the heatmap.
+  sinceDate: string;
+  untilDate: string;
   totals: UsageTotals;
   daily: UsageDaily[];
   byModel: UsageByModel[];
@@ -348,6 +366,8 @@ export type WorkspaceDetailResponse = { workspace: Workspace; sessions: SessionL
 // Result of the composer's @-mention file search: repo-relative POSIX paths
 // under the workspace cwd, matched by substring on the needle.
 export type FileSearchResponse = { cwd: string; results: string[] };
+export type FileContentHit = { path: string; matches: { line: number; text: string }[] };
+export type FileContentSearchResponse = { cwd: string; results: FileContentHit[] };
 export type SchedulesResponse = { schedules: Schedule[] };
 export type HealthResponse = {
   ok: boolean;

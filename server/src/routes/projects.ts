@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { PROJECTS_ROOT } from '../config.js';
 import { encodeClaudeProjectName, registerProjectCwd } from '../lib/project-registry.js';
 
-type CreateBody = { name?: string; gitUrl?: string };
+type CreateBody = { name?: string; gitUrl?: string; parent?: string };
 
 // A project name that's safe as a single path segment: no separators, no
 // traversal, no leading dot/dash. Mirrors the slug git itself derives from a
@@ -79,6 +79,7 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
   app.post<{ Body: CreateBody }>('/api/projects', async (req, reply) => {
     const gitUrl = String(req.body?.gitUrl || '').trim();
     let name = String(req.body?.name || '').trim();
+    const parentInput = String(req.body?.parent || '').trim();
 
     if (gitUrl) {
       if (!isAllowedGitUrl(gitUrl)) {
@@ -95,28 +96,79 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
       return reply.status(400).send({ error: `name must be ${MAX_NAME_LENGTH} characters or fewer` });
     }
 
-    const dest = path.join(PROJECTS_ROOT, name);
+    // Parent directory: caller-supplied absolute path (from the DirPicker in
+    // NewProjectModal) or the default `PROJECTS_ROOT`. Must exist and be a
+    // real directory — refusing to auto-mkdir a caller-picked path avoids
+    // typo-blows-away-your-home surprises.
+    let parentDir = PROJECTS_ROOT;
+    if (parentInput) {
+      if (!path.isAbsolute(parentInput)) {
+        return reply.status(400).send({ error: 'parent must be an absolute path' });
+      }
+      const resolvedParent = path.resolve(parentInput);
+      try {
+        const st = await fs.stat(resolvedParent);
+        if (!st.isDirectory()) {
+          return reply.status(400).send({ error: 'parent is not a directory' });
+        }
+      } catch (e) {
+        const err = e as NodeJS.ErrnoException;
+        return reply.status(400).send({ error: `parent not accessible: ${err.code || err.message}` });
+      }
+      parentDir = resolvedParent;
+    }
+
+    const dest = path.join(parentDir, name);
     // Defense in depth: even though NAME_RE forbids separators, confirm the
-    // resolved path is still a direct child of the root before touching disk.
-    if (path.dirname(path.resolve(dest)) !== path.resolve(PROJECTS_ROOT)) {
-      return reply.status(400).send({ error: 'resolved path escapes the projects root' });
+    // resolved path is still a direct child of the chosen parent.
+    if (path.dirname(path.resolve(dest)) !== path.resolve(parentDir)) {
+      return reply.status(400).send({ error: 'resolved path escapes the chosen parent' });
     }
 
     try {
-      await fs.mkdir(PROJECTS_ROOT, { recursive: true });
+      // Only auto-mkdir for the default PROJECTS_ROOT — a user-picked parent
+      // was already stat'd above, so we know it exists.
+      if (parentDir === PROJECTS_ROOT) await fs.mkdir(PROJECTS_ROOT, { recursive: true });
       const encodedDest = encodeClaudeProjectName(dest);
-      for (const sibling of await fs.readdir(PROJECTS_ROOT)) {
+      for (const sibling of await fs.readdir(parentDir)) {
         if (sibling === name || sibling.startsWith('.')) continue;
-        if (encodeClaudeProjectName(path.join(PROJECTS_ROOT, sibling)) === encodedDest) {
+        if (encodeClaudeProjectName(path.join(parentDir, sibling)) === encodedDest) {
           return reply.status(409).send({ error: `name collides with existing project "${sibling}" in Claude's project encoding` });
         }
       }
-      // `mkdir` without recursive throws EEXIST if the dir is already there —
-      // that's the guard against clobbering an existing project.
-      await fs.mkdir(dest);
+      // `mkdir` without recursive throws EEXIST if the dir is already there.
+      // For a git-clone request, EEXIST is a hard collision (git refuses to
+      // clone into non-empty). For a plain create, an already-there dir that
+      // is empty is a leftover from a prior "Delete Workspace" (the sidebar
+      // action drops sessions but not the disk dir) — just adopt it silently
+      // instead of forcing the user to `rm -rf` behind our back. A non-empty
+      // dir still errors, with a message that names the actual obstacle.
+      try {
+        await fs.mkdir(dest);
+      } catch (e) {
+        const err = e as NodeJS.ErrnoException;
+        if (err.code !== 'EEXIST') throw err;
+        if (gitUrl) throw err;                          // clone needs empty target
+        let entries: string[];
+        try { entries = await fs.readdir(dest); }
+        catch (readErr) {
+          return reply.status(409).send({
+            error: `directory ${dest} exists but is unreadable (${(readErr as NodeJS.ErrnoException).code || 'unknown'}) — remove it or pick a different name`,
+          });
+        }
+        // Ignore purely hidden metadata (a stray .DS_Store from Finder, a
+        // .git shell from a prior init) so a "looks empty" folder still
+        // adopts cleanly. Any other file / dir means real content.
+        const meaningful = entries.filter((n) => !['.DS_Store', '.git', '.gitignore', '.gitkeep'].includes(n));
+        if (meaningful.length > 0) {
+          return reply.status(409).send({
+            error: `directory ${dest} already exists on disk with ${meaningful.length} file${meaningful.length === 1 ? '' : 's'} inside — pick a different name, or remove it (\`rm -rf "${dest}"\`) to start fresh`,
+          });
+        }
+        // Fall through: empty (or metadata-only) dir → we'll just register it.
+      }
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
-      if (err.code === 'EEXIST') return reply.status(409).send({ error: `already exists: ${name}` });
       return reply.status(500).send({ error: `mkdir failed: ${err.code || err.message}` });
     }
 
@@ -134,4 +186,8 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     const project = await registerProjectCwd(dest);
     return { project, cwd: dest, name };
   });
+
+  // Default parent dir for New Project — the UI shows this so the user can
+  // see where "no parent chosen" will drop the folder.
+  app.get('/api/projects/default-parent', async () => ({ path: PROJECTS_ROOT }));
 }

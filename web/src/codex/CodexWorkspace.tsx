@@ -19,6 +19,7 @@ import {
   rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { Copy, RefreshCw, X } from 'lucide-react';
 import { codexApi, type CodexThread, type CodexWorkspace as Wk } from './api';
 import { CodexChat } from './CodexChat';
 import {
@@ -31,6 +32,7 @@ import {
   type TileGeom,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
+import { sessionTitle } from '../lib/api';
 
 const ROW_UNIT_PX = 48;
 
@@ -186,7 +188,7 @@ export function CodexWorkspace() {
                   <SortableTile
                     key={tile.sid}
                     tile={tile}
-                    label={meta?.preview?.slice(0, 60) || tile.sid.slice(0, 8)}
+                    label={meta ? sessionTitle(meta) : tile.sid.slice(0, 8)}
                     isFocused={isFocused}
                     onFocus={() => canvas.focus(tile.sid)}
                     onRemove={() => canvas.remove(tile.sid)}
@@ -253,26 +255,35 @@ function SortableTile({
         <span className="cx-tile-grip-dots">⋮⋮</span>
         <span className="cx-tile-grip-label">{label}</span>
         <button
+          type="button"
           className="cx-tile-action"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); copyResume(); }}
           title="Copy `codex resume` command"
           aria-label="Copy resume command"
-        >⧉</button>
+        >
+          <Copy size={14} strokeWidth={2} aria-hidden="true" />
+        </button>
         <button
+          type="button"
           className="cx-tile-action"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); setRefreshKey((k) => k + 1); }}
           title="Refresh"
           aria-label="Refresh"
-        >↻</button>
+        >
+          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+        </button>
         <button
-          className="cx-tile-close"
+          type="button"
+          className="cx-tile-action cx-tile-action-danger"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onRemove(); }}
           title="Remove from canvas"
           aria-label="Remove from canvas"
-        >×</button>
+        >
+          <X size={14} strokeWidth={2} aria-hidden="true" />
+        </button>
       </div>
       <div className="cx-tile-body">
         <CodexChat

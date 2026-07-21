@@ -7,7 +7,7 @@ export default defineConfig({
     alias: {
       // Used by the vendored Macaron source (source.tsx, components/ui/*).
       // Points to /web/src/macaron-vendor — swap to the published npm package
-      // (likely `@macaron/ui`) when Mindverse releases one and delete the vendor dir.
+      // (likely `@macaron/ui`) when the package is published and delete the vendor dir.
       '@': path.resolve(__dirname, 'src/macaron-vendor'),
     },
   },
@@ -18,12 +18,13 @@ export default defineConfig({
     sourcemap: false,
     commonjsOptions: { transformMixedEsModules: true },
     rollupOptions: {
-      // Two SPA bundles: the claude UI at /index.html, the codex UI at
-      // /codex.html. Fastify picks which one to serve as `/` based on
-      // MACARON_ENGINE at boot.
+      // Three SPA bundles: the claude UI at /index.html, the codex UI at
+      // /codex.html, the kimi UI at /kimi.html. Fastify picks which one to
+      // serve as `/` based on MACARON_ENGINE at boot.
       input: {
         main: path.resolve(__dirname, 'index.html'),
         codex: path.resolve(__dirname, 'codex.html'),
+        kimi: path.resolve(__dirname, 'kimi.html'),
       },
     },
   },
@@ -36,7 +37,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': { target: 'http://127.0.0.1:7878', changeOrigin: true },
-      '/mindlab-symbol.svg': { target: 'http://127.0.0.1:7878', changeOrigin: true },
+      // /mindlab-symbol.svg is NOT proxied — vite serves it from
+      // web/public/. Proxying would fall through to the server's static
+      // handler rooted at web/dist/, which only has the SVG after `pnpm
+      // build`. In dev that's an empty miss and the SPA fallback returns
+      // index.html, breaking the <img>.
     },
   },
 });

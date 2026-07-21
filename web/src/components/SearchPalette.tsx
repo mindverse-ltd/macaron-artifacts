@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SEARCH_HL_OPEN, SEARCH_HL_CLOSE } from '@macaron/shared';
 import { api, basename, type SearchHit } from '../lib/api';
+import { hasActiveModal } from '../lib/modal';
 
 // Split a server snippet on the highlight delimiters and render matched runs as
 // <mark>. We never set innerHTML, so message text can't inject markup — the
@@ -51,21 +52,10 @@ export function SearchPalette() {
     setActive(0);
   }, []);
 
-  // Cmd/Ctrl+K toggles the palette from anywhere in the app.
+  // Open on the sidebar search-button event (macaron:open-search). Don't stack
+  // over another open modal (e.g. CommandPalette) — matches ShortcutsHelp.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Also open on a custom event so the sidebar button can trigger it.
-  useEffect(() => {
-    const onOpen = () => setOpen(true);
+    const onOpen = () => setOpen((v) => v || !hasActiveModal());
     window.addEventListener('macaron:open-search', onOpen);
     return () => window.removeEventListener('macaron:open-search', onOpen);
   }, []);

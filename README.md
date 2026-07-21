@@ -1,37 +1,31 @@
-# Macaron · Claude Code plugin (demo)
+# Macaron Artifacts
 
-A Claude Code plugin that opens a local **WebUI** giving you three things you can't get from the CLI alone:
+Macaron Artifacts publishes the plugin manifests, local WebUI runtime, GenUI tooling, and docs for running Macaron with Claude Code, Codex, and Kimi Code.
 
-1. **Visual `/resume`** — browse Claude Code workspaces & sessions with previews; one click copies the `--resume` command.
-2. **Live chat** — continue any session (or start a new one) in the browser; streams thinking, tool calls and GenUI previews via the Claude Agent SDK.
-3. **Provider switcher** — run sessions against your ambient Claude Code login or any Anthropic-compatible endpoint (Macaron, OpenRouter, LiteLLM, …).
+1. **Visual sessions** — browse workspaces and sessions with previews, then continue a turn from the browser.
+2. **Live chat** — stream thinking, tool calls, and GenUI previews from supported agent runtimes.
+3. **Provider controls** — run against an ambient login or a compatible endpoint such as Macaron, OpenRouter, or LiteLLM.
 
-The plugin bundles the official **`genui-builder` skill** so any Claude Code instance that has it loaded can also produce GenUI TSX from the command line.
-
----
-
-## Run via npx
-
-No clone, no build — just Node 22+. Pre-release builds publish to [pkg.pr.new](https://pkg.pr.new) on every push to `main`, so `@main` always points at the latest build (a PR number or commit sha works too, e.g. `mcc@8`):
-
-```bash
-npx https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main            # → http://localhost:7878
-npx https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main --port 8080
-MACARON_API_KEY=sk-… npx https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main
-```
-
-The tarball ships the prebuilt web UI + a bundled server; only the npm-installable runtime deps (`fastify`, `@fastify/static`, `zod`, `typescript`, `@anthropic-ai/claude-agent-sdk`) are fetched on first run.
-
-`bunx` can't run a bare tarball URL, but the `name@url` form works: `bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-claude-code/mcc@main`.
+The plugin bundle includes the official **`genui-builder` skill** so supported agents can produce GenUI TSX from the command line.
 
 ---
+
+## Platform Support
+
+Macaron Artifacts currently targets Linux and macOS. Native Windows environments may have compatibility issues; use Linux, macOS, or WSL for the most reliable experience.
 
 ## Install
 
-The repo doubles as its own plugin marketplace (`.claude-plugin/marketplace.json`). Use the full https URL — the `owner/repo` shorthand clones over SSH, which fails without a GitHub SSH key. In a Claude Code session, run each command separately (pasting both lines at once merges them into one command):
+The repo doubles as its own plugin marketplace. Use the full https URL — the `owner/repo` shorthand may clone over SSH, which fails without a GitHub SSH key.
+
+After installing the plugin, start a new agent session so the slash command and bundled skills are loaded.
+
+### Claude Code
+
+In a Claude Code session, run each command separately (pasting both lines at once merges them into one command):
 
 ```
-/plugin marketplace add https://github.com/mindverse-ltd/macaron-claude-code
+/plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
 ```
 
 ```
@@ -41,11 +35,55 @@ The repo doubles as its own plugin marketplace (`.claude-plugin/marketplace.json
 or from the shell:
 
 ```bash
-claude plugin marketplace add https://github.com/mindverse-ltd/macaron-claude-code
+claude plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
 claude plugin install macaron@macaron
 ```
 
-For local development, install your checkout directly: `claude plugin install /path/to/macaron-claude-code`.
+For local development, install your checkout directly: `claude plugin install /path/to/macaron`.
+
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
+codex plugin add macaron@macaron
+```
+
+### Kimi Code
+
+In a Kimi Code session, install from the GitHub URL, then reload to activate:
+
+```
+/plugins install https://github.com/MindLab-Research/macaron-artifacts
+/reload
+```
+
+### Run without installing
+
+Three independent packages, each self-contained (its own prebuilt server + web bundles) — `mcc` (Claude WebUI, port `7878`), `mcx` (Codex WebUI, port `7979`), and `mkx` (Kimi WebUI, port `7980`). Install one, get only that one. Launch any of them in one command, no plugin install needed:
+
+```bash
+bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+bunx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+bunx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+```
+
+`npx` works the same way — bin name = package name for all three:
+
+```bash
+npx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+npx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+npx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+```
+
+Replace `<sha>` with a commit on `main` (see the [pkg.pr.new builds](https://github.com/MindLab-Research/macaron-artifacts/commits/main)). All three accept `--host` / `--port`; run with `--help` for the full list.
+
+`mcc` also takes `--model <model>` to preset the Claude launch model (sets `ANTHROPIC_MODEL`), mirroring `claude --model X`. Paste your provider env and launch in one go:
+
+```bash
+export ANTHROPIC_BASE_URL='https://mint.macaron.im'
+export ANTHROPIC_AUTH_TOKEN='sk-...'
+bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha> --model Macaron-V1-Venti
+```
 
 Verify:
 
@@ -56,13 +94,17 @@ claude plugin list
 
 ## Use
 
-Inside any Claude Code session:
+Inside Claude Code:
 
 ```
 /macaron
 ```
 
-The slash command starts the local server (`node server/dist/index.js`, port `7878` by default) and opens `http://localhost:7878` in your browser. Pass a custom port with `/macaron 8080`.
+The slash command starts the local server (`node server/dist/index.js`, fixed port `7878`) and opens `http://localhost:7878` in your browser.
+
+Inside Codex, ask it to open the Macaron WebUI. The Codex-side default port is `7979`.
+
+Inside Kimi Code, run `/macaron:macaron`. The Kimi-side default port is `7980`.
 
 ### Views
 
@@ -75,12 +117,12 @@ The slash command starts the local server (`node server/dist/index.js`, port `78
 
 ## Configure
 
-Zero config by default — sessions run against your ambient Claude Code login. Add Macaron or any Anthropic-compatible provider from the **Settings** page (persisted to `~/.claude/macaron-config.json`), or override via env — copy `.env.example` to `.env` (git-ignored) before launching:
+Zero config by default — sessions run against your ambient Claude Code login. Add an Anthropic-compatible provider from the **Settings** page (persisted to `~/.claude/macaron-config.json`), or override via env — copy `.env.example` to `.env` (git-ignored) before launching:
 
 ```bash
-MACARON_API_BASE=https://your-endpoint/v1
-MACARON_API_KEY=sk-…
-MACARON_MODEL=macaron-0.6     # optional
+MACARON_API_BASE=https://api.example.com/v1
+MACARON_API_KEY=<api-key>
+MACARON_MODEL=<model-id>       # optional
 MACARON_PORT=7878             # optional
 ```
 
@@ -98,17 +140,21 @@ Remote requests must then present the token; localhost stays frictionless (loopb
 
 ```
 .claude-plugin/                   plugin manifest + marketplace (install from GitHub)
+.kimi-plugin/                     Kimi Code plugin manifest
 commands/macaron.md               /macaron slash command
-skills/genui-builder/             bundled skill (used by Claude Code directly)
-bin/mcc.mjs                       `mcc` npx entry — boots the prebuilt server
+commands-kimi/                    Kimi Code slash commands (/macaron:macaron)
+skills/genui-builder/             bundled GenUI authoring skill
+skills/macaron-webui-kimi/        Kimi Code WebUI skill
+mkx/                              self-contained Kimi launcher package (port 7980)
 start.sh                          one-time npm install + build, boots server in background
 shared/                           domain types + SSE protocol (server ↔ web)
 server/                           Fastify API, Claude Agent SDK runner, provider relay
 web/                              Vite + React UI
-.github/workflows/pkg-pr-new.yml  publishes the npx tarball to pkg.pr.new on every push
+site/                             Fumadocs docs + landing site (standalone, not in the workspace)
 ```
 
 ## Notes
 
 - Built and tested against **Node 22**.
 - Claude Code stores project directories as `~/.claude/projects/-<encoded-path>`; hyphens in the original folder name are ambiguous (we display the best-guess decoded path).
+- Kimi Code stores sessions under `~/.kimi-code/sessions/<workDirKey>/<sessionId>/` (one bucket per working directory), with `~/.kimi-code/session_index.jsonl` as a fast sessionId → directory index.

@@ -3,15 +3,21 @@
 // look. Every visual detail — background, borders, tool cards, code
 // blocks — is tuned to match the claude WebUI's palette (see styles.css).
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Sparkles, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch, AlertTriangle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { SessionDetail, Message, Block } from '@macaron/shared';
+import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
+import type { SessionDetail, Message, Block, CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import { codexApi } from './api';
-import { sendCodexMessage, startCodexThread, subscribeCodexLive } from './stream';
+import { basename } from '../lib/api';
+import type { CodexRuntimeOverride } from './api';
+import { sendCodexMessage, startCodexThread, subscribeCodexLive, type CodexStreamEvent } from './stream';
 import { CodexComposer, type ComposerImage } from './CodexComposer';
 import { notify } from '../lib/notify';
+import { useReplay } from '../components/ReplayControls';
+import { formatDuration } from '../lib/thinkingVerbs';
 
 // GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
 // import so the default codex bundle stays small. First render_ui in a
@@ -28,12 +34,18 @@ type Item =
   | { id: string; kind: 'user'; text: string; images?: ComposerImage[] }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'reasoning'; text: string }
-  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; isError?: boolean }
+  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }
   // GenUI render_ui tool call. Codex hands us the full `code` at
   // tool_use time (arguments are already aggregated by the CLI), so we
   // render immediately — no pending phase in practice. The tool_result
   // (checkGenUI diagnostics) may flip `status` to 'error' with details.
-  | { id: string; kind: 'genui'; toolUseId: string; code: string; status: 'ready' | 'error'; error?: string };
+  | { id: string; kind: 'genui'; toolUseId: string; code: string; status: 'ready' | 'error'; streaming?: boolean; error?: string }
+  // Codex-native plan card (turn/plan/updated). One per thread, replaced in
+  // place as new plan snapshots arrive.
+  | { id: string; kind: 'plan'; steps: Array<{ step: string; status: CodexPlanStatus }>; explanation?: string | null }
+  // Codex-native approval request. `decision` set once answered (or 'stale'
+  // when the server cleared it) so the card disables its buttons.
+  | { id: string; kind: 'approval'; approval: CodexApprovalKind; command?: string; cwd?: string; reason?: string | null; fileChanges?: Array<{ path: string; kind: string; diff?: string }>; grantRoot?: string | null; network?: { host: string; protocol: string; port?: number }; available: CodexDecision[]; decision?: CodexDecision | 'stale' };
 
 function toolInputToCmd(name: string, input: unknown): string {
   if (name === 'Bash') {
@@ -57,9 +69,10 @@ function toolInputToCmd(name: string, input: unknown): string {
 
 function historyToItems(detail: SessionDetail): Item[] {
   const out: Item[] = [];
+  const toolStartedAt = new Map<string, number>();
   let seq = 0;
   const next = () => `h-${seq++}`;
-  const walk = (blocks: Block[], role: Message['role']) => {
+  const walk = (blocks: Block[], role: Message['role'], timestamp?: string) => {
     for (const b of blocks) {
       if (b.kind === 'text' && b.text.trim()) {
         if (role === 'user') out.push({ id: next(), kind: 'user', text: b.text });
@@ -68,16 +81,19 @@ function historyToItems(detail: SessionDetail): Item[] {
         out.push({ id: next(), kind: 'reasoning', text: b.text });
       } else if (b.kind === 'tool_use') {
         if (isRenderUiTool(b.name)) {
-          const code = String((b.input as { code?: unknown } | null)?.code || '');
+           const input = b.input as { code?: unknown; _replayStreaming?: boolean } | null;
+           const code = String(input?.code || '');
           out.push({
             id: `genui-${b.id}`,
             kind: 'genui',
             toolUseId: b.id,
-            code,
-            status: 'ready',
+             code,
+             status: 'ready',
+             streaming: input?._replayStreaming,
           });
         } else {
           out.push({ id: b.id, kind: 'tool', name: b.name, input: b.input });
+          if (timestamp) toolStartedAt.set(b.id, Date.parse(timestamp));
         }
       } else if (b.kind === 'tool_result') {
         const target = [...out].reverse().find(
@@ -85,7 +101,12 @@ function historyToItems(detail: SessionDetail): Item[] {
             (it.kind === 'tool' && it.result === undefined && (b.toolUseId ? it.id === b.toolUseId : true))
             || (it.kind === 'genui' && it.toolUseId === b.toolUseId),
         );
-        if (target?.kind === 'tool') target.result = b.text;
+        if (target?.kind === 'tool') {
+          target.result = b.text;
+          const startedAt = toolStartedAt.get(target.id);
+          const finishedAt = timestamp ? Date.parse(timestamp) : NaN;
+          if (startedAt !== undefined && Number.isFinite(startedAt) && Number.isFinite(finishedAt) && finishedAt >= startedAt) target.durationMs = finishedAt - startedAt;
+        }
         else if (target?.kind === 'genui') {
           const flagged = b.text.startsWith('Rendered inline, but the TSX has issues');
           if (flagged) { target.status = 'error'; target.error = b.text; }
@@ -93,7 +114,7 @@ function historyToItems(detail: SessionDetail): Item[] {
       }
     }
   };
-  for (const m of detail.messages) walk(m.blocks, m.role);
+  for (const m of detail.messages) walk(m.blocks, m.role, m.timestamp);
   return out;
 }
 
@@ -158,12 +179,29 @@ function withToolResult(cur: Item[], toolUseId: string, text: string, isError: b
   });
 }
 
-function Reasoning({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
+// Plan is a singleton per thread: replace the existing card in place (keeping
+// its position) or append if this is the first snapshot.
+function withPlan(cur: Item[], steps: Array<{ step: string; status: CodexPlanStatus }>, explanation?: string | null): Item[] {
+  const idx = cur.findIndex((it) => it.kind === 'plan');
+  const item: Item = { id: 'plan', kind: 'plan', steps, explanation };
+  if (idx < 0) return [...cur, item];
+  return cur.map((it, i) => (i === idx ? item : it));
+}
+
+function withApproval(cur: Item[], ev: Extract<CodexStreamEvent, { type: 'codex_approval_request' }>): Item[] {
+  if (cur.some((it) => it.kind === 'approval' && it.id === ev.id)) return cur;
+  return [...cur, { id: ev.id, kind: 'approval', approval: ev.kind, command: ev.command, cwd: ev.cwd, reason: ev.reason, fileChanges: ev.fileChanges, grantRoot: ev.grantRoot, network: ev.network, available: ev.available }];
+}
+
+function withApprovalResolved(cur: Item[], id: string, decision?: CodexDecision | 'stale'): Item[] {
+  return cur.map((it) => (it.kind === 'approval' && it.id === id ? { ...it, decision: decision ?? 'stale' } : it));
+}
+
+function Reasoning({ text }: { text: string }) {  const [open, setOpen] = useState(false);
   return (
     <div className="cx-reasoning">
       <div className="cx-reasoning-head" onClick={() => setOpen((v) => !v)}>
-        <span className="cx-reasoning-caret">{open ? '▾' : '▸'}</span>
+        <span className="cx-reasoning-caret">{open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</span>
         <span>Reasoning</span>
       </div>
       {open && <div className="cx-reasoning-body">{text}</div>}
@@ -171,13 +209,13 @@ function Reasoning({ text }: { text: string }) {
   );
 }
 
-function toolGlyph(name: string): string {
-  if (name === 'Bash') return '$';
-  if (name === 'Edit') return '△';
-  if (name === 'WebSearch') return '⌕';
-  if (name.startsWith('mcp:')) return '⬡';
-  if (name === 'TodoWrite') return '☰';
-  return '⚙';
+function toolGlyph(name: string): ReactNode {
+  if (name === 'Bash') return <Terminal size={14} aria-hidden="true" />;
+  if (name === 'Edit') return <Pencil size={14} aria-hidden="true" />;
+  if (name === 'WebSearch') return <Search size={14} aria-hidden="true" />;
+  if (name.startsWith('mcp:')) return <Hexagon size={14} aria-hidden="true" />;
+  if (name === 'TodoWrite') return <ListTodo size={14} aria-hidden="true" />;
+  return <Settings size={14} aria-hidden="true" />;
 }
 
 function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
@@ -193,7 +231,7 @@ function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
         <span className="cx-tool-glyph">{toolGlyph(it.name)}</span>
         <span className="cx-tool-name">{it.name}</span>
         <span className={'cx-tool-status' + (it.isError ? ' err' : '')}>
-          {running ? 'running…' : it.isError ? 'failed' : 'done'}
+          {running ? 'running…' : it.isError ? 'failed' : 'done'}{it.durationMs != null ? ` · ${formatDuration(it.durationMs)}` : ''}
         </span>
       </div>
       <div className="cx-tool-cmd">{cmd}</div>
@@ -215,12 +253,12 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   return (
     <div className="cx-genui">
       <div className="cx-genui-head">
-        <span className="cx-genui-glyph">◈</span>
+        <span className="cx-genui-glyph"><Sparkles size={14} aria-hidden="true" /></span>
         <span className="cx-genui-name">Rendered UI</span>
         {it.status === 'error' && <span className="cx-genui-status err">diagnostics failed</span>}
       </div>
       <Suspense fallback={<div className="cx-genui-loading">Loading GenUI runtime…</div>}>
-        <GenuiPreview code={it.code} done />
+        <GenuiPreview code={it.code} done={!it.streaming} />
       </Suspense>
       {it.status === 'error' && it.error && (
         <details className="cx-genui-details">
@@ -232,10 +270,77 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   );
 }
 
-function MessageRow({ it }: { it: Item }) {
+function PlanCard({ it }: { it: Extract<Item, { kind: 'plan' }> }) {
+  const glyph = (s: CodexPlanStatus): ReactNode => (s === 'completed' ? <CheckSquare size={13} aria-hidden="true" /> : s === 'inProgress' ? <CircleDot size={13} aria-hidden="true" /> : <Square size={13} aria-hidden="true" />);
+  const statusLabel = (s: CodexPlanStatus): string => (s === 'completed' ? 'completed' : s === 'inProgress' ? 'in progress' : 'pending');
+  return (
+    <div className="cx-plan">
+      <div className="cx-plan-head">
+        <span className="cx-plan-glyph"><Diamond size={14} aria-hidden="true" /></span>
+        <span className="cx-plan-name">Plan</span>
+      </div>
+      {it.explanation && <div className="cx-plan-explanation">{it.explanation}</div>}
+      <div className="cx-plan-steps">
+        {it.steps.map((s, i) => (
+          <div key={i} className={'cx-plan-step ' + s.status}>
+            <span className="cx-plan-step-glyph" role="img" aria-label={statusLabel(s.status)}>{glyph(s.status)}</span>
+            <span className="cx-plan-step-text">{s.step}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const DECISION_LABEL: Record<CodexDecision, string> = {
+  accept: 'Approve',
+  acceptForSession: 'Approve for session',
+  decline: 'Decline',
+  cancel: 'Cancel',
+};
+
+function ApprovalCard({ it, onDecide }: { it: Extract<Item, { kind: 'approval' }>; onDecide: (id: string, decision: CodexDecision) => void }) {
+  const resolved = it.decision !== undefined;
+  const title = it.approval === 'file' ? 'File change approval' : it.approval === 'network' ? 'Network access approval' : 'Command approval';
+  return (
+    <div className={'cx-approval' + (resolved ? ' resolved' : '')}>
+      <div className="cx-approval-head">
+        <span className="cx-approval-glyph"><Flag size={14} aria-hidden="true" /></span>
+        <span className="cx-approval-name">{title}</span>
+        {resolved && <span className="cx-approval-status">{it.decision === 'stale' ? 'expired' : it.decision}</span>}
+      </div>
+      {it.command && <div className="cx-approval-cmd">{it.command}</div>}
+      {it.network && <div className="cx-approval-net">{it.network.protocol}://{it.network.host}{it.network.port != null ? `:${it.network.port}` : ''}</div>}
+      {it.cwd && <div className="cx-approval-cwd">{it.cwd}</div>}
+      {it.grantRoot && <div className="cx-approval-cwd">grant root: {it.grantRoot}</div>}
+      {it.reason && <div className="cx-approval-reason">{it.reason}</div>}
+      {it.fileChanges?.map((c, i) => (
+        <div key={i} className="cx-approval-file">
+          <div className="cx-approval-file-head">{c.kind === 'add' ? '＋' : c.kind === 'delete' ? '－' : '△'} {c.path}</div>
+          {c.diff && <pre className="cx-approval-diff">{c.diff}</pre>}
+        </div>
+      ))}
+      {!resolved && (
+        <div className="cx-approval-actions">
+          {it.available.map((d) => (
+            <button key={d} className={'cx-approval-btn ' + d} onClick={() => onDecide(it.id, d)}>
+              {DECISION_LABEL[d]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CODEX_MARKDOWN_COMPONENTS = { code: MarkdownCode, pre: MarkdownPre } as const;
+
+function MessageRow({ it, streaming = false, onDecide }: { it: Item; streaming?: boolean; onDecide?: (id: string, decision: CodexDecision) => void }) {
   if (it.kind === 'reasoning') return <Reasoning text={it.text} />;
   if (it.kind === 'tool') return <ToolCard it={it} />;
   if (it.kind === 'genui') return <GenuiCard it={it} />;
+  if (it.kind === 'plan') return <PlanCard it={it} />;
+  if (it.kind === 'approval') return <ApprovalCard it={it} onDecide={onDecide ?? (() => {})} />;
   const isUser = it.kind === 'user';
   return (
     <div className={'cx-msg ' + (isUser ? 'user' : 'assistant')}>
@@ -253,7 +358,9 @@ function MessageRow({ it }: { it: Item }) {
           <div className="cx-msg-text">{it.text}</div>
         ) : (
           <div className="cx-msg-text md">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{it.text}</ReactMarkdown>
+            <MarkdownCodeStreamingProvider content={it.text} streaming={streaming}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={CODEX_MARKDOWN_COMPONENTS}>{it.text}</ReactMarkdown>
+            </MarkdownCodeStreamingProvider>
           </div>
         )}
       </div>
@@ -303,6 +410,16 @@ export function CodexChat(props: CodexChatProps = {}) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Per-turn runtime override from the composer's picker; kept in a ref so
+  // submit() reads the latest choice without re-subscribing. The setter is
+  // stable so the picker only reloads its persisted pref when the workspace
+  // changes, not on every keystroke.
+  const runtimeRef = useRef<CodexRuntimeOverride>({});
+  const setRuntime = useCallback((ov: CodexRuntimeOverride) => { runtimeRef.current = ov; }, []);
+  // On a brand-new thread the route `sid` stays empty until `onDone` navigates,
+  // but approvals arrive mid-turn — so approve/stop must target the sid the
+  // server reveals via `meta`. Captured here the instant it streams in.
+  const liveSidRef = useRef('');
   // True only after the user kicks off a turn on THIS mount. A server-side
   // reattach also flips `sending`, but must not create a completion notification.
   const streamedRef = useRef(false);
@@ -361,6 +478,9 @@ export function CodexChat(props: CodexChatProps = {}) {
       onToolResult: (ev) => {
         if (active) setLive((cur) => withToolResult(cur, ev.tool_use_id, ev.text, ev.isError));
       },
+      onCodexPlan: (ev) => { if (active) setLive((cur) => withPlan(cur, ev.steps, ev.explanation)); },
+      onCodexApproval: (ev) => { if (active) setLive((cur) => withApproval(cur, ev)); },
+      onCodexApprovalResolved: (ev) => { if (active) setLive((cur) => withApprovalResolved(cur, ev.id, ev.decision)); },
       onError: (message) => { if (active) setError(message); },
       onDone: () => {
         if (!active) return;
@@ -378,7 +498,8 @@ export function CodexChat(props: CodexChatProps = {}) {
     };
   }, [sid, isNew, refreshKey]);
 
-  const diskHistory = useMemo(() => (detail ? historyToItems(detail) : []), [detail]);
+  const replay = useReplay(detail?.replayMessages ?? detail?.messages ?? [], isNew || sending);
+  const diskHistory = useMemo(() => detail ? historyToItems({ ...detail, messages: replay.messages }) : [], [detail, replay.messages]);
   const history = useMemo(
     () => reconcileHistoryWithLive(diskHistory, live),
     [diskHistory, live],
@@ -402,10 +523,26 @@ export function CodexChat(props: CodexChatProps = {}) {
   const applyToolResult = (toolUseId: string, text: string, isError: boolean) => {
     setLive((cur) => withToolResult(cur, toolUseId, text, isError));
   };
+  const applyPlan = (ev: Extract<CodexStreamEvent, { type: 'codex_plan' }>) =>
+    setLive((cur) => withPlan(cur, ev.steps, ev.explanation));
+  const applyApproval = (ev: Extract<CodexStreamEvent, { type: 'codex_approval_request' }>) =>
+    setLive((cur) => withApproval(cur, ev));
+  const applyApprovalResolved = (ev: Extract<CodexStreamEvent, { type: 'codex_approval_resolved' }>) =>
+    setLive((cur) => withApprovalResolved(cur, ev.id, ev.decision));
+
+  // Answer an approval optimistically (disable the card), then POST. On failure
+  // the server already treated it as resolved (stale race), so we keep it off.
+  const decideApproval = useCallback((id: string, decision: CodexDecision) => {
+    const target = sid || liveSidRef.current;
+    if (!target) return;
+    setLive((cur) => withApprovalResolved(cur, id, decision));
+    void codexApi.approve(target, id, decision).catch(() => {});
+  }, [sid]);
 
   const stop = useCallback(async () => {
-    if (!sid) return;
-    try { await codexApi.stopThread(sid); } catch { /* nop */ }
+    const target = sid || liveSidRef.current;
+    if (!target) return;
+    try { await codexApi.stopThread(target); } catch { /* nop */ }
   }, [sid]);
 
   const submit = useCallback(async (opts?: { text?: string }) => {
@@ -428,12 +565,15 @@ export function CodexChat(props: CodexChatProps = {}) {
     try {
       if (isNew) {
         let newSid = '';
-        await startCodexThread({ text, images: wire }, {
-          onMeta: (s) => { newSid = s; },
+        await startCodexThread({ text, images: wire, runtime: runtimeRef.current }, {
+          onMeta: (s) => { newSid = s; liveSidRef.current = s; },
           onDelta: appendAssistantDelta,
           onReasoning: appendReasoning,
           onToolUse: (ev) => appendTool(ev.id, ev.name, ev.input),
           onToolResult: (ev) => applyToolResult(ev.tool_use_id, ev.text, ev.isError),
+          onCodexPlan: applyPlan,
+          onCodexApproval: applyApproval,
+          onCodexApprovalResolved: applyApprovalResolved,
           onError: (m) => setError(m),
           onDone: () => {
             setSending(false);
@@ -441,11 +581,14 @@ export function CodexChat(props: CodexChatProps = {}) {
           },
         });
       } else {
-        await sendCodexMessage(sid, { text, images: wire }, {
+        await sendCodexMessage(sid, { text, images: wire, runtime: runtimeRef.current }, {
           onDelta: appendAssistantDelta,
           onReasoning: appendReasoning,
           onToolUse: (ev) => appendTool(ev.id, ev.name, ev.input),
           onToolResult: (ev) => applyToolResult(ev.tool_use_id, ev.text, ev.isError),
+          onCodexPlan: applyPlan,
+          onCodexApproval: applyApproval,
+          onCodexApprovalResolved: applyApprovalResolved,
           onError: (m) => setError(m),
           onDone: () => {
             setSending(false);
@@ -481,13 +624,14 @@ export function CodexChat(props: CodexChatProps = {}) {
 
   const title = isNew
     ? 'New thread'
-    : detail?.cwd?.split('/').filter(Boolean).pop() || 'Thread';
+    : detail?.title || basename(detail?.cwd || '') || sid.slice(0, 8);
 
   return (
     <div className={'cx-main' + (hideBar ? ' tile' : '')}>
       {!hideBar && (
         <div className="cx-main-head">
           <div className="cx-main-head-title">{title}</div>
+          <div className="cx-main-head-replay">{replay.controls}</div>
           {!isNew && (
             <>
               <span className="cx-main-head-dot">·</span>
@@ -495,7 +639,7 @@ export function CodexChat(props: CodexChatProps = {}) {
               {detail?.gitBranch && (
                 <>
                   <span className="cx-main-head-dot">·</span>
-                  <span className="cx-main-head-branch">⌥ {detail.gitBranch}</span>
+                  <span className="cx-main-head-branch"><GitBranch size={13} aria-hidden="true" /> {detail.gitBranch}</span>
                 </>
               )}
             </>
@@ -508,14 +652,21 @@ export function CodexChat(props: CodexChatProps = {}) {
             <div className="cx-home-inner">
               <h1 className="cx-home-title">What can I help with?</h1>
               <p className="cx-home-sub">
-                Codex will run in your working directory with the sandbox / approval mode you
-                configured in Settings.
+                Codex will run in your working directory with the effort / sandbox / approval
+                mode set on the composer below.
               </p>
             </div>
           </div>
         ) : (
           <div className="cx-thread-body">
-            {items.map((it) => <MessageRow key={it.id} it={it} />)}
+            {items.map((it, i) => (
+              <MessageRow
+                key={it.id}
+                it={it}
+                streaming={sending && i === items.length - 1 && it.kind === 'assistant'}
+                onDecide={decideApproval}
+              />
+            ))}
             {/* Show the thinking spinner at the tail of the thread while a
                 turn is in flight. Hide it once the last item is a live
                 assistant message that has actually started emitting text —
@@ -529,7 +680,7 @@ export function CodexChat(props: CodexChatProps = {}) {
             {error && (
               <div className="cx-tool err">
                 <div className="cx-tool-head">
-                  <span className="cx-tool-glyph">!</span>
+                  <span className="cx-tool-glyph"><AlertTriangle size={14} aria-hidden="true" /></span>
                   <span className="cx-tool-name">Error</span>
                 </div>
                 <div className="cx-tool-out err">{error}</div>
@@ -550,6 +701,8 @@ export function CodexChat(props: CodexChatProps = {}) {
             disabled={sending}
             running={sending && !isNew}
             placeholder={sending ? 'Draft next message…' : undefined}
+            project={detail?.project ?? params.project ?? ''}
+            onRuntime={setRuntime}
           />
         </div>
       </div>

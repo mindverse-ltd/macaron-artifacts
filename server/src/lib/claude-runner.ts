@@ -3,11 +3,11 @@
 // approach — same UX, no CLI stdout parsing, typed events, no IPC buffering.
 
 import { randomUUID } from 'node:crypto';
-import { query, type SDKMessage, type PermissionMode, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { macaronMcpServer } from './macaron-mcp.js';
+import type { SDKMessage, PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { getMacaronMcpServer } from './macaron-mcp.js';
 import { registerPending } from './permission-registry.js';
 import { computeRuleKeys, isAllowed, rememberSession, rememberProject } from './permission-rules.js';
-import { getYoloMode } from './settings-store.js';
+import type { CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 
 export type AttachedImage = { mimeType: string; dataUrl: string };
 
@@ -39,6 +39,12 @@ export type RunnerEvent =
   // does no command parsing); absent when there's nothing rememberable.
   | { kind: 'permission_request'; id: string; toolName: string; input: unknown; suggestion?: { label: string } }
   | { kind: 'permission_resolved'; id: string; decision: 'allow' | 'deny' }
+  // Codex-native plan + approval events. Only the codex app-server runner emits
+  // these; they carry the shared SSE payload verbatim so the route can relay
+  // them without re-shaping. See shared/src/sse.ts for field semantics.
+  | { kind: 'codex_plan'; steps: Array<{ step: string; status: CodexPlanStatus }>; explanation?: string | null }
+  | { kind: 'codex_approval_request'; id: string; approval: CodexApprovalKind; command?: string; cwd?: string; reason?: string | null; fileChanges?: Array<{ path: string; kind: string; diff?: string }>; grantRoot?: string | null; network?: { host: string; protocol: string; port?: number }; available: CodexDecision[] }
+  | { kind: 'codex_approval_resolved'; id: string; decision?: CodexDecision | 'stale' }
   | { kind: 'error'; error: string }
   | { kind: 'done'; exitCode: number };
 
@@ -134,12 +140,16 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
     // new session it's filled in once the first `session` message arrives.
     let currentSid = opts.resume ?? '';
     try {
-      // YOLO mode (global Settings toggle) forces bypassPermissions for
-      // every run, regardless of what the WebUI requested. This is the
-      // single server-side override point — route handlers stay ignorant.
-      const effectivePermissionMode: PermissionMode = getYoloMode()
-        ? 'bypassPermissions'
-        : (opts.permissionMode ?? 'default');
+      // Honor whatever the WebUI sent. The global "default permission mode"
+      // in Settings is applied client-side (Session / Home init their
+      // per-session picker from readPublicSettings().defaultPermissionMode),
+      // so by the time we get here `opts.permissionMode` already reflects
+      // the user's picked mode for this session.
+      const effectivePermissionMode: PermissionMode = opts.permissionMode ?? 'default';
+      // Lazy-import the Claude SDK so the shared bundle only pulls it in when a
+      // Claude run actually starts — the codex/kimi launchers never install it.
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+      const macaronMcpServer = await getMacaronMcpServer();
       const stream = query({
         prompt: buildPromptInput(opts),
         options: {
@@ -162,50 +172,64 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
           abortController: opts.abortController,
           mcpServers: { macaron: macaronMcpServer },
           allowedTools: ['mcp__macaron__render_ui'],
+          // AskUserQuestion is the CLI's built-in "pick one of these" prompt.
+          // We ship render_ui as a superior replacement (real UI, arbitrary
+          // widgets, sendUserMessage) so the model doesn't fall back to the
+          // text-only Ask variant when a click-to-answer card would beat it.
+          // See skills/ask-via-ui/SKILL.md for the authored guidance.
+          disallowedTools: ['AskUserQuestion'],
           // canUseTool: pause the SDK, ask the client, resume once decided.
           // A promise is registered under a random id; the client's POST to
           // /permission-decision looks the id up and resolves it.
-          // NOTE: when permissionMode === 'bypassPermissions' (and
-          // allowDangerouslySkipPermissions is true), the SDK does NOT invoke
-          // this callback — every tool auto-approves. That's the intended
-          // "yolo" UX.
-          canUseTool: async (toolName: string, input: Record<string, unknown>) => {
-            // Remembered rules: if a prior "Session"/"Always" decision already
-            // covers every part of this call, auto-approve silently — no card,
-            // no round-trip. Empty/unknown key sets never match, so this can
-            // only ever skip a prompt the user already answered.
-            const { keys, label } = computeRuleKeys(toolName, input);
-            if (isAllowed(currentSid, opts.cwd, keys)) {
-              return { behavior: 'allow', updatedInput: input };
-            }
-            const id = randomUUID();
-            const decision = await new Promise<
-              { decision: 'allow'; mode?: PermissionMode; scope?: 'once' | 'session' | 'always' } | { decision: 'deny'; reason?: string }
-            >((resolve) => {
-              registerPending(id, resolve);
-              push({ kind: 'permission_request', id, toolName, input, ...(label ? { suggestion: { label } } : {}) });
-            });
-            if (decision.decision === 'allow') {
-              if (decision.scope === 'session') rememberSession(currentSid, keys);
-              // A persist failure must not strand the callback: the user already
-              // clicked Allow, so log and proceed rather than leaving the SDK's
-              // pending promise (and their tool call) hung forever.
-              else if (decision.scope === 'always') {
-                try { await rememberProject(opts.cwd, keys); } catch (e) { console.error('[permission-rules] persist failed:', e); }
+          //
+          // OMITTED in bypassPermissions mode: setting canUseTool unconditionally
+          // makes the SDK append `--permission-prompt-tool stdio` to the CLI
+          // argv, which then wins over `--allow-dangerously-skip-permissions`
+          // for any tool not in `allowedTools`. Since we only allowlist
+          // mcp__macaron__render_ui there, Bash/Edit/Write/Read were still
+          // routing back through this callback and firing permission cards —
+          // completely defeating the "Bypass all" UX. Dropping the callback in
+          // bypass mode lets the CLI truly bypass everything, matching the
+          // user's expectation.
+          ...(effectivePermissionMode === 'bypassPermissions' ? {} : {
+            canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+              // Remembered rules: if a prior "Session"/"Always" decision already
+              // covers every part of this call, auto-approve silently — no card,
+              // no round-trip. Empty/unknown key sets never match, so this can
+              // only ever skip a prompt the user already answered.
+              const { keys, label } = computeRuleKeys(toolName, input);
+              if (isAllowed(currentSid, opts.cwd, keys)) {
+                return { behavior: 'allow', updatedInput: input };
               }
-              push({ kind: 'permission_resolved', id, decision: 'allow' });
-              // A `mode` rides along when the plan-approval panel exits plan
-              // mode: setMode(session) switches how subsequent edits are
-              // gated (acceptEdits = auto, default = ask each time).
-              return {
-                behavior: 'allow',
-                updatedInput: input,
-                ...(decision.mode ? { updatedPermissions: [{ type: 'setMode', mode: decision.mode, destination: 'session' }] } : {}),
-              };
-            }
-            push({ kind: 'permission_resolved', id, decision: 'deny' });
-            return { behavior: 'deny', message: decision.reason || 'denied by user', interrupt: false };
-          },
+              const id = randomUUID();
+              const decision = await new Promise<
+                { decision: 'allow'; mode?: PermissionMode; scope?: 'once' | 'session' | 'always' } | { decision: 'deny'; reason?: string }
+              >((resolve) => {
+                registerPending(id, resolve);
+                push({ kind: 'permission_request', id, toolName, input, ...(label ? { suggestion: { label } } : {}) });
+              });
+              if (decision.decision === 'allow') {
+                if (decision.scope === 'session') rememberSession(currentSid, keys);
+                // A persist failure must not strand the callback: the user already
+                // clicked Allow, so log and proceed rather than leaving the SDK's
+                // pending promise (and their tool call) hung forever.
+                else if (decision.scope === 'always') {
+                  try { await rememberProject(opts.cwd, keys); } catch (e) { console.error('[permission-rules] persist failed:', e); }
+                }
+                push({ kind: 'permission_resolved', id, decision: 'allow' });
+                // A `mode` rides along when the plan-approval panel exits plan
+                // mode: setMode(session) switches how subsequent edits are
+                // gated (acceptEdits = auto, default = ask each time).
+                return {
+                  behavior: 'allow',
+                  updatedInput: input,
+                  ...(decision.mode ? { updatedPermissions: [{ type: 'setMode', mode: decision.mode, destination: 'session' }] } : {}),
+                };
+              }
+              push({ kind: 'permission_resolved', id, decision: 'deny' });
+              return { behavior: 'deny', message: decision.reason || 'denied by user', interrupt: false };
+            },
+          }),
           ...(opts.envOverrides ? { env: opts.envOverrides } : {}),
         },
       });
@@ -352,6 +376,8 @@ export type FollowupOptions = {
 // incrementally with partial-json (Allow.ARR) so chips appear as they stream.
 // Parsing lives client-side — here we only relay text, never interpret it.
 export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string> {
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
+  const macaronMcpServer = await getMacaronMcpServer();
   const stream = query({
     prompt: FOLLOWUP_PROMPT,
     options: {

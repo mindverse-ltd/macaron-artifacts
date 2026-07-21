@@ -1,14 +1,17 @@
-// Server-side GenUI diagnostics for render_ui. TS semantic diagnostics over Claude's TSX, with
+// Server-side GenUI diagnostics for render_ui. The shared GenUI linter owns compile, strict syntax,
+// and UnoCSS diagnostics; this host adds TS semantic diagnostics over Claude's TSX, with
 // $macaron/ui resolved to the REAL vendored source via compilerOptions.paths — so facade misuse
 // (bad props, missing exports) surfaces with the actual valid types, not degraded to `any`. The
-// LanguageService scaffolding + bag formatting come from @genui/diagnostics (the same modules the
-// upstream genui-cli standalone check/lint path uses), so host and CLI format identically.
+// LanguageService scaffolding + bag formatting come from @genui/diagnostics, so every surface uses
+// the same diagnostic shape and formatter.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { createCheckResult, type GenUICheckResult, type GenUIDiagnostic } from "@genui/diagnostics";
+import { createCheckResult, hasErrorDiagnostic, type GenUICheckResult, type GenUIDiagnostic } from "@genui/diagnostics";
 import { createTypeCheckService, DEFAULT_APP_FILENAME, DEFAULT_MAX_REPORTED, diagnosticMessage, type TypeCheckService } from "@genui/diagnostics/type-check";
+import { collectGenUILintDiagnostics } from "@genui/diagnostics/lint";
 import { WEB_ROOT } from "../config.js";
+import { loadGenUIUnocssToolkit } from "./genui-unocss.js";
 
 // Facade -> vendored source on disk, relative to WEB_ROOT (the tsconfig dir). Only specifiers the
 // browser resolves to OUR vendored source belong here; bare npm packages (lucide-react, motion)
@@ -46,9 +49,16 @@ const compilerOptions: ts.CompilerOptions = {
 // $macaron/chat is a runtime shim (.mjs, no .tsx source to map via FACADE_PATHS), so declare
 // its types ambiently — user TSX importing sendUserMessage gets real signature checking
 // instead of a TS2307.
+// NOTE: this file must stay a SCRIPT (no top-level import/export) — inside a module file
+// `declare module "x"` becomes an augmentation of an existing module instead of creating
+// one, and the TS2307 comes back. The runtime shim also installs sendUserMessage on
+// window, so a top-level (script-scoped) `interface Window` merge covers TSX that writes
+// `window.sendUserMessage(...)` instead of the preferred import — no `declare global`
+// wrapper (which would require module-ifying the file) needed.
 const AMBIENT_DECLARATIONS =
   `declare module "https://*";\ndeclare module "http://*";\n` +
-  `declare module "$macaron/chat" {\n  export function sendUserMessage(prompt: string): void;\n}\n`;
+  `declare module "$macaron/chat" {\n  export function sendUserMessage(prompt: string): void;\n}\n` +
+  `interface Window {\n  sendUserMessage(prompt: string): void;\n}\n`;
 
 const toDiag = (d: ts.Diagnostic): GenUIDiagnostic => {
   const message = diagnosticMessage(ts, d);
@@ -58,36 +68,45 @@ const toDiag = (d: ts.Diagnostic): GenUIDiagnostic => {
 };
 
 // LanguageService is expensive to build; one shared service handles every render_ui call. The
-// `serviceUnavailable` latch marks "diagnostics permanently off" (e.g. the published CLI ships no
-// web/src, so the vendored facades can't resolve) — in that state checkGenUI no-ops to an ack
-// rather than surfacing phantom errors or crashing.
+// `serviceUnavailable` latch only disables host semantic checks (e.g. when a published install has
+// no vendored source). Shared compile/syntax/UnoCSS lint remains active in that state.
 let service: TypeCheckService | undefined;
 let serviceUnavailable = false;
 
-// Syntactic (unclosed JSX, stray tokens — the `lint` pass) + semantic (types, missing exports —
-// the `check` pass) error diagnostics, folded into one bag. Empty code is a runtime diagnostic,
-// not a TS one. `ok:false` diagnostics go into the render_ui tool_result for in-turn self-repair.
-// Never throws: a TS check failure must not turn a render the user is already viewing into a
-// tool_use_error — degrade to an ack instead.
-export const checkGenUI = (code: string): GenUICheckResult => {
-  if (!code.trim()) return createCheckResult({ runtime: [{ message: "render_ui received empty TSX code." }] });
-  if (serviceUnavailable) return { ok: true };
+const collectSemanticDiagnostics = (code: string): GenUIDiagnostic[] => {
+  if (serviceUnavailable) return [];
   try {
     if (!service) {
-      // Published `mcc` ships only web/dist (no web/src), so the facades can't resolve — bail to
-      // an ack. The dev/source checkout always has web/src/macaron-vendor.
-      if (!existsSync(path.join(WEB_ROOT, "src", "macaron-vendor"))) { serviceUnavailable = true; return { ok: true }; }
+      if (!existsSync(path.join(WEB_ROOT, "src", "macaron-vendor"))) {
+        serviceUnavailable = true;
+        return [];
+      }
       service = createTypeCheckService(ts, { root: WEB_ROOT, filename: DEFAULT_APP_FILENAME, compilerOptions, ambient: AMBIENT_DECLARATIONS });
     }
     const svc = service;
     svc.appSource = code;
     svc.appVersion += 1;
-    const all = [...svc.service.getSyntacticDiagnostics(svc.appFile), ...svc.service.getSemanticDiagnostics(svc.appFile)];
-    const typescript = all.filter((d) => d.category === ts.DiagnosticCategory.Error).slice(0, DEFAULT_MAX_REPORTED).map(toDiag);
-    return createCheckResult({ typescript });
-  } catch (err) {
+    return svc.service
+      .getSemanticDiagnostics(svc.appFile)
+      .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+      .slice(0, DEFAULT_MAX_REPORTED)
+      .map(toDiag);
+  } catch {
     serviceUnavailable = true;
     service = undefined;
-    return { ok: true };
+    return [];
   }
+};
+
+// Lint and semantic checks start together. If lint finds a hard source error, prefer its precise
+// diagnostic over semantic cascades; otherwise merge the host-specific semantic results into the bag.
+export const checkGenUI = async (code: string): Promise<GenUICheckResult> => {
+  if (!code.trim()) return createCheckResult({ runtime: [{ message: "render_ui received empty TSX code." }] });
+  const [lint, typescript] = await Promise.all([
+    collectGenUILintDiagnostics(code, { loadUnocssToolkit: loadGenUIUnocssToolkit }).catch((error: unknown) => ({
+      runtime: [{ severity: "error" as const, message: `GenUI lint failed: ${error instanceof Error ? error.message : String(error)}` }],
+    })),
+    Promise.resolve(collectSemanticDiagnostics(code)),
+  ]);
+  return createCheckResult(hasErrorDiagnostic(lint) ? lint : { ...lint, typescript });
 };

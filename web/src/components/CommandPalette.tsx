@@ -1,8 +1,10 @@
+import { LayoutGrid, MessageSquare, Pencil, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { SEARCH_HL_CLOSE, SEARCH_HL_OPEN } from '@macaron/shared';
-import { api, basename, fmtAgo, type MessageSearchHit, type SessionListItem, type Workspace } from '../lib/api';
+import { api, basename, sessionTitle, fmtAgo, type MessageSearchHit, type SessionListItem, type Workspace } from '../lib/api';
 import { addDraftSid } from '../lib/canvas';
+import { hasActiveModal } from '../lib/modal';
 
 // Dependency-free subsequence score: every query char must appear in order.
 // Contiguous + early matches rank higher. Returns -1 for no match. Good
@@ -42,7 +44,10 @@ export function CommandPalette() {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [data, setData] = useState<WsWithSessions[]>([]);
-  const [yolo, setYolo] = useState(false);
+  // Same one-shot toggle the old YOLO command used to do — bounces the global
+  // default between 'bypassPermissions' (all tools auto-approve) and 'default'
+  // (ask for every call). The full 4-way picker lives in Settings.
+  const [bypassDefault, setBypassDefault] = useState(false);
   const [msgHits, setMsgHits] = useState<MessageSearchHit[]>([]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,23 +71,20 @@ export function CommandPalette() {
   }, [location.pathname]);
 
   // Global Cmd/Ctrl-K toggles the palette. IME-guarded; only bare Cmd/Ctrl+K
-  // (no shift/alt) so we don't shadow other shortcuts.
+  // (no shift/alt) so we don't shadow other shortcuts. The sidebar search button
+  // opens SearchPalette instead (macaron:open-search) — this palette keeps
+  // Cmd-K for commands + session/workspace navigation. Don't open over another
+  // modal (e.g. an open SearchPalette); matches ShortcutsHelp.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return;
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setOpen((v) => !v);
+        setOpen((v) => (v ? false : !hasActiveModal()));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener('macaron:open-search', onOpen);
-    return () => window.removeEventListener('macaron:open-search', onOpen);
   }, []);
 
   // On open: reset, focus the input, and load the session/workspace list from
@@ -113,7 +115,7 @@ export function CommandPalette() {
       }
       try {
         const s = await api.settings();
-        if (!cancelled) setYolo(s.yoloMode);
+        if (!cancelled) setBypassDefault(s.defaultPermissionMode === 'bypassPermissions');
       } catch {
         /* ignore */
       }
@@ -195,13 +197,15 @@ export function CommandPalette() {
     const commands: Item[] = [
       {
         kind: 'command',
-        id: 'toggle-yolo',
-        title: yolo ? 'Disable YOLO mode' : 'Enable YOLO mode',
-        subtitle: 'Bypass all tool permission prompts',
+        id: 'toggle-bypass-default',
+        title: bypassDefault ? 'Reset default permission mode' : 'Set default to Bypass all',
+        subtitle: bypassDefault
+          ? 'New sessions will start asking for every tool call'
+          : 'New sessions will start with all tool permissions auto-approved',
         run: async () => {
           try {
-            const s = await api.setYoloMode(!yolo);
-            setYolo(s.yoloMode);
+            const s = await api.setDefaultPermissionMode(bypassDefault ? 'default' : 'bypassPermissions');
+            setBypassDefault(s.defaultPermissionMode === 'bypassPermissions');
           } catch {
             /* ignore */
           }
@@ -234,7 +238,7 @@ export function CommandPalette() {
           kind: 'session',
           project: w.project,
           sid: s.sessionId,
-          title: s.preview || s.sessionId.slice(0, 8),
+          title: sessionTitle(s),
           subtitle: `${name} · ${fmtAgo(s.mtime)}`,
           mtime: s.mtime,
         });
@@ -264,7 +268,7 @@ export function CommandPalette() {
     }));
 
     return [...cmdMatched, ...sessMatched, ...wsMatched, ...msgItems];
-  }, [query, data, yolo, msgHits, currentProject, navigate, close]);
+  }, [query, data, bypassDefault, msgHits, currentProject, navigate, close]);
 
   // Clamp the active index whenever the filtered list shrinks.
   useEffect(() => {
@@ -316,7 +320,7 @@ export function CommandPalette() {
 
   return (
     <div className="cmdk-backdrop" onMouseDown={close}>
-      <div className="cmdk-panel" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal>
+      <div className="cmdk-panel" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <input
           ref={inputRef}
           className="cmdk-input"
@@ -347,7 +351,7 @@ export function CommandPalette() {
                   onClick={() => runItem(it)}
                 >
                   <span className={'cmdk-kind cmdk-kind-' + it.kind}>
-                    {it.kind === 'command' ? '⚡' : it.kind === 'session' ? '◈' : it.kind === 'workspace' ? '▤' : '✎'}
+                    {it.kind === 'command' ? <Zap size={14} aria-hidden="true" /> : it.kind === 'session' ? <MessageSquare size={14} aria-hidden="true" /> : it.kind === 'workspace' ? <LayoutGrid size={14} aria-hidden="true" /> : <Pencil size={14} aria-hidden="true" />}
                   </span>
                   <span className="cmdk-text">
                     <span className="cmdk-title">{it.title}</span>

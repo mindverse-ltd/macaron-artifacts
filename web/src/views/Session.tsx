@@ -764,26 +764,9 @@ function ensureReactImport(src: string): string {
 
 function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genui' }>; superseded?: boolean }) {
   // Superseded = this genui failed AND a later retry in the same transcript
-  // succeeded. Collapse to a one-line chip so the two versions don't stack
-  // (previously the failed frame sat right above the good one, doubling the
-  // visual card height and confusing users about which was "the" answer).
-  // Kept expandable in case debugging the failure is useful.
-  const [expanded, setExpanded] = useState(false);
-  if (superseded && !expanded) {
-    const err = it.status === 'error' ? (it.error || 'unknown error') : 'earlier render replaced by a later one';
-    return (
-      <button
-        type="button"
-        className="ti-genui-superseded"
-        data-item-id={it.id}
-        onClick={() => setExpanded(true)}
-        title={err}
-      >
-        <span className="ti-genui-superseded-glyph">▶</span>
-        <span className="ti-genui-superseded-label">Earlier render_ui failed — replaced by a later one</span>
-      </button>
-    );
-  }
+  // succeeded. Just hide it — no chip, no placeholder. The successful one
+  // below (or above, depending on scroll direction) is the answer.
+  if (superseded) return null;
 
   const code = it.code ? ensureReactImport(it.code) : '';
   const streaming = it.status === 'pending' && Boolean(code);

@@ -823,7 +823,7 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
         <div className="ti-genui-head">
           <span className="ti-genui-prompt" />
           <button className="ti-genui-codebtn" onClick={onExport} disabled={exporting} title="Export this UI as a standalone HTML file">
-            <Download size={12} aria-hidden="true" style={{ verticalAlign: '-1px', marginRight: 4 }} />
+            <Download size={12} aria-hidden="true" />
             {exporting ? 'Exporting…' : 'Export HTML'}
           </button>
         </div>

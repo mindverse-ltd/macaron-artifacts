@@ -762,7 +762,29 @@ function ensureReactImport(src: string): string {
   return `import React from 'react';\n${src}`;
 }
 
-function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
+function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genui' }>; superseded?: boolean }) {
+  // Superseded = this genui failed AND a later retry in the same transcript
+  // succeeded. Collapse to a one-line chip so the two versions don't stack
+  // (previously the failed frame sat right above the good one, doubling the
+  // visual card height and confusing users about which was "the" answer).
+  // Kept expandable in case debugging the failure is useful.
+  const [expanded, setExpanded] = useState(false);
+  if (superseded && !expanded) {
+    const err = it.status === 'error' ? (it.error || 'unknown error') : 'earlier render replaced by a later one';
+    return (
+      <button
+        type="button"
+        className="ti-genui-superseded"
+        data-item-id={it.id}
+        onClick={() => setExpanded(true)}
+        title={err}
+      >
+        <span className="ti-genui-superseded-glyph">▶</span>
+        <span className="ti-genui-superseded-label">Earlier render_ui failed — replaced by a later one</span>
+      </button>
+    );
+  }
+
   const code = it.code ? ensureReactImport(it.code) : '';
   const streaming = it.status === 'pending' && Boolean(code);
 
@@ -945,6 +967,7 @@ export function ItemView({
   streaming,
   project,
   sid,
+  supersededGenui,
 }: {
   it: Item;
   onRewind?: (uuid: string) => void;
@@ -958,6 +981,10 @@ export function ItemView({
   streaming?: boolean;
   project?: string;
   sid?: string;
+  // Set of genui item ids that failed AND have a later successful genui in
+  // the same combined transcript — passed down so those items collapse to a
+  // one-line chip instead of stacking the failed frame under the good one.
+  supersededGenui?: ReadonlySet<string>;
 }) {
   switch (it.kind) {
     case 'user':
@@ -993,7 +1020,7 @@ export function ItemView({
     case 'system_event':
       return <SystemEventItem eventType={it.eventType} text={it.text} />;
     case 'genui':
-      return <GenuiItem it={it} />;
+      return <GenuiItem it={it} superseded={supersededGenui?.has(it.id) ?? false} />;
     case 'assistant-image':
       return <AssistantImageItem mimeType={it.mimeType} data={it.data} />;
     case 'permission': {
@@ -2017,6 +2044,24 @@ export function Session(props: SessionProps = {}) {
   const hidden = Math.max(0, total - shown);
   const tail = items.slice(-shown);
 
+  // Which genui items should collapse to a chip because a later retry
+  // succeeded? Walk the combined chronological transcript once and mark any
+  // errored genui that has ANY later genui with status='ready' in the same
+  // conversation. Applies across liveTurn / completedTurns / tail so a retry
+  // in the current turn also collapses the failed frame from an earlier turn.
+  const supersededGenui = useMemo(() => {
+    const superseded = new Set<string>();
+    const combined: readonly Item[] = [...tail, ...completedTurns, ...(liveTurn as readonly Item[])];
+    let sawGoodGenuiLater = false;
+    for (let i = combined.length - 1; i >= 0; i--) {
+      const it = combined[i]!;
+      if (it.kind !== 'genui') continue;
+      if (it.status === 'ready') sawGoodGenuiLater = true;
+      else if (it.status === 'error' && sawGoodGenuiLater) superseded.add(it.id);
+    }
+    return superseded;
+  }, [tail, completedTurns, liveTurn]);
+
   // Opening an already-idle session (last item is an assistant reply, nothing
   // streaming) surfaces follow-ups too — not only the instant a turn ends.
   // Fires once per sid: after our OWN turn `onDone` flips `sending` false while
@@ -2749,7 +2794,7 @@ export function Session(props: SessionProps = {}) {
             (thread is column-reverse) puts the newest at the visual bottom
             while preserving relative text/tool interleaving. */}
         {[...liveTurn].reverse().map((t) => (
-          <ItemView key={t.id} it={t} onPermissionDecide={handlePermissionDecide} streaming={sending} />
+          <ItemView key={t.id} it={t} onPermissionDecide={handlePermissionDecide} streaming={sending} supersededGenui={supersededGenui} />
         ))}
         {/* Current-turn user message = one card. Images stack ABOVE the
             text (Claude-web ordering: attachments before prose). */}
@@ -2770,10 +2815,10 @@ export function Session(props: SessionProps = {}) {
           />
         )}
         {[...(collapseReadSearchGroups(completedTurns) as Item[])].reverse().map((it) => (
-          <ItemView key={it.id} it={it} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} project={project} sid={sid} supersededGenui={supersededGenui} />
         ))}
         {[...tail].reverse().map((it) => (
-          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} supersededGenui={supersededGenui} />
         ))}
         {hidden > 0 && (
           <button className="ghost load-earlier" onClick={() => setShown((s) => s + PAGE_SIZE)}>

@@ -1730,6 +1730,30 @@ textarea:focus, select:focus, input:focus {
   width: 100%;
   box-sizing: border-box;
 }
+.ti-genui-superseded {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 4px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.ti-genui-superseded:hover {
+  background: rgba(180, 138, 47, 0.06);
+  border-color: var(--warn, #b48a2f);
+  color: var(--text-2, var(--text));
+}
+.ti-genui-superseded-glyph {
+  font-size: 9px;
+  color: var(--muted-2, var(--muted));
+}
 .ti-genui-code {
   margin: 8px 0 0;
   padding: 10px 12px;

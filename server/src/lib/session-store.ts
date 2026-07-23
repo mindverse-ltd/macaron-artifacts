@@ -390,7 +390,13 @@ export async function readSessionSummary(filePath: string): Promise<SessionSumma
           try {
             const o = JSON.parse(line);
             foldTitleFields(o, titleFields);
-            if (o.cwd) summary.cwd = o.cwd;
+            // Only backfill cwd from the tail when the head didn't find one.
+            // The head's cwd is the session's REAL working directory. Later
+            // lines can carry other cwds (a nested subagent / cwd-changing
+            // hook), and overwriting on those was corrupting the workspace's
+            // canonical cwd — resolveProjectCwd would then pick a sibling
+            // subdirectory as the whole workspace's cwd on new-session POSTs.
+            if (!summary.cwd && o.cwd) summary.cwd = o.cwd;
             if (!summary.gitBranch && o.gitBranch) summary.gitBranch = o.gitBranch;
           } catch {
             /* skip malformed line */
@@ -469,17 +475,36 @@ export async function searchProjectFiles(project: string, needle: string, limit:
   return { cwd, results };
 }
 
-// Resolve a session's working directory. The project name IS the cwd (encoded
-// by claude-cli), so it's the safe default — the jsonl's head read is capped at
-// HEAD_BYTES and a big first-line paste can push cwd out of range, so prefer
-// the decoded name and only override with the embedded cwd when we got one.
+// Resolve a session's working directory. The URL's `project` param might not
+// match where the sid actually lives — claude-cli writes each session's jsonl
+// under a project dir derived from the run's cwd, and a session started inside
+// a subdirectory (e.g. `.../macaron-plugin/server`) lands in a different
+// project dir than the workspace the WebUI thinks it's in. So: try the URL
+// project first, then scan every project dir for `<sid>.jsonl`. Only fall back
+// to the lossy decode of the URL project when nothing on disk matches — that
+// decode turns each `-` into `/` and blows up any real path with a hyphen in
+// it (`macaron-plugin` → `/macaron/plugin`), which spawn then rejects.
 export async function resolveSessionCwd(project: string, sid: string): Promise<string> {
-  let cwd = decodeClaudeProjectName(project) || HOME || '/tmp';
+  const target = `${sid}.jsonl`;
   try {
-    const head = await readSessionSummary(path.join(CLAUDE_PROJECTS, project, `${sid}.jsonl`));
-    if (head?.cwd) cwd = head.cwd;
-  } catch { /* fall back to decoded project name */ }
-  return cwd;
+    const primary = await readSessionSummary(path.join(CLAUDE_PROJECTS, project, target));
+    if (primary?.cwd && (await fs.stat(primary.cwd)).isDirectory()) return primary.cwd;
+  } catch { /* fall through to cross-project scan */ }
+  try {
+    const projectDirs = await fs.readdir(CLAUDE_PROJECTS);
+    for (const dir of projectDirs) {
+      if (dir === project) continue; // already tried
+      try {
+        const meta = await readSessionSummary(path.join(CLAUDE_PROJECTS, dir, target));
+        if (meta?.cwd && (await fs.stat(meta.cwd)).isDirectory()) return meta.cwd;
+      } catch { /* keep looking */ }
+    }
+  } catch { /* CLAUDE_PROJECTS unreadable — fall through */ }
+  const projectCwd = await resolveProjectCwd(project);
+  try {
+    if (projectCwd && (await fs.stat(projectCwd)).isDirectory()) return projectCwd;
+  } catch { /* stale project cwd — use a guaranteed live directory */ }
+  return HOME || '/tmp';
 }
 
 // Resolve a claude project name to its working directory. Prefer the cwd
@@ -663,7 +688,9 @@ async function parseTranscriptFile(filePath: string): Promise<{
   let thinkChars = 0;
   let toolCallChars = 0;
   let toolResultChars = 0;
+  let sourceLine = 0;
   for (const line of raw.split('\n')) {
+    sourceLine++;
     if (!line.trim()) continue;
     try {
       const o = JSON.parse(line);
@@ -678,6 +705,7 @@ async function parseTranscriptFile(filePath: string): Promise<{
           blocks: [{ kind: 'system_event', eventType: 'summary', text: o.summary }],
           timestamp: o.timestamp,
           uuid: o.uuid,
+          sourceLine,
         });
         continue;
       }
@@ -705,6 +733,7 @@ async function parseTranscriptFile(filePath: string): Promise<{
                 blocks: [{ kind: 'system_event', eventType: 'resume', text: t }],
                 timestamp: o.timestamp,
                 uuid: o.uuid,
+                sourceLine,
               });
             }
           }
@@ -754,6 +783,7 @@ async function parseTranscriptFile(filePath: string): Promise<{
           model: o.message?.model,
           timestamp: o.timestamp,
           uuid: o.uuid,
+          sourceLine,
         });
         if (o.type === 'assistant' && o.message?.usage) {
           const u = o.message.usage;
@@ -834,6 +864,7 @@ export async function readSessionMessages(project: string, sid: string): Promise
     label: labels[sid],
     title,
     messages,
+    replayMessages: messages,
     truncated,
     totalBytes,
     latestUsage,

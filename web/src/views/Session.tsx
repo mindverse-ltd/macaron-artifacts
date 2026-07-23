@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
-import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
+import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, Download, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
+import { useReplay } from '../components/ReplayControls';
 import { sessionToMarkdown } from '@macaron/shared';
 import {
   api,
@@ -41,10 +42,12 @@ import {
   easeTowards,
 } from '../lib/thinkingVerbs';
 import { useToast } from '../components/Toast';
+import { authedFetch } from '../lib/auth';
 import { useConfirm } from '../components/Confirm';
 import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
+import { toolHeader, bashCommand, isToolExpandable } from '../lib/toolHeader';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
@@ -192,7 +195,7 @@ export function flatten(messages: Message[]): Item[] {
         } else if (isRenderUITool(b.name)) {
           // Claude writes the TSX directly into the tool_use input.code field;
           // jsonl persists it. We use that as the rendered code immediately.
-          const input = (b.input || {}) as { code?: string; prompt?: string };
+          const input = (b.input || {}) as { code?: string; prompt?: string; _replayStreaming?: boolean };
           const code = typeof input.code === 'string' ? input.code : '';
           const prompt = code
             ? `${code.split('\n')[0] || ''} … (${code.length} chars)`
@@ -208,7 +211,7 @@ export function flatten(messages: Message[]): Item[] {
             toolUseId,
             prompt,
             code: code || undefined,
-            status: code ? 'ready' : 'pending',
+            status: code && !input._replayStreaming ? 'ready' : 'pending',
           };
           out.push(it);
           const pending = { item: it as PairedTool, ts: m.timestamp };
@@ -281,26 +284,6 @@ export function flatten(messages: Message[]): Item[] {
     }
   }
   return out;
-}
-
-// ---- Tool header formatting (Bash → command first line, etc.) -------------
-
-export function toolHeader(name: string, input: any): string {
-  if (!input || typeof input !== 'object') return '';
-  if (name === 'Bash') {
-    return String(input.command || '').replace(/\s+/g, ' ').slice(0, 240);
-  }
-  if (name === 'Read' || name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
-    const p = String(input.file_path || '');
-    return p ? '…' + p.split('/').slice(-2).join('/') : '';
-  }
-  if (name === 'Glob') return String(input.pattern || '');
-  if (name === 'Grep') return String(input.pattern || '');
-  if (name === 'TaskCreate') return String(input.subject || '');
-  if (name === 'TaskUpdate') return `#${input.taskId || ''} → ${input.status || input.subject || ''}`;
-  if (name === 'WebFetch' || name === 'WebSearch') return String(input.url || input.query || '');
-  const s = JSON.stringify(input);
-  return s.length > 200 ? s.slice(0, 200) + '…' : s;
 }
 
 // ---- Items ----------------------------------------------------------------
@@ -586,13 +569,51 @@ function SubagentItem({
 
 const PREVIEW_LINES = 2;
 
+// Bash input scripts render through the same Shiki block the chat markdown uses, so the
+// heavy highlighter stays in its lazy chunk and out of the Session view's default bundle.
+const BashScript = lazy(loadShikiStreamCodeBlock);
+
 function ToolItem({ id, name, input, result, durationMs, isError }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [inputOverflows, setInputOverflows] = useState(false);
+  const inputRef = useRef<HTMLDivElement>(null);
   const header = toolHeader(name, input);
+  const command = bashCommand(name, input);
+  const commandLines = command ? command.split('\n') : [];
   const resultText = (result ?? '').replace(/\n+$/, '');
   const allLines = resultText ? resultText.split('\n') : [];
   const previewLines = open ? allLines : allLines.slice(0, PREVIEW_LINES);
-  const extra = Math.max(0, allLines.length - PREVIEW_LINES);
+  const extra = Math.max(0, allLines.length - PREVIEW_LINES) + Math.max(0, commandLines.length - PREVIEW_LINES);
+  // Both the input script and the output collapse to PREVIEW_LINES; expandable only when
+  // one of them actually overflows — no toggle for a script/output that already fits.
+  const expandable = open || inputOverflows || isToolExpandable(commandLines.length, allLines.length, PREVIEW_LINES);
+  const expandLabel = extra > 0 ? `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)` : 'expand';
+
+  // Logical line counts miss long wrapped commands. Measure the actual collapsed Shiki
+  // viewport so the toggle appears whenever more than two visual lines are clipped. The
+  // mutation observer catches the lazy highlighter replacing the plaintext fallback.
+  useEffect(() => {
+    if (!command || open || !inputRef.current) return;
+    const root = inputRef.current;
+    let frame = 0;
+    const measure = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const viewport = root.querySelector<HTMLElement>('.chat-shiki-code__viewport');
+        setInputOverflows(Boolean(viewport && viewport.scrollHeight > viewport.clientHeight + 1));
+      });
+    };
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    const mutationObserver = new MutationObserver(measure);
+    resizeObserver.observe(root);
+    mutationObserver.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [command, open]);
 
   return (
     <div className="ti-tool" data-item-id={id}>
@@ -601,22 +622,41 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
         <span className="ti-tool-name">{name}</span>
         {header && (
           <span className="ti-tool-args" title={header}>
-            ({header})
+            {name === 'Bash' ? header : `(${header})`}
           </span>
         )}
         {durationMs != null && <span className="ti-tool-dur">{formatDuration(durationMs)}</span>}
       </div>
+      {command && (
+        <div ref={inputRef} className={`ti-tool-out ti-tool-input${open ? ' is-expanded' : ' is-collapsed'}`}>
+          <span className="ti-rail">└</span>
+          <div className="ti-tool-body">
+            <Suspense fallback={(
+              <div className="chat-shiki-code">
+                <div className="chat-shiki-code__viewport">
+                  <pre className="chat-code-plain">{command}</pre>
+                </div>
+              </div>
+            )}>
+              <BashScript code={command} language="bash" streaming={false} />
+            </Suspense>
+          </div>
+        </div>
+      )}
       {result !== undefined && allLines.length > 0 && (
         <div className="ti-tool-out">
           <span className="ti-rail">└</span>
           <div className="ti-tool-body">
             {previewLines.length > 0 && <pre>{previewLines.join('\n')}</pre>}
-            {extra > 0 && (
-              <button className="ti-expand" onClick={() => setOpen((v) => !v)}>
-                {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)`}
-              </button>
-            )}
           </div>
+        </div>
+      )}
+      {expandable && (
+        <div className="ti-tool-out ti-tool-toggle-row">
+          <span className="ti-rail" aria-hidden="true">└</span>
+          <button className="ti-expand ti-tool-toggle" onClick={() => setOpen((v) => !v)}>
+            {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : expandLabel}
+          </button>
         </div>
       )}
     </div>
@@ -630,12 +670,14 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
 function ThinkingIndicator({
   assistantLen,
   outputTokens,
+  activity,
 }: {
   assistantLen: number;
   // Authoritative cumulative output_tokens from the SDK's message_delta
   // usage stream. -1 = no signal yet (Macaron path or pre-first-delta); in
   // that case we fall back to the CLI's len/4 English estimate.
   outputTokens: number;
+  activity: readonly unknown[];
 }) {
   const startRef = useRef(Date.now());
   const verbRef = useRef<string>(THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)]!);
@@ -650,8 +692,6 @@ function ThinkingIndicator({
     outputTokens >= 0 ? outputTokens : Math.round(assistantLen / 4);
 
   useEffect(() => {
-    startRef.current = Date.now();
-    setNow(Date.now());
     setDisplayTokens(0);
     const clockId = window.setInterval(() => setNow(Date.now()), 500);
     const frameId = window.setInterval(
@@ -667,6 +707,18 @@ function ThinkingIndicator({
       window.clearInterval(easeId);
     };
   }, []);
+
+  // Reset the elapsed clock only when a new *structural* block appears
+  // (tool_use / tool_result / new text block) — not on every text delta,
+  // which streams as an appended tail of the SAME block and produced a
+  // constant `activity` reference change that reset the timer several
+  // times per second (visible as seconds counting up then flipping back
+  // to 0-2s again and again). Length changes are the cheap proxy for
+  // "the turn just entered a new phase, restart the phase clock".
+  useEffect(() => {
+    startRef.current = Date.now();
+    setNow(Date.now());
+  }, [activity.length]);
 
   const elapsedMs = Math.max(0, now - startRef.current);
   const tokens = displayTokens;
@@ -695,60 +747,103 @@ function ThinkingIndicator({
   );
 }
 
-function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
-  const code = it.code || '';
+// Prepend `import React from 'react'` when the model writes `React.foo`
+// (React.forwardRef, React.CSSProperties, React.useCallback, …) without
+// the default import. TS check flags 'refers to a UMD global' AND the
+// browser runtime throws ReferenceError on the bare identifier — both
+// break the render. Named-imports-only is the prompt-side guidance, this
+// is the belt for when the model ignores it.
+function ensureReactImport(src: string): string {
+  if (!/\bReact\.\w/.test(src)) return src;
+  if (/^\s*import\s+React\b/m.test(src)) return src;
+  const named = src.match(/^(\s*)import\s*\{([^}]*)\}\s*from\s*(['"]react['"])/m);
+  if (named && !/^\s*import\s+React\s*,/m.test(src)) {
+    return src.replace(named[0], `${named[1]}import React, {${named[2]}} from ${named[3]}`);
+  }
+  return `import React from 'react';\n${src}`;
+}
+
+function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genui' }>; superseded?: boolean }) {
+  // Three "don't render" cases collapse to one — the widget only ever shows
+  // when we have code that isn't broken:
+  //   - superseded (a later retry succeeded, so this one is stale by definition)
+  //   - status === 'error' (server rejected the code or tool_result was marked
+  //     isError; no point flashing a red card, esp. mid-stream when a retry
+  //     usually follows)
+  //   - no code yet (was "generating UI…" placeholder — removed per user
+  //     feedback: the empty gap during streaming is less noisy than the pending
+  //     text, and once code lands the renderer takes over)
+  if (superseded || it.status === 'error' || !it.code) return null;
+
+  const code = ensureReactImport(it.code);
   const streaming = it.status === 'pending' && Boolean(code);
 
-  // Remember the most recent code that actually rendered so a subsequent
-  // failure (streamed partial that briefly breaks, or a tool_result marked
-  // error) doesn't wipe the widget — we keep showing the last good frame
-  // and just tack an error banner on top.
+  // Remember the most recent code that actually rendered so a runtime
+  // failure (streamed partial that briefly breaks compile) doesn't wipe
+  // the widget — keep showing the last good frame until fresh code compiles.
   const [lastGoodCode, setLastGoodCode] = useState('');
-  const [runtimeError, setRuntimeError] = useState('');
+  const [hasRendered, setHasRendered] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const toast = useToast();
 
   const onRendered = useCallback((rendered: string) => {
     setLastGoodCode(rendered);
-    setRuntimeError('');
+    setHasRendered(true);
   }, []);
-  const onError = useCallback((err: Error) => {
-    setRuntimeError(err.message || String(err));
-  }, []);
+  // onError is a no-op now — we don't surface runtime errors as banners
+  // anymore; StaticGenUIRenderer's own crossfade keeps the last good frame
+  // and a later retry (which we let through the filter above) is the fix.
+  const onError = useCallback(() => { /* swallow */ }, []);
 
   const displayCode = code || lastGoodCode;
-  const toolError = it.status === 'error' ? (it.error || 'unknown error') : '';
-  const banner = toolError || runtimeError;
-
-  if (!displayCode) {
-    if (toolError) {
-      return (
-        <div className="ti-genui" data-item-id={it.id}>
-          <div className="ti-genui-error">render_ui failed: {toolError}</div>
-        </div>
-      );
+  const onExport = useCallback(async () => {
+    if (exporting || !displayCode) return;
+    setExporting(true);
+    try {
+      const resp = await authedFetch('/api/genui/export-html', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: displayCode }),
+      });
+      if (!resp.ok) throw new Error(`export failed (${resp.status})`);
+      const html = await resp.text();
+      downloadTextFile('macaron-genui.html', html, 'text/html');
+    } catch (e) {
+      toast(`HTML export failed: ${(e as Error).message}`);
+    } finally {
+      setExporting(false);
     }
-    return (
-      <div className="ti-genui" data-item-id={it.id}>
-        <div className="ti-genui-pending">generating UI…</div>
-      </div>
-    );
-  }
+  }, [displayCode, exporting, toast]);
+
+  if (!displayCode) return null;
+
   return (
     <div className="ti-genui" data-item-id={it.id}>
-      {banner && (
-        <div className="ti-genui-error stale" title={banner}>
-          Newer render failed — showing last good frame. {banner}
+      {hasRendered && !streaming && (
+        <div className="ti-genui-head">
+          <span className="ti-genui-prompt" />
+          <button className="ti-genui-codebtn" onClick={onExport} disabled={exporting} title="Export this UI as a standalone HTML file">
+            <Download size={12} aria-hidden="true" />
+            {exporting ? 'Exporting…' : 'Export HTML'}
+          </button>
         </div>
       )}
-      <StaticGenUIRenderer
-        code={displayCode}
-        active
-        streaming={streaming}
-        preserveStateOnUpdate={streaming}
-        flushMode="immediate"
-        onRendered={onRendered}
-        onError={onError}
-        className="ti-genui-renderer macaron-genui-scope"
-      />
+      <div
+        data-genui-render-state={hasRendered ? 'ready' : 'pending'}
+        aria-hidden={!hasRendered}
+        style={!hasRendered ? { height: 0, overflow: 'hidden', visibility: 'hidden' } : undefined}
+      >
+        <StaticGenUIRenderer
+          code={displayCode}
+          active
+          streaming={streaming}
+          preserveStateOnUpdate={streaming}
+          flushMode="immediate"
+          onRendered={onRendered}
+          onError={onError}
+          className="ti-genui-renderer macaron-genui-scope"
+        />
+      </div>
     </div>
   );
 }
@@ -868,6 +963,7 @@ export function ItemView({
   streaming,
   project,
   sid,
+  supersededGenui,
 }: {
   it: Item;
   onRewind?: (uuid: string) => void;
@@ -881,6 +977,10 @@ export function ItemView({
   streaming?: boolean;
   project?: string;
   sid?: string;
+  // Set of genui item ids that failed AND have a later successful genui in
+  // the same combined transcript — passed down so those items collapse to a
+  // one-line chip instead of stacking the failed frame under the good one.
+  supersededGenui?: ReadonlySet<string>;
 }) {
   switch (it.kind) {
     case 'user':
@@ -916,7 +1016,7 @@ export function ItemView({
     case 'system_event':
       return <SystemEventItem eventType={it.eventType} text={it.text} />;
     case 'genui':
-      return <GenuiItem it={it} />;
+      return <GenuiItem it={it} superseded={supersededGenui?.has(it.id) ?? false} />;
     case 'assistant-image':
       return <AssistantImageItem mimeType={it.mimeType} data={it.data} />;
     case 'permission': {
@@ -1928,7 +2028,8 @@ export function Session(props: SessionProps = {}) {
     };
   }, [commitSnapshot, fetchSnapshot, isPending, liveSubscriptionGen, sid, onPendingConsumed]);
 
-  const rawItems = useMemo(() => (data ? flatten(data.messages) : []), [data]);
+  const replay = useReplay(data?.replayMessages ?? data?.messages ?? [], isNew || sending || polling || handoffPending);
+  const rawItems = useMemo(() => flatten(replay.messages), [replay.messages]);
   // Collapse consecutive read-only tool operations (Read / Grep / Glob /
   // cat / grep / ls / …) into a single summary badge, mirroring Claude
   // Code CLI's `⏺ Searching for N patterns, reading M files, listing K
@@ -1938,6 +2039,24 @@ export function Session(props: SessionProps = {}) {
   const total = items.length;
   const hidden = Math.max(0, total - shown);
   const tail = items.slice(-shown);
+
+  // Which genui items should collapse to a chip because a later retry
+  // succeeded? Walk the combined chronological transcript once and mark any
+  // errored genui that has ANY later genui with status='ready' in the same
+  // conversation. Applies across liveTurn / completedTurns / tail so a retry
+  // in the current turn also collapses the failed frame from an earlier turn.
+  const supersededGenui = useMemo(() => {
+    const superseded = new Set<string>();
+    const combined: readonly Item[] = [...tail, ...completedTurns, ...(liveTurn as readonly Item[])];
+    let sawGoodGenuiLater = false;
+    for (let i = combined.length - 1; i >= 0; i--) {
+      const it = combined[i]!;
+      if (it.kind !== 'genui') continue;
+      if (it.status === 'ready') sawGoodGenuiLater = true;
+      else if (it.status === 'error' && sawGoodGenuiLater) superseded.add(it.id);
+    }
+    return superseded;
+  }, [tail, completedTurns, liveTurn]);
 
   // Opening an already-idle session (last item is an assistant reply, nothing
   // streaming) surfaces follow-ups too — not only the instant a turn ends.
@@ -2610,6 +2729,7 @@ export function Session(props: SessionProps = {}) {
             {data?.gitBranch && <span className="sess-branch">{data.gitBranch}</span>}
           </div>
           <div className="session-bar-right">
+            {replay.controls}
             {!isNew && (
               <button
                 className="ghost small"
@@ -2634,6 +2754,7 @@ export function Session(props: SessionProps = {}) {
           </div>
         </div>
       )}
+      {hideBar && replay.controls && <div className="session-replay-bar">{replay.controls}</div>}
 
       {/*
         flex-direction: column-reverse on .thread. DOM order must be newest →
@@ -2641,7 +2762,7 @@ export function Session(props: SessionProps = {}) {
         button, banners, error/empty placeholders) goes at the END of the DOM.
       */}
       <div className="thread tui" ref={threadRef}>
-        {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} />}
+        {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} activity={liveTurn} />}
         {/* Suggested follow-ups from the throwaway cache-hit query. Rendered
             ABOVE liveTurn in DOM (so BELOW it visually — column-reverse)
             i.e. just above the input area, right under the latest reply.
@@ -2669,7 +2790,7 @@ export function Session(props: SessionProps = {}) {
             (thread is column-reverse) puts the newest at the visual bottom
             while preserving relative text/tool interleaving. */}
         {[...liveTurn].reverse().map((t) => (
-          <ItemView key={t.id} it={t} onPermissionDecide={handlePermissionDecide} streaming={sending} />
+          <ItemView key={t.id} it={t} onPermissionDecide={handlePermissionDecide} streaming={sending} supersededGenui={supersededGenui} />
         ))}
         {/* Current-turn user message = one card. Images stack ABOVE the
             text (Claude-web ordering: attachments before prose). */}
@@ -2690,10 +2811,10 @@ export function Session(props: SessionProps = {}) {
           />
         )}
         {[...(collapseReadSearchGroups(completedTurns) as Item[])].reverse().map((it) => (
-          <ItemView key={it.id} it={it} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} project={project} sid={sid} supersededGenui={supersededGenui} />
         ))}
         {[...tail].reverse().map((it) => (
-          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} supersededGenui={supersededGenui} />
         ))}
         {hidden > 0 && (
           <button className="ghost load-earlier" onClick={() => setShown((s) => s + PAGE_SIZE)}>

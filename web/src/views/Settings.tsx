@@ -340,10 +340,34 @@ export function Settings() {
             </label>
           ))}
 
-          {settings.customProviders.length === 0 && (
+          {settings.customProviders.length === 0 && !editing && (
             <p className="muted" style={{ padding: '10px 4px' }}>
               No custom providers yet. Click "+ Add provider" to add one.
             </p>
+          )}
+
+          {editing && (
+            <div className="prov-editor-inline">
+              <h3 className="prov-editor-title">
+                {editing.id === null ? 'Add provider' : 'Edit provider'}
+              </h3>
+              <ProviderForm
+                draft={editing.draft}
+                existingConfigured={editing.existingConfigured}
+                isNew={editing.id === null}
+                onChange={(patch) =>
+                  setEditing((cur) => (cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur))
+                }
+              />
+              <div className="settings-actions">
+                <button className="primary" onClick={save} disabled={busy}>
+                  {busy ? 'Saving…' : editing.id === null ? 'Create' : 'Save'}
+                </button>
+                <button className="ghost" onClick={() => setEditing(null)} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -456,29 +480,6 @@ export function Settings() {
         </label>
       </div>
 
-      {editing && (
-        <div className="settings-section prov-editor">
-          <h2 className="sec-title">
-            {editing.id === null ? 'Add provider' : 'Edit provider'}
-          </h2>
-          <ProviderForm
-            draft={editing.draft}
-            existingConfigured={editing.existingConfigured}
-            isNew={editing.id === null}
-            onChange={(patch) =>
-              setEditing((cur) => (cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur))
-            }
-          />
-          <div className="settings-actions">
-            <button className="primary" onClick={save} disabled={busy}>
-              {busy ? 'Saving…' : editing.id === null ? 'Create' : 'Save'}
-            </button>
-            <button className="ghost" onClick={() => setEditing(null)} disabled={busy}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
@@ -639,12 +640,12 @@ function ProviderForm({
           id="p-endpoint"
           className="settings-input"
           value={draft.endpoint}
-          placeholder="https://…/v1"
+          placeholder="https://api.example.com/v1"
           spellCheck={false}
           autoCapitalize="off"
           onChange={(e) => onChange({ endpoint: e.target.value })}
         />
-        <p className="settings-hint">Must expose <code>/v1/messages</code>. Claude Code SDK will POST to it.</p>
+        <p className="settings-hint">Requests are sent to <code>Endpoint/messages</code>.</p>
       </div>
       <div className="settings-field">
         <label htmlFor="p-model">Model</label>
@@ -652,7 +653,7 @@ function ProviderForm({
           id="p-model"
           className="settings-input"
           value={draft.model}
-          placeholder="e.g. macaron-0.6, claude-opus-4-7"
+          placeholder="e.g. provider-model-id"
           onChange={(e) => onChange({ model: e.target.value })}
         />
       </div>

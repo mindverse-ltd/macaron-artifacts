@@ -12,10 +12,11 @@ export type Workspace = {
 
 // Which agent engine produced this session. `claude` = claude-agent-sdk
 // jsonl under ~/.claude/projects. `codex` = @openai/codex-sdk rollout files
-// under ~/.codex/sessions. Both are grouped by cwd into the same
-// Workspace list; the tile UI dispatches to the appropriate backend
-// route based on this discriminator.
-export type SessionKind = 'claude' | 'codex';
+// under ~/.codex/sessions. `kimi` = Kimi Code wire.jsonl + state.json under
+// ~/.kimi-code/sessions. All are grouped by cwd into the same Workspace
+// list; the tile UI dispatches to the appropriate backend route based on
+// this discriminator.
+export type SessionKind = 'claude' | 'codex' | 'kimi';
 
 export type SessionListItem = {
   kind: SessionKind;
@@ -28,8 +29,8 @@ export type SessionListItem = {
   // Claude-owned jsonl). Takes display precedence over `preview` when set.
   label?: string;
   // Native/generated human-readable title. Claude reads ai-title/custom-title
-  // records; Codex uses its persisted generated title. The UI prefers it over
-  // `preview` when present.
+  // records; Codex uses its persisted generated title; Kimi reads state.json.
+  // The UI prefers it over `preview` when present.
   title?: string;
   messageCount: number;
   messageCountSuffix?: string;
@@ -58,6 +59,7 @@ export type Message = {
   model?: string;
   timestamp?: string;
   uuid?: string;
+  sourceLine?: number;
 };
 
 // Token usage snapshot taken from the last assistant message's `usage`
@@ -99,6 +101,7 @@ export type SessionDetail = {
   // sidebar does. Undefined when the session has none.
   title?: string;
   messages: Message[];
+  replayMessages?: Message[];
   truncated?: boolean;
   totalBytes?: number;
   latestUsage?: UsageSnapshot;

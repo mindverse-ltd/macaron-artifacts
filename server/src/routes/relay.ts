@@ -9,7 +9,7 @@
 // We sit in front of the provider:
 //   GET /v1/models             → synthesize list from active provider config
 //   GET /v1/models/<name>      → synthesize a Model object for <name>
-//   POST /v1/messages          → forward to provider.endpoint verbatim,
+//   POST /v1/messages          → append /messages to the provider endpoint,
 //                                streaming the response back byte-by-byte
 //   * everything else          → return an empty {ok:true} 200 so probes
 //                                don't fail (best-effort — most CLI probes
@@ -20,6 +20,7 @@
 // provider is a custom one.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { anthropicMessagesUrl } from '../lib/anthropic-endpoint.js';
 import { readSettings } from '../lib/settings-store.js';
 
 async function findProvider(id: string) {
@@ -77,7 +78,7 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
       //   - model  →  provider's canonical name
       //   - Any `messages[i].role === 'system'` entries get lifted into
       //     the top-level `system` field. Real Anthropic accepts either
-      //     shape, but Macaron's sglang backend rejects `system` inside
+      //     shape, but some Anthropic-compatible backends reject `system` inside
       //     `messages` with a 400 literal_error.
       let body: Record<string, unknown> = {};
       if (req.body && typeof req.body === 'object') {
@@ -116,7 +117,7 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const upstreamUrl = `${p.endpoint.replace(/\/$/, '')}/messages`;
+      const upstreamUrl = anthropicMessagesUrl(p.endpoint);
       // Forward select client headers (streaming, anthropic-beta, etc.).
       const fwdHeaders: Record<string, string> = {
         'content-type': 'application/json',

@@ -2293,3 +2293,28 @@ body {
   outline: none;
 }
 .cx-sb-thread-rename:focus { border-color: var(--cx-good, #4d8f5b); }
+
+/* Small icon-only action button that sits in the chat header (Download the
+   transcript, and any future single-shot toolbar action). Muted by default,
+   fills in on hover, disabled state greys out. */
+.cx-main-head-action {
+  margin-left: 4px;
+  padding: 4px 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--cx-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms, color 100ms;
+}
+.cx-main-head-action:hover:not(:disabled) {
+  background: var(--cx-hover);
+  color: var(--cx-text);
+}
+.cx-main-head-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

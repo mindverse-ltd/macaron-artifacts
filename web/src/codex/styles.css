@@ -2276,3 +2276,20 @@ body {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 10.5px;
 }
+
+/* Inline thread rename — swaps the .cx-sb-thread-main button for a text
+   input while renamingSid matches. Kept the same footprint so the row
+   doesn't jump; input inherits the row's height and thread-title font. */
+.cx-sb-thread-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--cx-border-strong);
+  border-radius: 4px;
+  background: var(--cx-surface);
+  color: var(--cx-text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.cx-sb-thread-rename:focus { border-color: var(--cx-good, #4d8f5b); }

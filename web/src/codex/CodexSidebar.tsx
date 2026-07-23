@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Check, Circle, Plus, X, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check, Circle, Plus, Search, X, Settings } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { assetUrl } from '../lib/assetBase';
 import { codexApi, type CodexThread, type CodexWorkspace } from './api';
@@ -151,6 +151,22 @@ export function CodexSidebar({ onNavigate }: {
       <button className="cx-sb-new" onClick={() => { navigate('/'); onNavigate?.(); }}>
         <Plus size={14} aria-hidden="true" />
         <span>New thread</span>
+      </button>
+
+      <button
+        type="button"
+        className="cx-sb-search"
+        onClick={() => {
+          onNavigate?.();
+          window.requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent('macaron:open-search'));
+          });
+        }}
+        title="Search threads (Cmd+K)"
+      >
+        <span className="cx-sb-search-icon"><Search size={14} aria-hidden="true" /></span>
+        <span className="cx-sb-search-label">Search threads</span>
+        <kbd className="cx-sb-search-kbd" aria-hidden="true">⌘K</kbd>
       </button>
 
       <Link

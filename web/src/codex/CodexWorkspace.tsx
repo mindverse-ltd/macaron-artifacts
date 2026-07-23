@@ -19,7 +19,7 @@ import {
   rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Copy, FolderOpen, RefreshCw, X } from 'lucide-react';
+import { Copy, FolderOpen, GitBranch, Plus, RefreshCw, SquareTerminal, X } from 'lucide-react';
 import { codexApi, type CodexThread, type CodexWorkspace as Wk } from './api';
 import { CodexChat } from './CodexChat';
 import {
@@ -36,6 +36,9 @@ import { sessionTitle } from '../lib/api';
 import { FilesPanel } from '../components/FilesPanel';
 import { FileTile } from '../components/FileTile';
 import { isFileSid, filePath } from '../lib/fileTile';
+import { GitPanel } from '../components/GitPanel';
+import { Terminal } from '../components/Terminal';
+import { isTerminalSid, killTerminal } from '../lib/terminal';
 
 const ROW_UNIT_PX = 48;
 
@@ -61,6 +64,7 @@ export function CodexWorkspace() {
   const [sessions, setSessions] = useState<CodexThread[] | null>(null);
   const [error, setError] = useState('');
   const [filesOpen, setFilesOpen] = useState(false);
+  const [gitOpen, setGitOpen] = useState(false);
   const canvas = useCanvas(project);
   const gridRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<ResizeState | null>(null);
@@ -167,6 +171,24 @@ export function CodexWorkspace() {
         <div className="cx-canvas-actions">
           <button
             type="button"
+            className={'cx-canvas-action' + (gitOpen ? ' active' : '')}
+            onClick={() => setGitOpen((v) => !v)}
+            title={gitOpen ? 'Close source control' : 'Source control'}
+          >
+            <GitBranch size={14} aria-hidden="true" />
+            <span>Git</span>
+          </button>
+          <button
+            type="button"
+            className="cx-canvas-action"
+            onClick={() => canvas.addTerminal()}
+            title="Pin a terminal to the canvas"
+          >
+            <SquareTerminal size={14} aria-hidden="true" />
+            <span>Terminal</span>
+          </button>
+          <button
+            type="button"
             className={'cx-canvas-action' + (filesOpen ? ' active' : '')}
             onClick={() => setFilesOpen((v) => !v)}
             title={filesOpen ? 'Close files panel' : 'Browse files in this workspace'}
@@ -174,8 +196,19 @@ export function CodexWorkspace() {
             <FolderOpen size={14} aria-hidden="true" />
             <span>Files</span>
           </button>
+          <button
+            type="button"
+            className="cx-canvas-action"
+            onClick={() => navigate('/')}
+            title="Start a new thread"
+          >
+            <Plus size={14} aria-hidden="true" />
+            <span>Thread</span>
+          </button>
         </div>
       </header>
+
+      {gitOpen && <GitPanel project={project} onClose={() => setGitOpen(false)} />}
 
       <div className={'cx-canvas-body' + (filesOpen ? ' with-files' : '')}>
         {filesOpen && (
@@ -211,11 +244,14 @@ export function CodexWorkspace() {
             >
               {canvas.tiles.map((tile) => {
                 const file = isFileSid(tile.sid);
-                const meta = file ? undefined : sessions.find((x) => x.sessionId === tile.sid);
+                const terminal = isTerminalSid(tile.sid);
+                const meta = file || terminal ? undefined : sessions.find((x) => x.sessionId === tile.sid);
                 const isFocused = canvas.focusedSid === tile.sid;
-                const label = file
-                  ? filePath(tile.sid).split('/').pop() || 'File'
-                  : meta ? sessionTitle(meta) : tile.sid.slice(0, 8);
+                const label = terminal
+                  ? 'Terminal'
+                  : file
+                    ? filePath(tile.sid).split('/').pop() || 'File'
+                    : meta ? sessionTitle(meta) : tile.sid.slice(0, 8);
                 return (
                   <SortableTile
                     key={tile.sid}
@@ -224,8 +260,12 @@ export function CodexWorkspace() {
                     isFocused={isFocused}
                     project={project}
                     isFile={file}
+                    isTerminal={terminal}
                     onFocus={() => canvas.focus(tile.sid)}
-                    onRemove={() => canvas.remove(tile.sid)}
+                    onRemove={() => {
+                      if (terminal) killTerminal(project, tile.sid);
+                      canvas.remove(tile.sid);
+                    }}
                     onResizeStart={(e) => startResize(tile.sid, e)}
                   />
                 );
@@ -246,6 +286,7 @@ function SortableTile({
   isFocused,
   project,
   isFile,
+  isTerminal,
   onFocus,
   onRemove,
   onResizeStart,
@@ -255,6 +296,7 @@ function SortableTile({
   isFocused: boolean;
   project: string;
   isFile: boolean;
+  isTerminal: boolean;
   onFocus: () => void;
   onRemove: () => void;
   onResizeStart: (e: React.PointerEvent) => void;
@@ -294,7 +336,7 @@ function SortableTile({
       <div className="cx-tile-grip" {...attributes} {...listeners} title="Drag to reorder">
         <span className="cx-tile-grip-dots">⋮⋮</span>
         <span className="cx-tile-grip-label">{label}</span>
-        {!isFile && (
+        {!isFile && !isTerminal && (
           <button
             type="button"
             className="cx-tile-action"
@@ -328,7 +370,9 @@ function SortableTile({
         </button>
       </div>
       <div className="cx-tile-body">
-        {isFile ? (
+        {isTerminal ? (
+          <Terminal project={project} sid={tile.sid} focused={isFocused} />
+        ) : isFile ? (
           <FileTile
             project={project}
             path={filePath(tile.sid)}

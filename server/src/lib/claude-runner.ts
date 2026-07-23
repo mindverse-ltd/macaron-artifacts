@@ -4,10 +4,11 @@
 
 import { randomUUID } from 'node:crypto';
 import type { SDKMessage, PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Diagnostic, CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import { getMacaronMcpServer } from './macaron-mcp.js';
 import { registerPending } from './permission-registry.js';
 import { computeRuleKeys, isAllowed, rememberSession, rememberProject } from './permission-rules.js';
-import type { CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
+import { getFileDiagnostics, reportForAgent } from './lsp-diagnostics.js';
 
 export type AttachedImage = { mimeType: string; dataUrl: string };
 
@@ -27,6 +28,10 @@ export type RunnerEvent =
   // the complete accumulated JSON so consumers can finalize state.
   | { kind: 'tool_input_done'; id: string; name: string; final_json: string }
   | { kind: 'tool_result'; tool_use_id: string; text: string; isError: boolean }
+  // LSP diagnostics for a file the agent just edited (Edit/Write/MultiEdit),
+  // computed in a PostToolUse hook. Surfaced on the tool card in the UI; the
+  // same errors are also fed back to the model via hookSpecificOutput.
+  | { kind: 'diagnostics'; file: string; toolUseId: string; diagnostics: Diagnostic[] }
   // Live usage. Emitted from Anthropic's `message_delta` streaming events
   // (authoritative cumulative output_tokens) and from thinking-phase ping
   // digests (estimated tokens burned during silent extended thinking).
@@ -230,6 +235,31 @@ export async function* runClaude(opts: RunOptions): AsyncGenerator<RunnerEvent> 
               return { behavior: 'deny', message: decision.reason || 'denied by user', interrupt: false };
             },
           }),
+          // After the model edits a file with a built-in tool, run TS/JS
+          // diagnostics on it. The report is returned as additionalContext so
+          // the model sees its own errors (OpenCode's "fed to the agent"), and
+          // a `diagnostics` event is pushed so the WebUI can show them on the
+          // tool card. render_ui keeps its own MCP-tool_result diagnostics path.
+          hooks: {
+            PostToolUse: [
+              {
+                hooks: [
+                  async (input) => {
+                    const i = input as { tool_name?: string; tool_input?: { file_path?: string }; tool_use_id?: string };
+                    if (i.tool_name !== 'Edit' && i.tool_name !== 'Write' && i.tool_name !== 'MultiEdit') return {};
+                    const file = i.tool_input?.file_path;
+                    if (!file || !i.tool_use_id) return {};
+                    const diagnostics = getFileDiagnostics(file, opts.cwd);
+                    if (diagnostics.length === 0) return {};
+                    push({ kind: 'diagnostics', file, toolUseId: i.tool_use_id, diagnostics });
+                    const report = reportForAgent(file, diagnostics);
+                    if (!report) return {};
+                    return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: report } };
+                  },
+                ],
+              },
+            ],
+          },
           ...(opts.envOverrides ? { env: opts.envOverrides } : {}),
         },
       });
@@ -417,4 +447,3 @@ export async function* runFollowup(opts: FollowupOptions): AsyncGenerator<string
   }
   console.log(`[claude-runner] followup  resume=${opts.resume.slice(0, 8)}  text=${got ? 'ok' : 'empty'}`);
 }
-

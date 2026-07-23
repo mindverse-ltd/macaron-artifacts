@@ -458,6 +458,7 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
               relay({ type: 'tool_input_done', id: ev.id, name: ev.name, final_json: ev.final_json });
             }
             else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
+            else if (ev.kind === 'diagnostics') relay({ type: 'diagnostics', file: ev.file, toolUseId: ev.toolUseId, diagnostics: ev.diagnostics });
             else if (ev.kind === 'permission_request') { relay({ type: 'permission_request', id: ev.id, toolName: ev.toolName, input: ev.input, suggestion: ev.suggestion }); pushPermissionRequest(project, sid, ev.toolName); }
             else if (ev.kind === 'permission_resolved') relay({ type: 'permission_resolved', id: ev.id, decision: ev.decision });
             else if (ev.kind === 'usage') relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });

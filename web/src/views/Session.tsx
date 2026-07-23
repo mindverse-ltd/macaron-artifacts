@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, Download, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
 import { useReplay } from '../components/ReplayControls';
-import { sessionToMarkdown } from '@macaron/shared';
+import { sessionToMarkdown, type Diagnostic } from '@macaron/shared';
 import {
   api,
   basename,
@@ -92,7 +92,7 @@ type Item =
   | { id: string; kind: 'user'; parts: MsgPart[]; uuid?: string }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'thinking'; text: string }
-  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }
+  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean; diagnostics?: Diagnostic[] }
   // A spawned custom subagent (the `Agent` tool). Drills into the child
   // transcript stored under <sid>/subagents/, linked back by toolUseId.
   | { id: string; kind: 'subagent'; agentType: string; description: string; toolUseId: string; result?: string }
@@ -573,7 +573,7 @@ const PREVIEW_LINES = 2;
 // heavy highlighter stays in its lazy chunk and out of the Session view's default bundle.
 const BashScript = lazy(loadShikiStreamCodeBlock);
 
-function ToolItem({ id, name, input, result, durationMs, isError }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }) {
+function ToolItem({ id, name, input, result, durationMs, isError, diagnostics }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean; diagnostics?: Diagnostic[] }) {
   const [open, setOpen] = useState(false);
   const [inputOverflows, setInputOverflows] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -648,6 +648,18 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
           <span className="ti-rail">└</span>
           <div className="ti-tool-body">
             {previewLines.length > 0 && <pre>{previewLines.join('\n')}</pre>}
+          </div>
+        </div>
+      )}
+      {diagnostics && diagnostics.length > 0 && (
+        <div className="ti-tool-out ti-diags">
+          <span className="ti-rail">└</span>
+          <div className="ti-tool-body">
+            {diagnostics.map((d, i) => (
+              <div key={i} className={d.severity === 'error' ? 'ti-diag ti-diag-err' : 'ti-diag ti-diag-warn'}>
+                {d.severity === 'error' ? 'ERROR' : 'WARN'} [{d.line}:{d.col}] {d.message}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -1007,7 +1019,7 @@ export function ItemView({
       const diff = isDiffTool(it.name) ? extractDiff(it.name, it.input) : null;
       return diff
         ? <DiffCard name={it.name} diff={diff} result={it.result} isError={it.isError} />
-        : <ToolItem id={it.id} name={it.name} input={it.input} result={it.result} durationMs={it.durationMs} isError={it.isError} />;
+        : <ToolItem id={it.id} name={it.name} input={it.input} result={it.result} durationMs={it.durationMs} isError={it.isError} diagnostics={it.diagnostics} />;
     }
     case 'subagent':
       return <SubagentItem it={it} project={project} sid={sid} />;
@@ -1928,6 +1940,7 @@ export function Session(props: SessionProps = {}) {
               name: t.name,
               input: t.input,
               result: t.result,
+              diagnostics: t.diagnostics,
             };
           }
           return {
@@ -2391,6 +2404,13 @@ export function Session(props: SessionProps = {}) {
                 }
                 return t;
               }),
+            );
+          },
+          onDiagnostics: ({ toolUseId, diagnostics }) => {
+            setLiveTurn((cur) =>
+              cur.map((t) =>
+                t.kind === 'tool' && t.id === `live-${toolUseId}` ? { ...t, diagnostics } : t,
+              ),
             );
           },
           onUsage: ({ outputTokens: ot }) => {

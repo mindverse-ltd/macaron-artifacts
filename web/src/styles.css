@@ -859,6 +859,15 @@ textarea:focus, select:focus, input:focus {
   gap: 3px;
 }
 .ti-expand:hover { color: var(--accent); }
+.ti-diag {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ti-diag-err { color: var(--bad); }
+.ti-diag-warn { color: var(--warn); }
 
 .ti-tool-dur { color: var(--muted); flex-shrink: 0; margin-left: auto; padding-left: 8px; }
 .ti-dot-error { color: var(--bad); }

@@ -11,6 +11,7 @@ description: "Whenever you would ask the user a question — pick between option
 
 ## When this fires (non-exhaustive)
 
+- **Commit / push gate**: "want me to commit this?", "should I push?", "open a PR?" — the end-of-work hand-off. Two buttons, and optionally a default with a countdown (template C).
 - **Choice**: "Pick a framework", "which of these files did you mean", "A or B?", boolean confirms.
 - **Form**: any request for structured input — name/email/config values, migration parameters, tuning knobs.
 - **Adjustment**: pick a color, resize a padding, choose a threshold. Slider / color picker / preview + apply beats "give me a number".
@@ -103,7 +104,53 @@ export default function App() {
 }
 ```
 
-### C. Confirm before destructive
+### C. Commit gate (with a default + countdown)
+
+The most common question a coding agent asks — "want me to commit this?" — is also the one most often typed as prose. It is two buttons.
+
+Add the countdown ONLY when the session gives you evidence the user wants the default to just happen: they said "just commit" / "don't ask me", or they've approved the same thing several times already. No evidence → same card, drop the `useEffect` and the `(Ns)` suffix.
+
+```tsx
+import { useEffect, useRef, useState } from 'react';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button, Text } from '$macaron/ui';
+import { sendUserMessage, scheduleUserMessage } from '$macaron/chat';
+
+const COMMIT = 'Commit it.';
+const SKIP = "Don't commit — leave the changes in the working tree.";
+
+export default function App() {
+  const [left, setLeft] = useState<number | null>(null);
+  const cancel = useRef<() => void>(() => {});
+  // Host owns the timer: it won't fire on a re-opened transcript and holds
+  // while the turn is still streaming. Returns the canceller.
+  useEffect(() => {
+    cancel.current = scheduleUserMessage(COMMIT, 30, setLeft);
+    return () => cancel.current();
+  }, []);
+  // Cancel BEFORE sending, or the countdown lands a second message on top.
+  const pick = (reply: string) => { cancel.current(); sendUserMessage(reply); };
+
+  return (
+    <Card className="max-w-md">
+      <CardHeader>
+        <CardTitle>Commit these changes?</CardTitle>
+        <CardDescription>3 files, +82 −14 — `feat: add retry to the upload queue`</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Row className="gap-2 justify-end items-center">
+          {left !== null && <Text className="text-xs opacity-60 mr-auto">Committing automatically in {left}s</Text>}
+          <Button variant="ghost" onClick={() => pick(SKIP)}>Don't commit</Button>
+          <Button onClick={() => pick(COMMIT)}>Commit{left !== null ? ` (${left}s)` : ''}</Button>
+        </Row>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+Show the file/diff summary in the card — the user is approving a specific change, and a bare "Commit?" makes the button meaningless. Same shape for push / open-a-PR / apply-migration gates.
+
+### D. Confirm before destructive
 
 ```tsx
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button } from '$macaron/ui';
@@ -134,3 +181,6 @@ export default function App() {
 - Making buttons that just log or alert instead of calling `sendUserMessage`. — The next turn never sees the click.
 - Forgetting to import `sendUserMessage` (`import { sendUserMessage } from '$macaron/chat';`). Bare call also works via `globalThis.sendUserMessage`, but the import is the documented path.
 - Emitting a widget without a `reply` payload string on each option — the next turn can't tell what was chosen.
+- Arming a countdown the user never asked for, or one whose remaining seconds aren't visible on the button. Both turn "convenient" into "it committed behind my back".
+- Calling `sendUserMessage` from a button without cancelling the countdown first — the user gets their answer AND the auto-answer.
+- Rolling your own `setTimeout` inside the widget instead of `scheduleUserMessage` — a widget-local timer re-fires every time the transcript is re-opened.

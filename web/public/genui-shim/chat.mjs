@@ -15,6 +15,18 @@ export function sendUserMessage(prompt) {
   dispatch(prompt);
 }
 
+// Countdown auto-send for confirm widgets with a default option ("commit unless
+// you say otherwise"). The host owns the timer (globalThis['$app/chat/schedule'],
+// see lib/autoSend.ts) so it can refuse to fire on a re-opened transcript and
+// hold while a turn is still streaming — neither is observable from in here.
+// Returns a cancel function; call it from onClick when the user picks manually.
+export function scheduleUserMessage(prompt, seconds, onTick) {
+  if (typeof prompt !== 'string') throw new TypeError('scheduleUserMessage expects a string prompt');
+  const schedule = globalThis['$app/chat/schedule'];
+  if (!schedule) { console.warn('[genui-shim/chat] no active chat bridge; countdown dropped'); return () => {}; }
+  return schedule(prompt, seconds, onTick);
+}
+
 // Side-effect: also expose sendUserMessage on globalThis so widgets that
 // forget the `import` still work — the preview shares globalThis with the
 // host, so any onClick handler can just call sendUserMessage(...) directly.

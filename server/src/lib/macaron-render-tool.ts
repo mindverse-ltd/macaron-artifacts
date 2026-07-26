@@ -49,13 +49,17 @@ export const RENDER_UI_INSTRUCTIONS =
   '  (STATUS) Snapshot of state (build, PR, tests, TODOs, service health) — StatGrid / Timeline.\n' +
   '  (NEXT) "You could do X, Y, or Z" — each an actionable Button that fires sendUserMessage.\n' +
   '  (CONFIRM) Before a destructive action — diff summary card + Apply / Cancel buttons.\n' +
+  '  (COMMIT) Any "should I commit / push / open a PR / apply this?" hand-off at the end of a unit of work — ' +
+  '  render the two buttons instead of asking in prose. This is the single most common question you ask; ' +
+  '  never type it.\n' +
   '  (RESEARCH) Multi-section research / comparison / metrics breakdown — render a report card ' +
   '  (titled sections + Stats + Table), not a long Markdown wall.\n' +
   '\nRules: NEVER put TSX in ```tsx fences. NEVER explain code before calling — call first, ' +
   'then the surrounding prose acknowledges + threads the widgets together. Prefer multiple small ' +
   'widgets to one big monolithic card. Write UI copy + the surrounding ack in the user\'s own ' +
   'language. Only stay in pure text for: single-line factual answers, pure prose explanations ' +
-  'with no structure at all, a yes/no confirmation, error/failure traces, and code you were ' +
+  'with no structure at all, a yes/no about work already finished (NOT a commit / push / apply ' +
+  'gate — those render), error/failure traces, and code you were ' +
   'asked to write to a FILE (WHEN A PREVIEW WAS ALREADY APPROVED). When in doubt, render.';
 
 // Model routinely writes React.forwardRef / React.CSSProperties / React.useX
@@ -103,7 +107,7 @@ export const RENDER_UI_TOOL_DESCRIPTION = `Render an interactive TSX UI inline i
 - **Status / dashboard / snapshot**: build result, PR checks, service health, TODO progress, session state → render Stats/StatGrid/Timeline.
 - **Form / wizard / configurator**: any answer that would say "tell me the following: name, ..., ..." → render Inputs the user submits back via sendUserMessage.
 - **Actionable next steps**: "you could do X, Y, or Z" where each step is something the user might click to trigger → render each as a Button that fires sendUserMessage.
-- **You are asking the user**: your turn ends in a question with **3+ discrete options, or 2+ fields to fill** → render a form the user submits via \`sendUserMessage\` instead of asking in prose. When each option has a visual counterpart (layout / theme / chart type / template), use an **options-left, preview-right** layout (e.g. a \`Row\` of a choice list + a live preview pane) so selecting an option shows what it looks like. A yes/no or any other **binary confirmation** stays as text — don't render a form for it.
+- **You are asking the user**: your turn ends in a question with **3+ discrete options, or 2+ fields to fill** → render a form the user submits via \`sendUserMessage\` instead of asking in prose. When each option has a visual counterpart (layout / theme / chart type / template), use an **options-left, preview-right** layout (e.g. a \`Row\` of a choice list + a live preview pane) so selecting an option shows what it looks like. A bare yes/no about something already done ("that worked, right?") stays as text — don't render a form for it. But a binary that *gates your next action* — commit / don't commit, push / hold, apply / discard, open a PR / not yet — IS a render: two buttons that call \`sendUserMessage\`, so one click continues the turn instead of the user typing "yes".
 - **Report-style answer**: the user asked a question whose answer is **structured research or data findings** — multi-section analysis, comparison of records, metrics/breakdown ("research …", "compare …", "summarize this data") → render it as a report — a titled \`Card\`/\`Stack\` with sections, Stats/StatGrid for numbers, Tables for records — instead of a long Markdown wall. This does NOT cover code/debug explanation: a code walkthrough, error/failure analysis, or debugging trace stays as plain text even when it runs long (see MUST NOT). A short factual answer that fits in a sentence or two also stays as plain text.
 
 If a Markdown table, numbered list of ≥3 things, or "reply with your choice" would be in your answer — you're describing what render_ui is for. Render it instead.
@@ -115,7 +119,7 @@ If a Markdown table, numbered list of ≥3 things, or "reply with your choice" w
 - **NEVER** call render_ui for:
   - Pure prose explanations, code walkthroughs, debugging traces, error/failure analysis, single-sentence Q&A — these stay text even when multi-section; they are NOT "reports" in the sense above (that trigger is only for structured research / data findings).
   - Code you are asked to write to a FILE (use Edit/Write, not render_ui)
-  - Simple confirmations ("done", "here's the file path", "the tests pass") and any yes/no or binary confirmation question
+  - Simple confirmations ("done", "here's the file path", "the tests pass") and yes/no questions about work already finished — but NOT a binary that gates your next action (commit / push / apply / open a PR): that one renders, see above
   - Answers that fit in one line of text
 
 # Imports — exact rules
@@ -153,6 +157,29 @@ Media/decor: Avatar+AvatarImage+AvatarFallback, Tilt, GlowEffect, ProgressiveBlu
 - **Preview must equal Apply.** When a widget is an "options-left, preview-right" picker where each option maps to concrete code you'll write in a follow-up turn (fonts, themes, layouts, palettes, copy), the preview shown for a selected option MUST use the *exact* CSS / class / prop values you will later apply. If \`Monospace\` sets \`font-family: "JetBrains Mono", ...; font-weight: 500\`, the preview swatch for it must use those same values — not a stylized "hero" version with bolder weight, extra letter-spacing, decorative subtitle, etc. And the prompt string you send via \`sendUserMessage\` on Apply must carry the full CSS block, not just the option name, so the follow-up turn writes byte-identical code to disk.
 - **Mirror the real component, not a mockup.** When previewing a change to an **existing UI** (logo area, sidebar, tile, header — anything the user is currently looking at), you MUST first Read the target component source file so the preview reproduces its actual markup and assets, not a placeholder. Reuse the real image paths (\`<img src="/mindlab-symbol.svg" />\`, not a fake "M" square), the real copy ("Macaron Artifacts / Presented by Mind Lab", not "Sample Brand"), the real container (padding, border-radius, background), and the real neighboring elements around the swapped property. Only the property under change (the font, the color, the layout) varies between option swatches; everything else is byte-copied from the current component. A preview that "looks like the general idea" is a failed answer — the user is choosing a change they will see land verbatim in their app, and a mocked-up placeholder makes the choice meaningless.
 - Call it ONLY from event handlers or effects, never during render, and at most once per user gesture. For a purely display-only UI, don't call it.
+
+# Default option + countdown (\`scheduleUserMessage\`)
+
+\`import { sendUserMessage, scheduleUserMessage } from '$macaron/chat';\`
+
+\`scheduleUserMessage(prompt, seconds, onTick?)\` arms a host-side countdown that sends \`prompt\` on its own when it runs out, and returns a **cancel function**. Use it ONLY for a confirm widget where you have real evidence of the user's habit — they've been saying "just commit", "don't ask me", or have approved the same thing several times this session. Absent that evidence, render the buttons with no countdown; a surprise auto-action is worse than a click.
+
+- Arm it in a \`useEffect\` on mount (not during render) and return its cancel function from the effect, so unmount / a manual pick stops the clock.
+- Every button's \`onClick\` must call the cancel function BEFORE \`sendUserMessage\` — otherwise the countdown fires a second message on top of the user's choice.
+- Use \`onTick\` to render the remaining seconds INSIDE the default button ("Commit (28s)") so the user can see what is about to happen and stop it. A silent timer is a defect.
+- The host refuses to fire on a re-opened transcript and holds while a turn is still streaming, so you don't need to guard for either. Typing in the composer also cancels it.
+- 30–60s for a routine commit; 5 minutes only for something the user has explicitly told you to stop asking about.
+
+\`\`\`tsx
+const [left, setLeft] = useState<number | null>(null);
+const cancelRef = useRef<() => void>(() => {});
+useEffect(() => {
+  cancelRef.current = scheduleUserMessage('Commit and push it.', 30, setLeft);
+  return () => cancelRef.current();
+}, []);
+const pick = (reply: string) => { cancelRef.current(); sendUserMessage(reply); };
+// …<Button onClick={() => pick('Commit and push it.')}>Commit{left !== null ? \` (\${left}s)\` : ''}</Button>
+\`\`\`
 
 # After the call
 

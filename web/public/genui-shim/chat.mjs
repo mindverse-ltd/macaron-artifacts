@@ -4,6 +4,11 @@
 // dispatcher on globalThis['$app/chat'] (see Session.tsx); the preview
 // renders inline (not an iframe) so it shares globalThis with the host. No active
 // bridge = no-op + warn, matching display-only widget semantics.
+// Sibling shim, not bare 'react': the import map only rewrites specifiers in the
+// widget's own compiled module, so a bare import in here would depend on the
+// page-level map existing. Same file URL either way = the host's single React.
+import { useEffect, useState } from './react.mjs';
+
 const dispatch = (text) => {
   const bridge = globalThis['$app/chat'];
   if (!bridge) { console.warn('[genui-shim/chat] no active chat bridge; message dropped'); return; }
@@ -15,16 +20,21 @@ export function sendUserMessage(prompt) {
   dispatch(prompt);
 }
 
-// Countdown auto-send for confirm widgets with a default option ("commit unless
-// you say otherwise"). The host owns the timer (globalThis['$app/chat/schedule'],
-// see lib/autoSend.ts) so it can refuse to fire on a re-opened transcript and
-// hold while a turn is still streaming — neither is observable from in here.
-// Returns a cancel function; call it from onClick when the user picks manually.
-export function scheduleUserMessage(prompt, seconds, onTick) {
-  if (typeof prompt !== 'string') throw new TypeError('scheduleUserMessage expects a string prompt');
-  const schedule = globalThis['$app/chat/schedule'];
-  if (!schedule) { console.warn('[genui-shim/chat] no active chat bridge; countdown dropped'); return () => {}; }
-  return schedule(prompt, seconds, onTick);
+// Countdown auto-send for a confirm widget with a default option ("commit
+// unless you say otherwise"). Returns the seconds left, or null when nothing is
+// counting — so the whole widget-side contract is `const left = useAutoSend(...)`
+// and rendering `left`. Everything that makes an auto-fire wrong is handled by
+// the host (lib/autoSend.ts): it refuses to arm on a re-opened transcript (left
+// stays null, so the label silently drops the timer), holds while a turn streams,
+// stops on any keystroke, and cancels itself inside send() — which means a button
+// calling sendUserMessage needs no cancel bookkeeping at all.
+export function useAutoSend(prompt, seconds = 30) {
+  if (typeof prompt !== 'string') throw new TypeError('useAutoSend expects a string prompt');
+  const [remaining, setRemaining] = useState(null);
+  // Deps are the two primitives, NOT setRemaining's closure: re-arming on every
+  // render would restart the countdown forever and it could never reach zero.
+  useEffect(() => globalThis['$app/chat/schedule']?.(prompt, seconds, setRemaining), [prompt, seconds]);
+  return remaining;
 }
 
 // Side-effect: also expose sendUserMessage on globalThis so widgets that

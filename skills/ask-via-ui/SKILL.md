@@ -108,27 +108,20 @@ export default function App() {
 
 The most common question a coding agent asks — "want me to commit this?" — is also the one most often typed as prose. It is two buttons.
 
-Add the countdown ONLY when the session gives you evidence the user wants the default to just happen: they said "just commit" / "don't ask me", or they've approved the same thing several times already. No evidence → same card, drop the `useEffect` and the `(Ns)` suffix.
+Add the countdown ONLY when the session gives you evidence the user wants the default to just happen: they said "just commit" / "don't ask me", or they've approved the same thing several times already. No evidence → same card, drop the `useAutoSend` line and the `(Ns)` suffix.
 
 ```tsx
-import { useEffect, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button, Text } from '$macaron/ui';
-import { sendUserMessage, scheduleUserMessage } from '$macaron/chat';
+import { sendUserMessage, useAutoSend } from '$macaron/chat';
 
 const COMMIT = 'Commit it.';
 const SKIP = "Don't commit — leave the changes in the working tree.";
 
 export default function App() {
-  const [left, setLeft] = useState<number | null>(null);
-  const cancel = useRef<() => void>(() => {});
-  // Host owns the timer: it won't fire on a re-opened transcript and holds
-  // while the turn is still streaming. Returns the canceller.
-  useEffect(() => {
-    cancel.current = scheduleUserMessage(COMMIT, 30, setLeft);
-    return () => cancel.current();
-  }, []);
-  // Cancel BEFORE sending, or the countdown lands a second message on top.
-  const pick = (reply: string) => { cancel.current(); sendUserMessage(reply); };
+  // Counts down and sends COMMIT if the user does nothing; `left` is the seconds
+  // remaining, or null when nothing is counting (e.g. a re-opened transcript —
+  // the host refuses to arm there, so the buttons stay but the timer doesn't).
+  const left = useAutoSend(COMMIT, 30);
 
   return (
     <Card className="max-w-md">
@@ -139,8 +132,8 @@ export default function App() {
       <CardContent>
         <Row className="gap-2 justify-end items-center">
           {left !== null && <Text className="text-xs opacity-60 mr-auto">Committing automatically in {left}s</Text>}
-          <Button variant="ghost" onClick={() => pick(SKIP)}>Don't commit</Button>
-          <Button onClick={() => pick(COMMIT)}>Commit{left !== null ? ` (${left}s)` : ''}</Button>
+          <Button variant="ghost" onClick={() => sendUserMessage(SKIP)}>Don't commit</Button>
+          <Button onClick={() => sendUserMessage(COMMIT)}>Commit{left !== null ? ` (${left}s)` : ''}</Button>
         </Row>
       </CardContent>
     </Card>
@@ -182,5 +175,5 @@ export default function App() {
 - Forgetting to import `sendUserMessage` (`import { sendUserMessage } from '$macaron/chat';`). Bare call also works via `globalThis.sendUserMessage`, but the import is the documented path.
 - Emitting a widget without a `reply` payload string on each option — the next turn can't tell what was chosen.
 - Arming a countdown the user never asked for, or one whose remaining seconds aren't visible on the button. Both turn "convenient" into "it committed behind my back".
-- Calling `sendUserMessage` from a button without cancelling the countdown first — the user gets their answer AND the auto-answer.
-- Rolling your own `setTimeout` inside the widget instead of `scheduleUserMessage` — a widget-local timer re-fires every time the transcript is re-opened.
+- Passing a different string to `useAutoSend` than to the default button's `sendUserMessage` — clicking early then does something other than what the label promised.
+- Rolling your own `setTimeout` inside the widget instead of `useAutoSend` — a widget-local timer re-fires every time the transcript is re-opened.

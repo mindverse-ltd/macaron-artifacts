@@ -1,5 +1,5 @@
 // Countdown auto-send for GenUI confirm widgets ("Commit / Don't commit", with
-// one option as the default). The widget arms it via `scheduleUserMessage` from
+// one option as the default). The widget arms it via the `useAutoSend` hook from
 // '$macaron/chat' and the HOST owns the timer, because the two things that make
 // an auto-fire wrong are invisible from inside the widget: reopening a session
 // re-mounts the very same TSX (a widget-local setTimeout would then auto-commit

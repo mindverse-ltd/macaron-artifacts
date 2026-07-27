@@ -55,9 +55,9 @@ export function meta({}: Route.MetaArgs) {
 }
 
 // pkg.pr.new ships prebuilt tarballs per commit; __COMMIT_SHA__ is injected at build time (falls back to `<sha>`).
-const PKG = `https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@${__COMMIT_SHA__}`;
-const PKG_MCX = `https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@${__COMMIT_SHA__}`;
-const PKG_MKX = `https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@${__COMMIT_SHA__}`;
+const PKG = `https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@${__COMMIT_SHA__}`;
+const PKG_MCX = `https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@${__COMMIT_SHA__}`;
+const PKG_MKX = `https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@${__COMMIT_SHA__}`;
 
 export default function Home() {
   return (

@@ -46,8 +46,14 @@ import { useToast } from '../components/Toast';
 
 const ROW_UNIT_PX = 48;
 
+// Edge / corner the user grabbed. Sign of dx / dy for each axis is derived
+// from the letters — 'w' inverts dx, 'n' inverts dy, absence means that axis
+// doesn't participate for this handle.
+type ResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
 type ResizeState = {
   sid: string;
+  edge: ResizeEdge;
   startX: number;
   startY: number;
   startColSpan: number;
@@ -127,10 +133,14 @@ export function CodexWorkspace() {
   const onResizeMove = useCallback((e: PointerEvent) => {
     const r = resizeRef.current;
     if (!r) return;
-    const dxCols = Math.round((e.clientX - r.startX) / (r.colPx + 12));
-    const dyRows = Math.round((e.clientY - r.startY) / (ROW_UNIT_PX + 12));
-    const nextCol = Math.max(MIN_COL_SPAN, Math.min(MAX_COL_SPAN, r.startColSpan + dxCols));
-    const nextRow = Math.max(MIN_ROW_SPAN, Math.min(MAX_ROW_SPAN, r.startRowSpan + dyRows));
+    // W/N edges flip the sign so dragging outward always grows the tile and
+    // inward shrinks it; E/S handles grow/shrink in the natural direction.
+    const dxSign = r.edge.includes('w') ? -1 : r.edge.includes('e') ? 1 : 0;
+    const dySign = r.edge.includes('n') ? -1 : r.edge.includes('s') ? 1 : 0;
+    const dCols = Math.round(((e.clientX - r.startX) * dxSign) / (r.colPx + 12));
+    const dRows = Math.round(((e.clientY - r.startY) * dySign) / (ROW_UNIT_PX + 12));
+    const nextCol = dxSign === 0 ? r.startColSpan : Math.max(MIN_COL_SPAN, Math.min(MAX_COL_SPAN, r.startColSpan + dCols));
+    const nextRow = dySign === 0 ? r.startRowSpan : Math.max(MIN_ROW_SPAN, Math.min(MAX_ROW_SPAN, r.startRowSpan + dRows));
     canvas.resize(r.sid, { colSpan: nextCol, rowSpan: nextRow });
   }, [canvas]);
 
@@ -139,7 +149,7 @@ export function CodexWorkspace() {
     window.removeEventListener('pointermove', onResizeMove);
   }, [onResizeMove]);
 
-  const startResize = (sid: string, e: React.PointerEvent) => {
+  const startResize = (sid: string, edge: ResizeEdge, e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const tile = canvas.tiles.find((t) => t.sid === sid);
@@ -151,6 +161,7 @@ export function CodexWorkspace() {
     const colPx = (gridRect.width - gapPx * (CANVAS_COLS - 1)) / CANVAS_COLS;
     resizeRef.current = {
       sid,
+      edge,
       startX: e.clientX,
       startY: e.clientY,
       startColSpan: tile.colSpan,
@@ -318,7 +329,7 @@ export function CodexWorkspace() {
                       if (terminal) killTerminal(project, tile.sid);
                       canvas.remove(tile.sid);
                     }}
-                    onResizeStart={(e) => startResize(tile.sid, e)}
+                    onResizeStart={(edge, e) => startResize(tile.sid, edge, e)}
                   />
                 );
               })}
@@ -355,7 +366,7 @@ function SortableTile({
   onDraftPromoted: (newSid: string) => void;
   onFocus: () => void;
   onRemove: () => void;
-  onResizeStart: (e: React.PointerEvent) => void;
+  onResizeStart: (edge: ResizeEdge, e: React.PointerEvent) => void;
 }) {
   const {
     attributes,
@@ -449,12 +460,16 @@ function SortableTile({
           />
         )}
       </div>
-      <div
-        className="cx-tile-resize"
-        onPointerDown={onResizeStart}
-        title="Drag to resize"
-        aria-label="Resize"
-      />
+      {/* Edge + corner resize handles. Each handle stops event propagation so
+          dnd-kit doesn't start a reorder drag when the user grabs an edge. */}
+      <div className="cx-tile-edge n" onPointerDown={(e) => onResizeStart('n', e)} title="Drag to resize" aria-label="Resize top" />
+      <div className="cx-tile-edge s" onPointerDown={(e) => onResizeStart('s', e)} title="Drag to resize" aria-label="Resize bottom" />
+      <div className="cx-tile-edge e" onPointerDown={(e) => onResizeStart('e', e)} title="Drag to resize" aria-label="Resize right" />
+      <div className="cx-tile-edge w" onPointerDown={(e) => onResizeStart('w', e)} title="Drag to resize" aria-label="Resize left" />
+      <div className="cx-tile-corner nw" onPointerDown={(e) => onResizeStart('nw', e)} aria-label="Resize top-left" />
+      <div className="cx-tile-corner ne" onPointerDown={(e) => onResizeStart('ne', e)} aria-label="Resize top-right" />
+      <div className="cx-tile-corner sw" onPointerDown={(e) => onResizeStart('sw', e)} aria-label="Resize bottom-left" />
+      <div className="cx-tile-corner se cx-tile-resize" onPointerDown={(e) => onResizeStart('se', e)} title="Drag to resize" aria-label="Resize bottom-right" />
     </div>
   );
 }

@@ -1564,6 +1564,10 @@ body {
   user-select: none;
   flex-shrink: 0;
   height: 38px;
+  /* Lift the grip above the absolutely-positioned N/NE/NW resize handles so
+     dragging the header still triggers dnd-kit reorder rather than resize. */
+  position: relative;
+  z-index: 6;
 }
 .cx-tile-grip:active { cursor: grabbing; }
 .cx-tile-grip-dots {
@@ -1660,6 +1664,40 @@ body {
 .cx-tile:hover .cx-tile-resize,
 .cx-tile.focused .cx-tile-resize { opacity: 0.7; }
 .cx-tile-resize:hover { opacity: 1; }
+
+/* Edge handles: thin invisible strips along all four sides, sized so they
+   overlap the tile border by a couple of pixels. Corner handles sit on top
+   of the edge strips at z-index 5 so grabbing a corner reliably picks the
+   diagonal resize rather than an adjacent edge. */
+.cx-tile-edge {
+  position: absolute;
+  /* Above the tile body / composer / textarea so pointerdown reaches us
+     rather than being swallowed by whatever is painted underneath. Must
+     beat the sticky composer wrap (z-index 10). */
+  z-index: 15;
+  background: transparent;
+  touch-action: none;
+}
+/* Positive offsets only — the parent tile has overflow:hidden, so any pixels
+   overhanging outside the border are clipped for hit-testing too. Keep the
+   strips fully inside the tile edge. */
+.cx-tile-edge.n { top: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.cx-tile-edge.s { bottom: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.cx-tile-edge.e { top: 12px; bottom: 12px; right: 0; width: 6px; cursor: ew-resize; }
+.cx-tile-edge.w { top: 12px; bottom: 12px; left: 0; width: 6px; cursor: ew-resize; }
+.cx-tile-corner {
+  position: absolute;
+  width: 14px; height: 14px;
+  /* Corners must beat the sticky composer wrap (z-index 10) that lives at
+     the bottom of every chat tile, and the grip at the top (z-index 6). */
+  z-index: 20;
+  background: transparent;
+  touch-action: none;
+}
+.cx-tile-corner.nw { top: 0; left: 0; cursor: nwse-resize; }
+.cx-tile-corner.ne { top: 0; right: 0; cursor: nesw-resize; }
+.cx-tile-corner.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+/* SE corner keeps its visible diagonal-lines chevron via .cx-tile-resize. */
 
 /* ---------- Composer show/hide animation ----------
    Uses grid-template-rows 0fr↔1fr so height interpolates to the child's

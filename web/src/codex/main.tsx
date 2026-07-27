@@ -29,6 +29,12 @@ import { Hooks } from '../views/Hooks';
 import { FileExplorer } from '../views/FileExplorer';
 import './styles.css';
 import '../chat-code.css';
+// Claude-side stylesheet, needed because the borrowed views under `../views/`
+// (Analytics, Examples, Skills, …) style themselves with class names defined
+// only in the Claude bundle (`.examples-*`, `.heatmap-*`, `.ti-*`, `.ws-*`).
+// Codex's own `.cx-*` scope is disjoint from those, so importing after the
+// Codex sheet is safe — no class collisions.
+import '../styles.css';
 
 // Pick up the hosted-mode handoff (docs connect page stashed {server, token}
 // same-tab in sessionStorage). The handoff binds the token to its server origin;

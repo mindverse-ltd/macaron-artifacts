@@ -390,6 +390,13 @@ export type CodexChatProps = {
   onSendingChange?: (sending: boolean) => void;
   /** Bump this number from the parent to force a fresh transcript reload. */
   refreshKey?: number;
+  /**
+   * When this tile is a draft inside a workspace canvas, the parent passes
+   * `onCreated` to receive the freshly-assigned sid instead of us navigating
+   * to /t/:sid. This is what keeps a new thread inside the current workspace
+   * canvas instead of jumping out to full-screen.
+   */
+  onCreated?: (newSid: string) => void;
 };
 
 export function CodexChat(props: CodexChatProps = {}) {
@@ -401,6 +408,7 @@ export function CodexChat(props: CodexChatProps = {}) {
   const hideBar = props.hideBar ?? false;
   const onSendingChange = props.onSendingChange;
   const refreshKey = props.refreshKey ?? 0;
+  const onCreated = props.onCreated;
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [live, setLive] = useState<Item[]>([]);
   const [pending, setPending] = useState('');
@@ -588,7 +596,14 @@ export function CodexChat(props: CodexChatProps = {}) {
       if (isNew) {
         let newSid = '';
         await startCodexThread({ text, images: wire, runtime: runtimeRef.current }, {
-          onMeta: (s) => { newSid = s; liveSidRef.current = s; },
+          onMeta: (s) => {
+            newSid = s;
+            liveSidRef.current = s;
+            // Embedded in a workspace canvas: swap the draft tile in place
+            // right away so the parent's tile remounts with the real sid
+            // (and keeps streaming) — no full-screen navigation.
+            if (onCreated) onCreated(s);
+          },
           onDelta: appendAssistantDelta,
           onReasoning: appendReasoning,
           onToolUse: (ev) => appendTool(ev.id, ev.name, ev.input),
@@ -599,7 +614,7 @@ export function CodexChat(props: CodexChatProps = {}) {
           onError: (m) => setError(m),
           onDone: () => {
             setSending(false);
-            if (newSid) navigate(`/t/${encodeURIComponent(newSid)}`, { replace: true });
+            if (newSid && !onCreated) navigate(`/t/${encodeURIComponent(newSid)}`, { replace: true });
           },
         });
       } else {

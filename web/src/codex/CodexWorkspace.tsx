@@ -29,6 +29,7 @@ import {
   MAX_COL_SPAN,
   MIN_ROW_SPAN,
   MAX_ROW_SPAN,
+  isDraftSid,
   type TileGeom,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
@@ -220,8 +221,8 @@ export function CodexWorkspace() {
           <button
             type="button"
             className="cx-canvas-action"
-            onClick={() => navigate('/')}
-            title="Start a new thread"
+            onClick={() => canvas.addDraft()}
+            title="Start a new thread in this workspace"
           >
             <Plus size={14} aria-hidden="true" />
             <span>Thread</span>
@@ -288,13 +289,16 @@ export function CodexWorkspace() {
               {canvas.tiles.map((tile) => {
                 const file = isFileSid(tile.sid);
                 const terminal = isTerminalSid(tile.sid);
-                const meta = file || terminal ? undefined : sessions.find((x) => x.sessionId === tile.sid);
+                const draft = isDraftSid(tile.sid);
+                const meta = file || terminal || draft ? undefined : sessions.find((x) => x.sessionId === tile.sid);
                 const isFocused = canvas.focusedSid === tile.sid;
-                const label = terminal
-                  ? 'Terminal'
-                  : file
-                    ? filePath(tile.sid).split('/').pop() || 'File'
-                    : meta ? sessionTitle(meta) : tile.sid.slice(0, 8);
+                const label = draft
+                  ? 'New thread'
+                  : terminal
+                    ? 'Terminal'
+                    : file
+                      ? filePath(tile.sid).split('/').pop() || 'File'
+                      : meta ? sessionTitle(meta) : tile.sid.slice(0, 8);
                 return (
                   <SortableTile
                     key={tile.sid}
@@ -304,6 +308,11 @@ export function CodexWorkspace() {
                     project={project}
                     isFile={file}
                     isTerminal={terminal}
+                    isDraft={draft}
+                    onDraftPromoted={(newSid) => {
+                      canvas.promoteDraft(newSid);
+                      load();
+                    }}
                     onFocus={() => canvas.focus(tile.sid)}
                     onRemove={() => {
                       if (terminal) killTerminal(project, tile.sid);
@@ -330,6 +339,8 @@ function SortableTile({
   project,
   isFile,
   isTerminal,
+  isDraft,
+  onDraftPromoted,
   onFocus,
   onRemove,
   onResizeStart,
@@ -340,6 +351,8 @@ function SortableTile({
   project: string;
   isFile: boolean;
   isTerminal: boolean;
+  isDraft: boolean;
+  onDraftPromoted: (newSid: string) => void;
   onFocus: () => void;
   onRemove: () => void;
   onResizeStart: (e: React.PointerEvent) => void;
@@ -379,7 +392,7 @@ function SortableTile({
       <div className="cx-tile-grip" {...attributes} {...listeners} title="Drag to reorder">
         <span className="cx-tile-grip-dots">⋮⋮</span>
         <span className="cx-tile-grip-label">{label}</span>
-        {!isFile && !isTerminal && (
+        {!isFile && !isTerminal && !isDraft && (
           <button
             type="button"
             className="cx-tile-action"
@@ -424,11 +437,15 @@ function SortableTile({
           />
         ) : (
           <CodexChat
-            sid={tile.sid}
+            // Draft tiles carry the sentinel sid; passing '' flips CodexChat
+            // into `isNew` mode so the composer starts a fresh thread. Real
+            // sid takes over once onCreated fires and the parent promotes.
+            sid={isDraft ? '' : tile.sid}
             focused={isFocused}
             hideBar
             refreshKey={refreshKey}
             onSendingChange={setIsRunning}
+            onCreated={isDraft ? onDraftPromoted : undefined}
           />
         )}
       </div>

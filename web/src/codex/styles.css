@@ -1637,9 +1637,14 @@ body {
 }
 .cx-tile-body .cx-main-scroll { padding: 0; }
 .cx-tile-body .cx-thread-body {
+  /* Full-width tiles: drop the 820px content column the full-page chat uses.
+     Otherwise a 1200px tile leaves ~200px of blank margin on each side and
+     the message list floats in the middle. */
+  max-width: none;
   padding: 14px 18px 8px;
   gap: 2px;
 }
+.cx-tile-body .cx-composer { max-width: none; }
 .cx-tile-body .cx-msg { padding: 10px 0; }
 .cx-tile-body .cx-msg-text { font-size: 13.5px; line-height: 1.6; }
 .cx-tile-body .cx-msg-role { font-size: 10.5px; margin-bottom: 3px; }

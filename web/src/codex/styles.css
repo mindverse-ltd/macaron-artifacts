@@ -680,12 +680,8 @@ body {
 /* ---------- GenUI (render_ui) cards ---------- */
 
 .cx-genui {
-  margin: 12px 0 12px 0;
-  border: 1px solid var(--cx-border);
-  border-radius: var(--cx-radius-lg);
-  background: var(--cx-surface);
-  overflow: hidden;
-  box-shadow: var(--cx-shadow-1);
+  margin: 12px 0;
+  width: 100%;
 }
 .cx-genui-head {
   padding: 9px 12px;

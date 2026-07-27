@@ -4,7 +4,7 @@
 // blocks — is tuned to match the claude WebUI's palette (see styles.css).
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Sparkles, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch, AlertTriangle, Download } from 'lucide-react';
+import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch, AlertTriangle, Download } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -255,11 +255,6 @@ function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
 function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   return (
     <div className="cx-genui">
-      <div className="cx-genui-head">
-        <span className="cx-genui-glyph"><Sparkles size={14} aria-hidden="true" /></span>
-        <span className="cx-genui-name">Rendered UI</span>
-        {it.status === 'error' && <span className="cx-genui-status err">diagnostics failed</span>}
-      </div>
       <Suspense fallback={<div className="cx-genui-loading">Loading GenUI runtime…</div>}>
         <GenuiPreview code={it.code} done={!it.streaming} />
       </Suspense>

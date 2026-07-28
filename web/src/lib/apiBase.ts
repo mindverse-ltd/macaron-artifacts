@@ -26,9 +26,30 @@ function normalize(raw: string): string {
 
 export function getApiBase(): string {
   if (cached !== null) return cached;
-  try { cached = sessionStorage.getItem(KEY) || ''; } catch { cached = ''; }
+  try { cached = sessionStorage.getItem(KEY) || ''; } catch { return ''; }
   return cached;
 }
+
+// Whether the target is actually KNOWN. A sessionStorage read that throws is not
+// "same-origin" — it's "we can't tell". getApiBase() returns '' in that case (its
+// callers all want a string), so routing a request on that answer would send a
+// hosted tab's call to the local origin instead of the server it is bound to.
+// authedFetch gates on this and fails closed rather than guessing. We do NOT
+// cache the failure: a later successful read resolves the real base.
+export function isApiBaseKnown(): boolean {
+  if (cached !== null) return true;
+  // No storage API at all (SSR / a non-browser host) is not the same as a storage
+  // that REFUSES to answer. Without the API, no hosted binding could ever have been
+  // written, so same-origin is provably the target rather than a guess. A present
+  // sessionStorage that throws IS a guess, and that is what we refuse to make.
+  if (typeof sessionStorage === 'undefined') return true;
+  try { sessionStorage.getItem(KEY); return true; } catch { return false; }
+}
+
+// Test-only: drop the module cache so the next read hits storage, simulating a
+// fresh page load. clearApiBase() can't stand in for this — clearing the base is
+// a real state ('' = same-origin), not the absence of a known state.
+export function __resetCacheForTests(): void { cached = null; }
 
 export function setApiBase(origin: string): void {
   const clean = normalize(origin);

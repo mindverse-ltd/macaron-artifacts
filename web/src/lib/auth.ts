@@ -4,7 +4,7 @@
 // the browser EventSource), so a single Authorization header covers plain
 // requests and streaming reads alike — no cookie / query-token escape hatch.
 
-import { getApiBase, isLoopbackBase, resolveApiUrl, setApiBase, clearApiBase } from './apiBase';
+import { getApiBase, isApiBaseKnown, isLoopbackBase, resolveApiUrl, setApiBase, clearApiBase } from './apiBase';
 
 // The token is keyed by the server origin it was minted for, so a token bound to
 // server A can never be sent to server B. It lives in sessionStorage — per browser
@@ -34,6 +34,13 @@ export function clearToken(): void {
 // fetch wrapper that injects the token and re-gates the UI on 401 (expired /
 // wrong token). Every call site that hits our own server uses this.
 export async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  // Fail closed on an unknown target. If the base can't be read we do NOT fall
+  // back to same-origin: a hosted tab bound to a remote server would then send
+  // the request — and its Authorization header — to the docs origin instead.
+  // Only /api and /relay are at risk; everything else is same-origin by design.
+  if (!isApiBaseKnown() && (input.startsWith('/api') || input.startsWith('/relay'))) {
+    throw new Error('macaron: cannot determine the API target (storage unreadable) — refusing to send the request');
+  }
   const headers = new Headers(init.headers);
   const t = getToken();
   if (t) headers.set('Authorization', `Bearer ${t}`);

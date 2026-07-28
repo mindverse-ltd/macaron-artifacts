@@ -6,11 +6,17 @@ import assert from 'node:assert/strict';
 // modules are imported after the shims are installed.
 class MemStorage {
   private m = new Map<string, string>();
+  private getCount = 0;
   fail = false;
-  getItem(k: string) { if (this.fail) throw new Error('SecurityError'); return this.m.has(k) ? this.m.get(k)! : null; }
+  failAfterSuccessfulGets: number | null = null;
+  getItem(k: string) {
+    if (this.fail || (this.failAfterSuccessfulGets !== null && this.getCount >= this.failAfterSuccessfulGets)) throw new Error('SecurityError');
+    this.getCount++;
+    return this.m.has(k) ? this.m.get(k)! : null;
+  }
   setItem(k: string, v: string) { if (this.fail) throw new Error('SecurityError'); this.m.set(k, v); }
   removeItem(k: string) { if (this.fail) throw new Error('SecurityError'); this.m.delete(k); }
-  clear() { this.m.clear(); }
+  clear() { this.m.clear(); this.getCount = 0; this.failAfterSuccessfulGets = null; }
 }
 const local = new MemStorage();
 const session = new MemStorage();
@@ -20,6 +26,8 @@ const session = new MemStorage();
 const { setApiBase, clearApiBase, getApiBase, __resetCacheForTests } = await import('../src/lib/apiBase');
 const { loadBackends, saveBackends, getActiveBackend, activateBackend, LOCAL_BACKEND_ID } = await import('../src/lib/backends');
 const { authedFetch, getToken, setToken } = await import('../src/lib/auth');
+
+if (typeof window === 'undefined') (globalThis as unknown as { window: EventTarget }).window = new EventTarget();
 
 beforeEach(() => {
   local.clear(); session.clear();
@@ -126,13 +134,24 @@ test('an unwritable registry loses the edit but does not throw', () => {
   assert.doesNotThrow(() => saveBackends([BOX]));
 });
 
-test('FAIL-CLOSED: an unreadable api base refuses to send an /api request', async () => {
+test('FAIL-CLOSED: an unreadable api base refuses to send /api and /relay requests', async () => {
   session.setItem('macaron_api_base', BOX.baseUrl);
   __resetCacheForTests();       // fresh page load: the base is not yet cached
   session.fail = true;
   // Without the guard this would resolve to a same-origin '/api/...' fetch,
   // sending a request meant for the remote server to the hosting origin.
   await assert.rejects(() => authedFetch('/api/workspaces'), /cannot determine the API target/);
+  await assert.rejects(() => authedFetch('/relay/session'), /cannot determine the API target/);
+});
+
+test('routing reuses the guard read if storage fails immediately afterward', async () => {
+  session.setItem('macaron_api_base', BOX.baseUrl);
+  __resetCacheForTests();
+  session.failAfterSuccessfulGets = 1;
+  let seen = '';
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (u: string) => { seen = u; return new Response('{}'); }) as never;
+  await authedFetch('/api/x');
+  assert.equal(seen, `${BOX.baseUrl}/api/x`, 'a second target read must not fall back to the hosting origin');
 });
 
 test('a readable api base still routes normally after a transient failure', async () => {
@@ -146,4 +165,29 @@ test('a readable api base still routes normally after a transient failure', asyn
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (u: string) => { seen = u; return new Response('{}'); }) as never;
   await authedFetch('/api/x');
   assert.equal(seen, `${BOX.baseUrl}/api/x`);
+});
+
+test('a late 401 only clears the backend and token used by that request', async () => {
+  const OTHER = { id: 'other', label: 'Other', baseUrl: 'https://other.example.com' };
+  saveBackends([...loadBackends(), BOX, OTHER]);
+  activateBackend('box');
+  setToken('TOKEN_BOX');
+
+  let finish!: (response: Response) => void;
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (() => new Promise<Response>((resolve) => { finish = resolve; })) as never;
+  let authRequired = 0;
+  const onAuthRequired = () => { authRequired++; };
+  window.addEventListener('macaron:auth-required', onAuthRequired);
+  const pending = authedFetch('/api/x');
+
+  activateBackend('other');
+  setToken('TOKEN_OTHER');
+  finish(new Response('{}', { status: 401 }));
+  await pending;
+
+  assert.equal(getToken(), 'TOKEN_OTHER', 'the current backend token must survive an old request');
+  assert.equal(authRequired, 0, 'an inactive backend must not re-arm the current backend auth gate');
+  activateBackend('box');
+  assert.equal(getToken(), '', 'the rejected request token must be cleared from its own backend');
+  window.removeEventListener('macaron:auth-required', onAuthRequired);
 });

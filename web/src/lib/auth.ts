@@ -13,14 +13,18 @@ import { getApiBase, isApiBaseKnown, isLoopbackBase, resolveApiUrl, setApiBase, 
 // one. Same-origin (empty base) keeps the historical bare key. See the two-realm
 // and same-server dual-tab regressions.
 const KEY = 'macaron_auth_token';
-function tokenKey(): string { const b = getApiBase(); return b ? `${KEY}::${b}` : KEY; }
+function tokenKey(base = getApiBase()): string { return base ? `${KEY}::${base}` : KEY; }
+
+function readToken(base: string): string {
+  try { return sessionStorage.getItem(tokenKey(base)) || ''; } catch { return ''; }
+}
 
 // sessionStorage key the docs connect page WRITES and we READ once on load.
 // Must stay identical to HANDOFF_KEY in site/app/lib/hosted-target.ts.
 const HANDOFF_KEY = 'macaron_connect_handoff';
 
 export function getToken(): string {
-  try { return sessionStorage.getItem(tokenKey()) || ''; } catch { return ''; }
+  return readToken(getApiBase());
 }
 
 export function setToken(token: string): void {
@@ -41,21 +45,34 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
   if (!isApiBaseKnown() && (input.startsWith('/api') || input.startsWith('/relay'))) {
     throw new Error('macaron: cannot determine the API target (storage unreadable) — refusing to send the request');
   }
+  // Capture one immutable {target, token} pair for the whole request. Besides
+  // keeping routing atomic, this lets a late 401 clear the credential that was
+  // actually rejected instead of whichever backend happens to be active then.
+  const base = getApiBase();
   const headers = new Headers(init.headers);
-  const t = getToken();
+  const t = readToken(base);
   if (t) headers.set('Authorization', `Bearer ${t}`);
-  const url = resolveApiUrl(input);
+  const url = resolveApiUrl(input, base);
   const extra: RequestInit = {};
   // Cross-origin hosted mode: the browser needs credentials mode explicit, and
   // loopback targets want the LNA hint so Chrome skips the mixed-content check.
-  if (getApiBase()) {
+  if (base) {
     extra.mode = 'cors';
-    if (isLoopbackBase()) (extra as { targetAddressSpace?: string }).targetAddressSpace = 'loopback';
+    if (isLoopbackBase(base)) (extra as { targetAddressSpace?: string }).targetAddressSpace = 'loopback';
   }
   const resp = await fetch(url, { ...init, ...extra, headers });
   if (resp.status === 401) {
-    clearToken();
-    window.dispatchEvent(new Event('macaron:auth-required'));
+    const key = tokenKey(base);
+    let requestTokenIsCurrent = true;
+    try {
+      requestTokenIsCurrent = (sessionStorage.getItem(key) || '') === t;
+      if (requestTokenIsCurrent) sessionStorage.removeItem(key);
+    } catch { /* storage unavailable: the 401 is still authoritative */ }
+    // A response from an inactive backend (or from a token already replaced by
+    // a newer login) must not re-arm the current backend's auth gate.
+    if (requestTokenIsCurrent && getApiBase() === base) {
+      window.dispatchEvent(new Event('macaron:auth-required'));
+    }
   }
   return resp;
 }

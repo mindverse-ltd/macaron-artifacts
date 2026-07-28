@@ -42,8 +42,13 @@ export function isApiBaseKnown(): boolean {
   // that REFUSES to answer. Without the API, no hosted binding could ever have been
   // written, so same-origin is provably the target rather than a guess. A present
   // sessionStorage that throws IS a guess, and that is what we refuse to make.
-  if (typeof sessionStorage === 'undefined') return true;
-  try { sessionStorage.getItem(KEY); return true; } catch { return false; }
+  if (typeof sessionStorage === 'undefined') { cached = ''; return true; }
+  // Use getApiBase for the probe so a successful read becomes the exact cached
+  // value used by the ensuing request. Probing and then reading again creates a
+  // TOCTOU window where the probe succeeds, the second read throws, and routing
+  // silently falls back to the hosting origin.
+  getApiBase();
+  return cached !== null;
 }
 
 // Test-only: drop the module cache so the next read hits storage, simulating a
@@ -66,8 +71,7 @@ export function clearApiBase(): void {
 // path; annotating the fetch with targetAddressSpace lets the browser skip the
 // mixed-content pre-check (see server CORS + LNA headers). Best-effort: only
 // loopback literals/names get flagged, everything else is left to normal rules.
-export function isLoopbackBase(): boolean {
-  const b = getApiBase();
+export function isLoopbackBase(b = getApiBase()): boolean {
   if (!b) return false;
   try {
     const h = new URL(b).hostname.replace(/\.$/, '').toLowerCase();
@@ -77,8 +81,7 @@ export function isLoopbackBase(): boolean {
 
 // Retarget an /api or /relay path at the configured server. Absolute URLs and
 // non-API paths pass through untouched.
-export function resolveApiUrl(input: string): string {
-  const base = getApiBase();
+export function resolveApiUrl(input: string, base = getApiBase()): string {
   if (!base) return input;
   if (!input.startsWith('/api') && !input.startsWith('/relay')) return input;
   return base + input;

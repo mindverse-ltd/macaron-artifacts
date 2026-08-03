@@ -1,7 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { api, type PublicSettings, type PublicCustomProvider, type ProviderInput, type TunnelProvider, type TunnelState, type ConfigFileMeta, type DefaultPermissionMode } from '../lib/api';
+import { api, type PublicSettings, type PublicCustomProvider, type ProviderInput, type ProviderProbe, type TunnelProvider, type TunnelState, type ConfigFileMeta, type DefaultPermissionMode } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import { useTheme, setTheme, type Theme } from '../lib/theme';
@@ -353,6 +353,7 @@ export function Settings() {
               </h3>
               <ProviderForm
                 draft={editing.draft}
+                providerId={editing.id}
                 existingConfigured={editing.existingConfigured}
                 isNew={editing.id === null}
                 onChange={(patch) =>
@@ -612,16 +613,47 @@ function RemoteAccess() {
 
 function ProviderForm({
   draft,
+  providerId,
   existingConfigured,
   isNew,
   onChange,
 }: {
   draft: ProviderInput;
+  providerId: string | null;
   existingConfigured: boolean;
   isNew: boolean;
   onChange: (patch: Partial<ProviderInput>) => void;
 }) {
   const [showKey, setShowKey] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [probe, setProbe] = useState<ProviderProbe | null>(null);
+  // Any edit invalidates the previous verdict — a stale green tick next to a
+  // freshly-changed endpoint is worse than no tick at all.
+  const edit = (patch: Partial<ProviderInput>) => {
+    setProbe(null);
+    onChange(patch);
+  };
+  const runTest = async () => {
+    setTesting(true);
+    setProbe(null);
+    try {
+      setProbe(
+        await api.testProvider({
+          id: providerId || undefined,
+          endpoint: draft.endpoint.trim(),
+          model: draft.model.trim(),
+          apiKey: (draft.apiKey || '').trim(),
+        }),
+      );
+    } catch (e) {
+      setProbe({ ok: false, url: '', latencyMs: 0, detail: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  };
+  const canTest =
+    Boolean(draft.endpoint.trim() && draft.model.trim()) &&
+    Boolean((draft.apiKey || '').trim() || existingConfigured);
   return (
     <>
       <div className="settings-field">
@@ -631,7 +663,7 @@ function ProviderForm({
           className="settings-input"
           value={draft.name}
           placeholder="e.g. Macaron, OpenRouter, My server"
-          onChange={(e) => onChange({ name: e.target.value })}
+          onChange={(e) => edit({ name: e.target.value })}
         />
       </div>
       <div className="settings-field">
@@ -640,12 +672,12 @@ function ProviderForm({
           id="p-endpoint"
           className="settings-input"
           value={draft.endpoint}
-          placeholder="https://api.example.com/v1"
+          placeholder="https://api.example.com"
           spellCheck={false}
           autoCapitalize="off"
-          onChange={(e) => onChange({ endpoint: e.target.value })}
+          onChange={(e) => edit({ endpoint: e.target.value })}
         />
-        <p className="settings-hint">Requests are sent to <code>Endpoint/messages</code>.</p>
+        <p className="settings-hint">Base URL only — requests go to <code>Endpoint/v1/messages</code>. A trailing <code>/v1</code> is fine, we strip it.</p>
       </div>
       <div className="settings-field">
         <label htmlFor="p-model">Model</label>
@@ -654,7 +686,7 @@ function ProviderForm({
           className="settings-input"
           value={draft.model}
           placeholder="e.g. provider-model-id"
-          onChange={(e) => onChange({ model: e.target.value })}
+          onChange={(e) => edit({ model: e.target.value })}
         />
       </div>
       <div className="settings-field">
@@ -668,7 +700,7 @@ function ProviderForm({
             placeholder={existingConfigured ? '••••••••  (saved — leave blank to keep)' : 'Paste your API key'}
             autoComplete="off"
             spellCheck={false}
-            onChange={(e) => onChange({ apiKey: e.target.value })}
+            onChange={(e) => edit({ apiKey: e.target.value })}
           />
           <button
             type="button"
@@ -686,6 +718,19 @@ function ProviderForm({
         ) : (
           <p className="settings-hint">No key on file yet.</p>
         )}
+      </div>
+      <div className="settings-field">
+        <div className="settings-input-row">
+          <button type="button" className="ghost small" onClick={runTest} disabled={testing || !canTest}>
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
+          {probe && (
+            <span className={`settings-hint ${probe.ok ? 'ok' : 'bad'}`}>
+              {probe.ok ? `✓ ${probe.detail} (${(probe.latencyMs / 1000).toFixed(1)}s)` : `✕ ${probe.detail}`}
+            </span>
+          )}
+        </div>
+        <p className="settings-hint">Sends one 1-token message to check the endpoint, key and model.</p>
       </div>
     </>
   );

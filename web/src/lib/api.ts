@@ -152,6 +152,14 @@ export type ProviderInput = {
   apiKey?: string;
 };
 
+export type ProviderProbe = {
+  ok: boolean;
+  url: string;
+  status?: number;
+  latencyMs: number;
+  detail?: string;
+};
+
 export type AgentInput = {
   name: string;
   description: string;
@@ -211,6 +219,12 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
+    }),
+  testProvider: (input: Partial<ProviderInput> & { id?: string }) =>
+    req<ProviderProbe>('/api/settings/providers/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
     }),
   deleteProvider: (id: string) =>
     req<PublicSettings>(`/api/settings/providers/${encodeURIComponent(id)}`, {

@@ -148,7 +148,10 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
       const rawHeaders: Record<string, string> = {};
       upstream.headers.forEach((v, k) => {
         const lk = k.toLowerCase();
-        if (lk === 'content-length' || lk === 'transfer-encoding' || lk === 'connection') return;
+        // `fetch` already decoded the body, so passing the upstream
+        // content-encoding through makes the CLI try to brotli/gzip-decode
+        // plaintext SSE — it then stalls forever with a decompression error.
+        if (lk === 'content-length' || lk === 'content-encoding' || lk === 'transfer-encoding' || lk === 'connection') return;
         rawHeaders[k] = v;
       });
       reply.raw.writeHead(upstream.status, rawHeaders);
@@ -178,7 +181,7 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
   // permissions, telemetry). Return a bland 200 so probes don't kill the
   // session. Provider-specific POSTs that need real behavior will still
   // fail visibly if they matter; startup checks won't.
-  const stub = async (req: FastifyRequest, reply: FastifyReply) => {
+  const stub = async (_req: FastifyRequest, reply: FastifyReply) => {
     return reply.send({});
   };
   app.get('/relay/anthropic/:providerId/v1/*', stub);

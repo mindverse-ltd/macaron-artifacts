@@ -147,12 +147,14 @@ app.addHook('onRequest', makeAuthHook());
 // Only interesting requests are reported. Opening the dashboard fires hundreds of
 // fast, successful GETs (one per workspace); recording those buries the signal and
 // costs a row each. What's left is what we'd actually look at: anything that
-// failed, anything slow, and every mutation.
+// failed, anything slow, and every mutation. /relay/* is excluded outright: it's a
+// pass-through to the model provider, so every call is a slow POST and its latency
+// is the upstream's, not ours.
 const SLOW_MS = 2000;
 app.addHook('onRequest', async (req) => { (req as { _t0?: number })._t0 = performance.now(); });
 app.addHook('onResponse', async (req, reply) => {
   const route = req.routeOptions?.url;
-  if (!route || route === '/api/telemetry') return;
+  if (!route || route === '/api/telemetry' || route.startsWith('/relay/')) return;
   const durationMs = Math.round(performance.now() - ((req as { _t0?: number })._t0 ?? 0));
   if (req.method === 'GET' && reply.statusCode < 400 && durationMs < SLOW_MS) return;
   track('request', { route, method: req.method, status: reply.statusCode, durationMs });

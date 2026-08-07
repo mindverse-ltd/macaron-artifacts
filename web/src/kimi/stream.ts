@@ -2,6 +2,7 @@
 // into typed events the chat view can consume with simple callbacks.
 
 import { authedFetch } from '../lib/auth';
+import { track } from '../lib/telemetry';
 
 export type KimiStreamEvent =
   | { type: 'starting'; cwd?: string }
@@ -98,8 +99,10 @@ export async function sendKimiMessage(sid: string, body: Body, h: KimiStreamHand
 // thread after a refresh reconstructs the same live UI as the original POST.
 export function subscribeKimiLive(sid: string, h: KimiStreamHandlers): () => void {
   const ac = new AbortController();
+  const openedAt = performance.now();
   authedFetch(`/api/kimi/threads/${encodeURIComponent(sid)}/live`, { signal: ac.signal })
     .then((resp) => pump(resp, h))
-    .catch(() => { /* aborted or disconnected; a remount replays the snapshot */ });
+    .catch(() => { /* aborted or disconnected; a remount replays the snapshot */ })
+    .finally(() => track('stream_disconnected', { engine: 'kimi', durationMs: Math.round(performance.now() - openedAt) }));
   return () => ac.abort();
 }

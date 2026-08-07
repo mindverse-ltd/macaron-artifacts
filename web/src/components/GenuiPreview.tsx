@@ -1,4 +1,5 @@
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
+import { track } from '../lib/telemetry';
 
 // Thin wrapper around the vendored Macaron StaticGenUIRenderer.
 // The full streaming/partial/import-map logic lives there (580 lines that we'd
@@ -15,7 +16,9 @@ export function GenuiPreview({ code, done }: { code: string; done?: boolean }) {
         preserveStateOnUpdate={!done}
         flushMode="immediate"
         className="genui-renderer macaron-genui-scope"
+        onRendered={(rendered) => track('render_ui_rendered', { codeLen: rendered.length })}
         onError={(err, phase) => {
+          track('render_ui_failed', { phase, message: err.message });
           // eslint-disable-next-line no-console
           console.warn('[GenuiPreview]', phase, err);
         }}

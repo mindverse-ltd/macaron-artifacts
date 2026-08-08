@@ -53,7 +53,7 @@ import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
-import { track, trackRenderedOnce } from '../lib/telemetry';
+import { track, trackFailedOnce, trackRenderedOnce } from '../lib/telemetry';
 import { CreatePrDialog } from '../components/CreatePrDialog';
 import { collapseReadSearchGroups, summarize } from '../lib/collapseReadSearch';
 
@@ -797,7 +797,7 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
   // anymore; StaticGenUIRenderer's own crossfade keeps the last good frame
   // and a later retry (which we let through the filter above) is the fix.
   // It's still the funnel's failure signal, so it reports.
-  const onError = useCallback((err: Error, phase: string) => { track('render_ui_failed', { engine: 'claude', phase, message: err.message }); }, []);
+  const onError = useCallback((err: Error, phase: string) => { if (!streaming) trackFailedOnce(it.toolUseId, 'claude', phase, err.message); }, [streaming, it.toolUseId]);
 
   const displayCode = code || lastGoodCode;
   const onExport = useCallback(async () => {

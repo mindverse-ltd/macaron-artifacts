@@ -23,15 +23,24 @@ export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsE
   umami.track(name, payload);
 }
 
-// The renderer re-fires onRendered for every streamed frame, and a widget also
-// remounts when the live turn is replaced by its persisted twin. The funnel
-// counts widgets, not frames or views, so key the report on the tool_use id —
-// a component-local ref would reset on both.
-const renderedWidgets = new Set<string>();
+// The renderer re-fires onRendered/onError for every streamed frame, and a
+// widget also remounts when the live turn is replaced by its persisted twin.
+// The funnel counts widgets, not frames or views, so key the report on the
+// tool_use id — a component-local ref would reset on both.
+const reportedWidgets = new Set<string>();
 export function trackRenderedOnce(widgetId: string, engine: string): void {
-  if (renderedWidgets.has(widgetId)) return;
-  renderedWidgets.add(widgetId);
+  if (reportedWidgets.has(widgetId)) return;
+  reportedWidgets.add(widgetId);
   track('render_ui_rendered', { engine });
+}
+const failedWidgets = new Set<string>();
+export function trackFailedOnce(widgetId: string, engine: string, phase: string, message: string): void {
+  // Call sites gate this on the widget being done: a streamed partial routinely
+  // fails to compile and then recovers, so reporting per frame would drown the
+  // real failures.
+  if (failedWidgets.has(widgetId)) return;
+  failedWidgets.add(widgetId);
+  track('render_ui_failed', { engine, phase, message });
 }
 
 /** Emit route_view for the current route and for every navigation after it.

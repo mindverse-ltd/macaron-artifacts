@@ -38,6 +38,7 @@ import { registerCodexRoutes } from './routes/codex.js';
 import { registerKimiRoutes } from './routes/kimi.js';
 import { registerGitRoutes } from './routes/git.js';
 import { registerShareRoutes } from './routes/share.js';
+import { registerGenuiExportRoutes } from './routes/genui-export.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { isSearchEnabled, syncAll } from './lib/search-index.js';
 import { registerAgentRoutes } from './routes/agents.js';
@@ -49,6 +50,9 @@ import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerScheduleRoutes } from './routes/schedules.js';
 import { registerTerminalRoutes } from './routes/terminal.js';
 import { registerFileRoutes } from './routes/files.js';
+import { registerTelemetryRoutes } from './routes/telemetry.js';
+import { track } from './lib/telemetry.js';
+import { redactMessage } from '@macaron/shared';
 
 const app = Fastify({
   logger: {
@@ -115,9 +119,11 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('unhandledRejection', (reason: unknown) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
   app.log.error({ err, kind: 'unhandledRejection' }, '[macaron-server] unhandled promise rejection — staying alive');
+  track('error', { where: 'unhandledRejection', message: redactMessage(err.message) });
 });
 process.on('uncaughtException', (err: Error) => {
   app.log.error({ err, kind: 'uncaughtException' }, '[macaron-server] uncaught exception — staying alive');
+  track('error', { where: 'uncaughtException', message: redactMessage(err.message) });
 });
 
 // Gate the API/relay behind a shared token when the server is reachable from
@@ -135,6 +141,26 @@ setArmedToken(authToken);
 app.addHook('onRequest', makeCorsHook(ALLOWED_ORIGINS));
 app.addHook('onRequest', makeAuthHook());
 
+// Request timing. Runs after auth so unauthenticated probes aren't counted.
+// routerPath (the registered pattern, e.g. /api/sessions/claude/:project/:sid)
+// keeps ids and cwds out of the payload.
+//
+// Only interesting requests are reported. Opening the dashboard fires hundreds of
+// fast, successful GETs (one per workspace); recording those buries the signal and
+// costs a row each. What's left is what we'd actually look at: anything that
+// failed, anything slow, and every mutation. /relay/* is excluded outright: it's a
+// pass-through to the model provider, so every call is a slow POST and its latency
+// is the upstream's, not ours.
+const SLOW_MS = 2000;
+app.addHook('onRequest', async (req) => { (req as { _t0?: number })._t0 = performance.now(); });
+app.addHook('onResponse', async (req, reply) => {
+  const route = req.routeOptions?.url;
+  if (!route || route === '/api/telemetry' || route.startsWith('/relay/')) return;
+  const durationMs = Math.round(performance.now() - ((req as { _t0?: number })._t0 ?? 0));
+  if (req.method === 'GET' && reply.statusCode < 400 && durationMs < SLOW_MS) return;
+  track('request', { route, method: req.method, status: reply.statusCode, durationMs });
+});
+
 await app.register(async (instance) => {
   await registerHealthRoutes(instance);
   await registerAuthRoutes(instance);
@@ -144,6 +170,7 @@ await app.register(async (instance) => {
   await registerUsageRoutes(instance);
   await registerHooksRoutes(instance);
   await registerAnalyticsRoutes(instance);
+  await registerTelemetryRoutes(instance);
   await registerSkillRoutes(instance);
   await registerMcpRoutes(instance);
   await registerConfigFileRoutes(instance);
@@ -167,6 +194,7 @@ await app.register(async (instance) => {
   }
   await registerGitRoutes(instance);
   await registerShareRoutes(instance);
+  await registerGenuiExportRoutes(instance);
   await registerSearchRoutes(instance);
   await registerAgentRoutes(instance);
   await registerScheduleRoutes(instance);

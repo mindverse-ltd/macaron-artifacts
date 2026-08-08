@@ -62,17 +62,17 @@ In a Kimi Code session, install from the GitHub URL, then reload to activate:
 Three independent packages, each self-contained (its own prebuilt server + web bundles) — `mcc` (Claude WebUI, port `7878`), `mcx` (Codex WebUI, port `7979`), and `mkx` (Kimi WebUI, port `7980`). Install one, get only that one. Launch any of them in one command, no plugin install needed:
 
 ```bash
-bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
-bunx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
-bunx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+bunx mcx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+bunx mkx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
 ```
 
 `npx` works the same way — bin name = package name for all three:
 
 ```bash
-npx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
-npx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
-npx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+npx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+npx mcx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+npx mkx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
 ```
 
 Replace `<sha>` with a commit on `main` (see the [pkg.pr.new builds](https://github.com/MindLab-Research/macaron-artifacts/commits/main)). All three accept `--host` / `--port`; run with `--help` for the full list.
@@ -82,7 +82,7 @@ Replace `<sha>` with a commit on `main` (see the [pkg.pr.new builds](https://git
 ```bash
 export ANTHROPIC_BASE_URL='https://mint.macaron.im'
 export ANTHROPIC_AUTH_TOKEN='sk-...'
-bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha> --model Macaron-V1-Venti
+bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha> --model Macaron-V1-Venti
 ```
 
 Verify:
@@ -135,6 +135,16 @@ MACARON_HOST=0.0.0.0 MACARON_AUTH_TOKEN=your-long-random-token /macaron
 ```
 
 Remote requests must then present the token; localhost stays frictionless (loopback is never challenged). The web app shows a one-field unlock screen, and you can share a ready-to-use link as `http://<host>:7878/?token=your-long-random-token` (the token is stored and stripped from the URL on first load). If you bind to a non-loopback host **without** setting a token, the server generates one at boot and prints it to the log so it's never left wide open.
+
+### Telemetry
+
+macaron reports anonymous usage to our own [umami](https://umami.is) instance so we can see which engines and features actually get used. Only counters and durations are sent — route patterns, engine name, status codes, code lengths — never prompts, transcripts, file paths, or tokens. The browser's Do Not Track setting is honoured.
+
+To opt out completely, so the tracker script is never injected and the server makes zero outbound requests:
+
+```bash
+MACARON_TELEMETRY=0
+```
 
 ## Layout
 

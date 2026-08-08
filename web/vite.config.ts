@@ -7,7 +7,7 @@ export default defineConfig({
     alias: {
       // Used by the vendored Macaron source (source.tsx, components/ui/*).
       // Points to /web/src/macaron-vendor — swap to the published npm package
-      // (likely `@macaron/ui`) when Mindverse releases one and delete the vendor dir.
+      // (likely `@macaron/ui`) when the package is published and delete the vendor dir.
       '@': path.resolve(__dirname, 'src/macaron-vendor'),
     },
   },
@@ -25,6 +25,10 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         codex: path.resolve(__dirname, 'codex.html'),
         kimi: path.resolve(__dirname, 'kimi.html'),
+        // Clickability smoke harness (scripts/smoke/clickable.mjs). Not linked
+        // from any UI; built so the check can run against the real dist output
+        // instead of a hand-rolled page that could drift from production.
+        clickable: path.resolve(__dirname, 'clickable.html'),
       },
     },
   },

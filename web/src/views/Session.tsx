@@ -3,9 +3,9 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
-import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, Download, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
 import { useReplay } from '../components/ReplayControls';
-import { sessionToMarkdown, type Diagnostic } from '@macaron/shared';
+import { sessionToMarkdown, redactMessage, type Diagnostic } from '@macaron/shared';
 import {
   api,
   basename,
@@ -32,6 +32,7 @@ import {
 import { peekPendingCwd, takePendingCwd, takePendingPrompt } from '../lib/newSession';
 import { hasActiveModal } from '../lib/modal';
 import { extractPartialCode, parseFollowups } from '../lib/partialJson';
+import { cancelAutoSend, createScheduleBridge, type ScheduleBridge } from '../lib/autoSend';
 import { SlashPalette } from '../components/SlashPalette';
 import {
   THINKING_VERBS,
@@ -42,6 +43,7 @@ import {
   easeTowards,
 } from '../lib/thinkingVerbs';
 import { useToast } from '../components/Toast';
+import { authedFetch } from '../lib/auth';
 import { useConfirm } from '../components/Confirm';
 import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
@@ -51,6 +53,7 @@ import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
+import { track } from '../lib/telemetry';
 import { CreatePrDialog } from '../components/CreatePrDialog';
 import { collapseReadSearchGroups, summarize } from '../lib/collapseReadSearch';
 
@@ -774,54 +777,79 @@ function ensureReactImport(src: string): string {
   return `import React from 'react';\n${src}`;
 }
 
-function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
-  const code = it.code ? ensureReactImport(it.code) : '';
+function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genui' }>; superseded?: boolean }) {
+  // Three "don't render" cases collapse to one — the widget only ever shows
+  // when we have code that isn't broken:
+  //   - superseded (a later retry succeeded, so this one is stale by definition)
+  //   - status === 'error' (server rejected the code or tool_result was marked
+  //     isError; no point flashing a red card, esp. mid-stream when a retry
+  //     usually follows)
+  //   - no code yet (was "generating UI…" placeholder — removed per user
+  //     feedback: the empty gap during streaming is less noisy than the pending
+  //     text, and once code lands the renderer takes over)
+  if (superseded || it.status === 'error' || !it.code) return null;
+
+  const code = ensureReactImport(it.code);
   const streaming = it.status === 'pending' && Boolean(code);
 
-  // Remember the most recent code that actually rendered so a subsequent
-  // failure (streamed partial that briefly breaks, or a tool_result marked
-  // error) doesn't wipe the widget — we keep showing the last good frame
-  // and just tack an error banner on top.
+  // Remember the most recent code that actually rendered so a runtime
+  // failure (streamed partial that briefly breaks compile) doesn't wipe
+  // the widget — keep showing the last good frame until fresh code compiles.
   const [lastGoodCode, setLastGoodCode] = useState('');
-  const [runtimeError, setRuntimeError] = useState('');
   const [hasRendered, setHasRendered] = useState(false);
+  const reportedRenderRef = useRef(false);
+  const [exporting, setExporting] = useState(false);
+  const toast = useToast();
 
   const onRendered = useCallback((rendered: string) => {
+    // The renderer re-fires this for every streamed frame; the funnel counts
+    // widgets, not frames, so only the first one pairs with render_ui_called.
+    if (!reportedRenderRef.current) {
+      reportedRenderRef.current = true;
+      track('render_ui_rendered', { engine: 'claude', codeLen: rendered.length });
+    }
     setLastGoodCode(rendered);
-    setRuntimeError('');
     setHasRendered(true);
   }, []);
-  const onError = useCallback((err: Error) => {
-    setRuntimeError(err.message || String(err));
-  }, []);
+  // onError is a no-op now — we don't surface runtime errors as banners
+  // anymore; StaticGenUIRenderer's own crossfade keeps the last good frame
+  // and a later retry (which we let through the filter above) is the fix.
+  // It's still the funnel's failure signal, so it reports.
+  const onError = useCallback((err: Error, phase: string) => { track('render_ui_failed', { engine: 'claude', phase, message: redactMessage(err.message) }); }, []);
 
   const displayCode = code || lastGoodCode;
-  const toolError = it.status === 'error' ? (it.error || 'unknown error') : '';
-  const banner = toolError || runtimeError;
-  const waitingForFirstFrame = !hasRendered && !banner;
-
-  if (!displayCode) {
-    if (toolError) {
-      return (
-        <div className="ti-genui" data-item-id={it.id}>
-          <div className="ti-genui-error">render_ui failed: {toolError}</div>
-        </div>
-      );
+  const onExport = useCallback(async () => {
+    if (exporting || !displayCode) return;
+    setExporting(true);
+    try {
+      const resp = await authedFetch('/api/genui/export-html', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: displayCode }),
+      });
+      if (!resp.ok) throw new Error(`export failed (${resp.status})`);
+      const html = await resp.text();
+      downloadTextFile('macaron-genui.html', html, 'text/html');
+    } catch (e) {
+      toast(`HTML export failed: ${(e as Error).message}`);
+    } finally {
+      setExporting(false);
     }
-    return (
-      <div className="ti-genui" data-item-id={it.id}>
-        <div className="ti-genui-pending">generating UI…</div>
-      </div>
-    );
-  }
+  }, [displayCode, exporting, toast]);
+
+  if (!displayCode) return null;
+
   return (
     <div className="ti-genui" data-item-id={it.id}>
-      {banner && (
-        <div className="ti-genui-error stale" title={banner}>
-          Newer render failed — showing last good frame. {banner}
+      {hasRendered && !streaming && (
+        <div className="ti-genui-head">
+          <span className="ti-genui-prompt" />
+          <button className="ti-genui-codebtn" onClick={onExport} disabled={exporting} title="Export this UI as a standalone HTML file">
+            <Download size={12} aria-hidden="true" />
+            {exporting ? 'Exporting…' : 'Export HTML'}
+          </button>
         </div>
       )}
-      {waitingForFirstFrame && <div className="ti-genui-pending">generating UI…</div>}
       <div
         data-genui-render-state={hasRendered ? 'ready' : 'pending'}
         aria-hidden={!hasRendered}
@@ -957,6 +985,7 @@ export function ItemView({
   streaming,
   project,
   sid,
+  supersededGenui,
 }: {
   it: Item;
   onRewind?: (uuid: string) => void;
@@ -970,6 +999,10 @@ export function ItemView({
   streaming?: boolean;
   project?: string;
   sid?: string;
+  // Set of genui item ids that failed AND have a later successful genui in
+  // the same combined transcript — passed down so those items collapse to a
+  // one-line chip instead of stacking the failed frame under the good one.
+  supersededGenui?: ReadonlySet<string>;
 }) {
   switch (it.kind) {
     case 'user':
@@ -1005,7 +1038,7 @@ export function ItemView({
     case 'system_event':
       return <SystemEventItem eventType={it.eventType} text={it.text} />;
     case 'genui':
-      return <GenuiItem it={it} />;
+      return <GenuiItem it={it} superseded={supersededGenui?.has(it.id) ?? false} />;
     case 'assistant-image':
       return <AssistantImageItem mimeType={it.mimeType} data={it.data} />;
     case 'permission': {
@@ -1320,6 +1353,10 @@ export function Session(props: SessionProps = {}) {
   const [sending, setSending] = useState(false);
   const [polling, setPolling] = useState(false);
   const [handoffPending, setHandoffPending] = useState(false);
+  // True once a turn has been started on THIS mount. Gates the GenUI
+  // countdown auto-send: re-opening a transcript remounts its widgets, and an
+  // armed countdown from a past turn must not fire again on the replay.
+  const turnStartedRef = useRef(false);
   // Notify the parent tile whenever the effective "running" state flips
   // (either an in-flight send OR the initial new-session SSE poll). Debounced
   // by a microtask so React batches state updates naturally.
@@ -2030,6 +2067,24 @@ export function Session(props: SessionProps = {}) {
   const hidden = Math.max(0, total - shown);
   const tail = items.slice(-shown);
 
+  // Which genui items should collapse to a chip because a later retry
+  // succeeded? Walk the combined chronological transcript once and mark any
+  // errored genui that has ANY later genui with status='ready' in the same
+  // conversation. Applies across liveTurn / completedTurns / tail so a retry
+  // in the current turn also collapses the failed frame from an earlier turn.
+  const supersededGenui = useMemo(() => {
+    const superseded = new Set<string>();
+    const combined: readonly Item[] = [...tail, ...completedTurns, ...(liveTurn as readonly Item[])];
+    let sawGoodGenuiLater = false;
+    for (let i = combined.length - 1; i >= 0; i--) {
+      const it = combined[i]!;
+      if (it.kind !== 'genui') continue;
+      if (it.status === 'ready') sawGoodGenuiLater = true;
+      else if (it.status === 'error' && sawGoodGenuiLater) superseded.add(it.id);
+    }
+    return superseded;
+  }, [tail, completedTurns, liveTurn]);
+
   // Opening an already-idle session (last item is an assistant reply, nothing
   // streaming) surfaces follow-ups too — not only the instant a turn ends.
   // Fires once per sid: after our OWN turn `onDone` flips `sending` false while
@@ -2136,6 +2191,10 @@ export function Session(props: SessionProps = {}) {
       const effectivePermissionMode = opts?.permissionMode ?? permissionMode;
       const effectiveIsolate = opts?.isolate ?? isolate;
       if ((!text && sentImages.length === 0) || sending) return;
+      // Any new turn retires a countdown armed by the previous turn's widget,
+      // and marks this mount live so the NEXT widget's countdown may fire.
+      cancelAutoSend();
+      turnStartedRef.current = true;
       if (!opts) {
         mention.close();
         setInput('');
@@ -2567,24 +2626,40 @@ export function Session(props: SessionProps = {}) {
   // send() as a programmatic user turn. Only the focused session registers —
   // canvas multi-tile mounts share one slot, so the widget the user is actually
   // looking at owns the bridge.
+  // send() is re-created on every keystroke (input is a dep) and whenever a
+  // turn settles, so the bridge reads it through a ref: re-registering per
+  // render would run the cleanup below and kill an armed countdown before it
+  // could ever tick.
+  const sendRef = useRef(send);
+  sendRef.current = send;
   useEffect(() => {
     if (!focused) return;
     const g = globalThis as unknown as {
       '$app/chat'?: (prompt: string) => void;
+      '$app/chat/schedule'?: ScheduleBridge;
       sendUserMessage?: (prompt: string) => void;
     };
-    const bridge = (prompt: string) => { void send({ text: prompt }); };
+    const bridge = (prompt: string) => { void sendRef.current({ text: prompt }); };
     g['$app/chat'] = bridge;
+    // Countdown auto-send (a confirm widget with a default option). `isLive`
+    // is what keeps re-opening an old session from re-firing its commit —
+    // only a turn started on this mount counts.
+    g['$app/chat/schedule'] = createScheduleBridge({
+      send: bridge,
+      isBusy: () => runningRef.current,
+      isLive: () => turnStartedRef.current,
+    });
     // Also expose sendUserMessage as a bare global for widgets that forget
     // to `import { sendUserMessage } from '$macaron/chat'` — models drop the
     // import surprisingly often, and the resulting ReferenceError is fatal
     // to the whole onClick with no path to recover at runtime.
     g.sendUserMessage = bridge;
     return () => {
-      if (g['$app/chat'] === bridge) delete g['$app/chat'];
+      if (g['$app/chat'] === bridge) { delete g['$app/chat']; delete g['$app/chat/schedule']; }
       if (g.sendUserMessage === bridge) delete g.sendUserMessage;
+      cancelAutoSend();
     };
-  }, [focused, send]);
+  }, [focused]);
 
   // ---- Slash palette derivation + keyboard reconciliation ----------------
   // Open only while the input is a bare `/word` — leading slash, no space yet
@@ -2769,7 +2844,7 @@ export function Session(props: SessionProps = {}) {
             (thread is column-reverse) puts the newest at the visual bottom
             while preserving relative text/tool interleaving. */}
         {[...liveTurn].reverse().map((t) => (
-          <ItemView key={t.id} it={t} onPermissionDecide={handlePermissionDecide} streaming={sending} />
+          <ItemView key={t.id} it={t} onPermissionDecide={handlePermissionDecide} streaming={sending} supersededGenui={supersededGenui} />
         ))}
         {/* Current-turn user message = one card. Images stack ABOVE the
             text (Claude-web ordering: attachments before prose). */}
@@ -2790,10 +2865,10 @@ export function Session(props: SessionProps = {}) {
           />
         )}
         {[...(collapseReadSearchGroups(completedTurns) as Item[])].reverse().map((it) => (
-          <ItemView key={it.id} it={it} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} project={project} sid={sid} supersededGenui={supersededGenui} />
         ))}
         {[...tail].reverse().map((it) => (
-          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} />
+          <ItemView key={it.id} it={it} onRewind={handleRewind} onFork={handleFork} project={project} sid={sid} supersededGenui={supersededGenui} />
         ))}
         {hidden > 0 && (
           <button className="ghost load-earlier" onClick={() => setShown((s) => s + PAGE_SIZE)}>

@@ -8,11 +8,12 @@
 // Cache is warmed at startup so getActiveProviderEnv() is synchronous —
 // hot-path request handlers can call it without awaiting disk I/O.
 
-import { promises as fs, mkdirSync, existsSync, symlinkSync, lstatSync, rmSync } from 'node:fs';
+import { promises as fs, readFileSync, mkdirSync, existsSync, symlinkSync, lstatSync, rmSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { HOME, HOST, PORT, MACARON_API_BASE, MACARON_API_KEY, MACARON_MODEL } from '../config.js';
+import { normalizeAnthropicBase } from './anthropic-endpoint.js';
 
 // The built-in pass-through provider. Never touches the SDK subprocess env —
 // it inherits process.env unchanged. Whatever ANTHROPIC_BASE_URL /
@@ -83,8 +84,26 @@ export type PublicSettings = {
 };
 
 const CONFIG_PATH = path.join(HOME, '.claude', 'macaron-config.json');
+const CLAUDE_SETTINGS_PATH = path.join(HOME, '.claude', 'settings.json');
 
 let cache: Settings | null = null;
+
+// The SDK normally resolves this from settings.json itself. Custom-provider
+// runs use an isolated CLAUDE_CONFIG_DIR for auth, though, so the SDK cannot
+// see the user's model setting there. Read only this field synchronously on
+// the request path so edits made through the Settings page take effect on the
+// next turn without another server restart. Invalid or missing files mean the
+// same thing as an unset model and fall back to the normal env/SDK behavior.
+function readClaudeSettingsModel(): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(CLAUDE_SETTINGS_PATH, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const model = (parsed as { model?: unknown }).model;
+    return typeof model === 'string' && model.trim() ? model.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // Launch override: a pasted `mcc` env block (ANTHROPIC_BASE_URL) or `--model`
 // (ANTHROPIC_MODEL) at boot is a "run against these params now" intent that
@@ -193,7 +212,7 @@ function sanitizeProvider(p: CustomProvider): CustomProvider {
   return {
     id: String(p.id || randomUUID()),
     name: String(p.name || '').trim() || 'Unnamed provider',
-    endpoint: String(p.endpoint || '').trim(),
+    endpoint: normalizeAnthropicBase(String(p.endpoint || '')),
     model: String(p.model || '').trim(),
     apiKey: String(p.apiKey || ''),
   };
@@ -355,7 +374,7 @@ export async function seedProviderFromEnv(): Promise<
   if (/^(1|true|yes)$/i.test(process.env.MACARON_DISABLE_ENV_PROVIDER_SEED || '')) {
     return { seeded: false, reason: 'disabled' };
   }
-  const endpoint = (process.env.MACARON_PROVIDER_ENDPOINT || process.env.ANTHROPIC_BASE_URL || '').trim();
+  const endpoint = normalizeAnthropicBase(process.env.MACARON_PROVIDER_ENDPOINT || process.env.ANTHROPIC_BASE_URL || '');
   const token = (process.env.MACARON_PROVIDER_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!endpoint || !token) return { seeded: false, reason: 'missing-env' };
   const model = (process.env.MACARON_PROVIDER_MODEL || process.env.ANTHROPIC_MODEL || 'macaron-v1-venti').trim();
@@ -495,8 +514,10 @@ export function getActiveProviderEnv(): {
     // Pass-through: inherit process.env unchanged (ANTHROPIC_BASE_URL /
     // ANTHROPIC_AUTH_TOKEN the user exported in their shell). Honor an
     // ambient ANTHROPIC_MODEL too so `mcc --model X` (which sets it) picks
-    // the launch model, matching `claude --model X`.
-    return { model: process.env.ANTHROPIC_MODEL || undefined, env: null };
+    // the launch model, matching `claude --model X`. When no launch override
+    // exists, make the user-scope settings.json model explicit instead of
+    // letting the SDK silently choose its own (currently Opus) default.
+    return { model: process.env.ANTHROPIC_MODEL || readClaudeSettingsModel(), env: null };
   }
   const p = s.customProviders.find((x) => x.id === s.activeProviderId);
   if (!p) return { model: undefined, env: null };
@@ -519,6 +540,10 @@ export function getActiveProviderEnv(): {
     ANTHROPIC_AUTH_TOKEN: p.apiKey,
     ANTHROPIC_API_KEY: p.apiKey,
   };
-  if (p.model) env.ANTHROPIC_MODEL = p.model;
-  return { model: p.model || undefined, env };
+  // A provider's explicit model remains authoritative for that endpoint. An
+  // older/partially configured provider can still follow settings.json rather
+  // than falling through to the SDK's built-in Opus default.
+  const model = p.model || readClaudeSettingsModel();
+  if (model) env.ANTHROPIC_MODEL = model;
+  return { model: model || undefined, env };
 }

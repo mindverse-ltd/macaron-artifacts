@@ -6,6 +6,7 @@
 // a queue so events fired before the script finishes loading aren't dropped.
 
 import type { AnalyticsEvents, TelemetryConfig } from '@macaron/shared';
+import { redactMessage } from '@macaron/shared';
 import { authedFetch } from './auth';
 
 type Loaded = { track: (name: string, data?: Record<string, unknown>) => void };
@@ -14,9 +15,23 @@ let umami: Loaded | null = null;
 const queue: Array<[string, Record<string, unknown> | undefined]> = [];
 
 export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsEvents[K]): void {
-  const payload = data as Record<string, unknown>;
+  // Redact centrally so a new call site can't leak by forgetting to.
+  const payload = typeof (data as { message?: unknown }).message === 'string'
+    ? { ...data, message: redactMessage((data as { message: string }).message) }
+    : data as Record<string, unknown>;
   if (!umami) { if (queue.length < 100) queue.push([name, payload]); return; }
   umami.track(name, payload);
+}
+
+// The renderer re-fires onRendered for every streamed frame, and a widget also
+// remounts when the live turn is replaced by its persisted twin. The funnel
+// counts widgets, not frames or views, so key the report on the tool_use id —
+// a component-local ref would reset on both.
+const renderedWidgets = new Set<string>();
+export function trackRenderedOnce(widgetId: string, engine: string): void {
+  if (renderedWidgets.has(widgetId)) return;
+  renderedWidgets.add(widgetId);
+  track('render_ui_rendered', { engine });
 }
 
 /** Emit route_view for the current route and for every navigation after it.
@@ -52,6 +67,10 @@ export async function initTelemetry(): Promise<void> {
   // main.tsx preserves that query when it rewrites the URL into a hash route —
   // so without this the token would be shipped to the collector on every event.
   el.dataset.excludeSearch = 'true';
+  // …and the hash too: main.tsx moves that query into the hash on a deep link
+  // (exclude-search only clears URL.search), and the workspace routes embed the
+  // project's absolute filesystem path — username and all — in `#/w/<path>`.
+  el.dataset.excludeHash = 'true';
   el.addEventListener('load', () => {
     umami = (window as unknown as { umami?: Loaded }).umami ?? null;
     if (!umami) return;

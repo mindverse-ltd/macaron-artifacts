@@ -5,20 +5,19 @@
 // @types/umami-browser already types it. All we add is the typed event map and
 // a queue so events fired before the script finishes loading aren't dropped.
 
-import type { AnalyticsEvents, TelemetryConfig } from '@macaron/shared';
+import type { AnalyticsEventName, AnalyticsEvents, Engine, TelemetryConfig } from '@macaron/shared';
 import { redactMessage } from '@macaron/shared';
 import { authedFetch } from './auth';
 
 type Loaded = { track: (name: string, data?: Record<string, unknown>) => void };
 
 let umami: Loaded | null = null;
-const queue: Array<[string, Record<string, unknown> | undefined]> = [];
+const queue: Array<[AnalyticsEventName, Record<string, unknown>]> = [];
 
-export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsEvents[K]): void {
-  // Redact centrally so a new call site can't leak by forgetting to.
-  const payload = typeof (data as { message?: unknown }).message === 'string'
-    ? { ...data, message: redactMessage((data as { message: string }).message) }
-    : data as Record<string, unknown>;
+export function track<K extends AnalyticsEventName>(name: K, data: AnalyticsEvents[K]): void {
+  // Redact centrally so a new call site can't leak by forgetting to. The `in`
+  // narrowing is structural, so an event without a message is untouched.
+  const payload: Record<string, unknown> = 'message' in data ? { ...data, message: redactMessage(data.message) } : { ...data };
   if (!umami) { if (queue.length < 100) queue.push([name, payload]); return; }
   umami.track(name, payload);
 }
@@ -28,13 +27,13 @@ export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsE
 // The funnel counts widgets, not frames or views, so key the report on the
 // tool_use id — a component-local ref would reset on both.
 const reportedWidgets = new Set<string>();
-export function trackRenderedOnce(widgetId: string, engine: string): void {
+export function trackRenderedOnce(widgetId: string, engine: Engine): void {
   if (reportedWidgets.has(widgetId)) return;
   reportedWidgets.add(widgetId);
   track('render_ui_rendered', { engine });
 }
 const failedWidgets = new Set<string>();
-export function trackFailedOnce(widgetId: string, engine: string, phase: string, message: string): void {
+export function trackFailedOnce(widgetId: string, engine: Engine, phase: string, message: string): void {
   // Call sites gate this on the widget being done: a streamed partial routinely
   // fails to compile and then recovers, so reporting per frame would drown the
   // real failures.

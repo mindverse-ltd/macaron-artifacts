@@ -56,10 +56,9 @@ export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsE
   // a local copy of shared's redactMessage: @macaron/shared must stay types-only
   // here (see bin/mcc.mjs) — a value import survives `bun build --packages=external`
   // as a bare specifier the published tarball cannot resolve. Keep the two in sync.
-  const msg = (data as { message?: unknown }).message;
-  const payload = typeof msg === 'string'
-    ? { ...data, message: msg.replace(/\b[a-z]+:\/\/\S+/gi, '<url>').replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, '<email>').replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{8,}/g, '<key>').replace(/(?:[A-Za-z]:)?(?<![\w])[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>').slice(0, 200) }
-    : data as Record<string, unknown>;
+  const payload: Record<string, unknown> = 'message' in data
+    ? { ...data, message: data.message.replace(/\b[a-z]+:\/\/\S+/gi, '<url>').replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, '<email>').replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{8,}/g, '<key>').replace(/(?:[A-Za-z]:)?(?<![\w])[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>').slice(0, 200) }
+    : { ...data };
   queue.push({ name, data: payload });
   if (queue.length >= FLUSH_AT_COUNT) return flush();
   timer ||= setTimeout(flush, FLUSH_AFTER_MS).unref();

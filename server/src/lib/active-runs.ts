@@ -4,6 +4,7 @@
 // throwing on the async iterator — the surrounding SSE handler then closes.
 
 import { track } from './telemetry.js';
+import { ENGINE } from '../config.js';
 
 const runs = new Map<string, AbortController>();
 
@@ -25,7 +26,7 @@ export function abortRun(sid: string): boolean {
   // the old runner is still unwinding and able to write to the same transcript
   // or live entry. The owning route releases the claim at terminal cleanup.
   ac.abort();
-  track('run_interrupted', { engine: process.env.MACARON_ENGINE || 'claude' });
+  track('run_interrupted', { engine: ENGINE });
   return true;
 }
 

@@ -4,9 +4,13 @@
 //
 // Telemetry is on by default; MACARON_TELEMETRY=0 disables it entirely.
 
+/** The three engine bundles. `engine` is a dimension we group by in umami, so
+ * it must be a closed set — a stray value silently forks every chart. */
+export type Engine = 'claude' | 'codex' | 'kimi';
+
 export interface AnalyticsEvents {
   /** SPA booted. One per page load, per engine bundle. */
-  app_mounted: { engine: string };
+  app_mounted: { engine: Engine };
   /** Hash-router navigation, including the initial route. Carries the matched
    * route PATTERN, never the URL: `:project` params are absolute filesystem paths. */
   route_view: { path: string };
@@ -15,22 +19,22 @@ export interface AnalyticsEvents {
    * every mutation. Successful fast GETs are deliberately not reported. */
   request: { route: string; method: string; status: number; durationMs: number };
 
-  run_started: { engine: string; resumed: boolean; hasImages: boolean; promptLen: number };
+  run_started: { engine: Engine; resumed: boolean; hasImages: boolean; promptLen: number };
   /** Fired from abortRun() — the one place all three engines' /stop converge. */
-  run_interrupted: { engine: string };
-  run_finished: { engine: string; durationMs: number; ok: boolean };
+  run_interrupted: { engine: Engine };
+  run_finished: { engine: Engine; durationMs: number; ok: boolean };
   /** Client lost the SSE stream ABNORMALLY. A stream that ends because the turn
    * finished is not reported — that's what run_finished is for. */
-  stream_disconnected: { engine: string; durationMs: number };
+  stream_disconnected: { engine: Engine; durationMs: number };
 
   /** Server-side: the model actually called render_ui. */
-  render_ui_called: { engine: string; codeLen: number; diagnostics: number };
+  render_ui_called: { engine: Engine; codeLen: number; diagnostics: number };
   /** Client-side: the card reached the screen. The gap vs. called is the funnel,
    * so this fires ONCE per widget — the renderer itself fires per streamed frame.
    * No codeLen: the first frame that compiles is a partial, so its length would
    * be systematically smaller than render_ui_called's (which sees the full code). */
-  render_ui_rendered: { engine: string };
-  render_ui_failed: { engine: string; phase: string; message: string };
+  render_ui_rendered: { engine: Engine };
+  render_ui_failed: { engine: Engine; phase: string; message: string };
 
   error: { where: string; message: string };
 }

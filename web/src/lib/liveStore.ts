@@ -745,11 +745,13 @@ export function attachLive(project: string, sid: string): Promise<AttachResult> 
       const current = states.get(sid);
       if (current && !current.done) { current.done = true; notify(sid); }
     } catch {
+      // Only an abnormal end is worth an event — a stream that ends because the
+      // turn finished falls out of the try block and is covered by run_finished.
+      track('stream_disconnected', { engine: 'claude', durationMs: Math.round(performance.now() - attachedAt), reason: 'error' });
       settle('not-live');
       const current = states.get(sid);
       if (current && !current.done) { current.done = true; notify(sid); }
     } finally {
-      track('stream_disconnected', { engine: 'claude', durationMs: Math.round(performance.now() - attachedAt) });
       if (liveAttachments.get(sid) === attachment) liveAttachments.delete(sid);
     }
   })();

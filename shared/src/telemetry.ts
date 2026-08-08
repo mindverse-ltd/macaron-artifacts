@@ -19,19 +19,31 @@ export interface AnalyticsEvents {
   /** Fired from abortRun() — the one place all three engines' /stop converge. */
   run_interrupted: { engine: string };
   run_finished: { engine: string; durationMs: number; ok: boolean };
-  /** Client lost the SSE stream (tab closed, network drop, abort). */
-  stream_disconnected: { engine: string; durationMs: number };
+  /** Client lost the SSE stream ABNORMALLY. A stream that ends because the turn
+   * finished is not reported — that's what run_finished is for. */
+  stream_disconnected: { engine: string; durationMs: number; reason: 'abort' | 'error' };
 
   /** Server-side: the model actually called render_ui. */
   render_ui_called: { engine: string; codeLen: number; diagnostics: number };
-  /** Client-side: the card reached the screen. The gap vs. called is the funnel. */
-  render_ui_rendered: { codeLen: number };
-  render_ui_failed: { phase: string; message: string };
+  /** Client-side: the card reached the screen. The gap vs. called is the funnel,
+   * so this fires ONCE per widget — the renderer itself fires per streamed frame. */
+  render_ui_rendered: { engine: string; codeLen: number };
+  render_ui_failed: { engine: string; phase: string; message: string };
 
   error: { where: string; message: string };
 }
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
+
+/** Error text ships to a hosted collector, so it must not carry the user's
+ * machine. Node errors embed absolute paths (ENOENT), undici embeds the
+ * upstream URL, and renderer errors embed model-generated source lines. */
+export function redactMessage(msg: string): string {
+  return msg
+    .replace(/\b[a-z]+:\/\/\S+/gi, '<url>')
+    .replace(/(?:[A-Za-z]:)?[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>')
+    .slice(0, 200);
+}
 
 /** What GET /api/telemetry answers. Empty host/websiteId when disabled. */
 export type TelemetryConfig = { enabled: boolean; host: string; websiteId: string; scriptPath: string };

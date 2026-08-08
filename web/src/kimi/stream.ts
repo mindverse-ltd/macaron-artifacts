@@ -102,7 +102,10 @@ export function subscribeKimiLive(sid: string, h: KimiStreamHandlers): () => voi
   const openedAt = performance.now();
   authedFetch(`/api/kimi/threads/${encodeURIComponent(sid)}/live`, { signal: ac.signal })
     .then((resp) => pump(resp, h))
-    .catch(() => { /* aborted or disconnected; a remount replays the snapshot */ })
-    .finally(() => track('stream_disconnected', { engine: 'kimi', durationMs: Math.round(performance.now() - openedAt) }));
+    .catch(() => {
+      // Only an abnormal end is worth an event — a stream that ends because the
+      // turn finished is already covered by run_finished.
+      track('stream_disconnected', { engine: 'kimi', durationMs: Math.round(performance.now() - openedAt), reason: ac.signal.aborted ? 'abort' : 'error' });
+    });
   return () => ac.abort();
 }

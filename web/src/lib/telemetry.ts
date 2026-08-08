@@ -47,6 +47,11 @@ export async function initTelemetry(): Promise<void> {
   // and stays silent rather than us having to gate every call site.
   el.dataset.doNotTrack = 'true';
   el.dataset.autoTrack = 'false';   // route_view is emitted by the hash router, not by URL polling
+  // The tracker attaches the page URL's query string to every event. A share or
+  // tunnel link carries `?token=<live credential>` (see server lib/auth.ts), and
+  // main.tsx preserves that query when it rewrites the URL into a hash route —
+  // so without this the token would be shipped to the collector on every event.
+  el.dataset.excludeSearch = 'true';
   el.addEventListener('load', () => {
     umami = (window as unknown as { umami?: Loaded }).umami ?? null;
     if (!umami) return;

@@ -52,6 +52,7 @@ import { registerTerminalRoutes } from './routes/terminal.js';
 import { registerFileRoutes } from './routes/files.js';
 import { registerTelemetryRoutes } from './routes/telemetry.js';
 import { track } from './lib/telemetry.js';
+import { redactMessage } from '@macaron/shared';
 
 const app = Fastify({
   logger: {
@@ -118,11 +119,11 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('unhandledRejection', (reason: unknown) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
   app.log.error({ err, kind: 'unhandledRejection' }, '[macaron-server] unhandled promise rejection — staying alive');
-  track('error', { where: 'unhandledRejection', message: err.message });
+  track('error', { where: 'unhandledRejection', message: redactMessage(err.message) });
 });
 process.on('uncaughtException', (err: Error) => {
   app.log.error({ err, kind: 'uncaughtException' }, '[macaron-server] uncaught exception — staying alive');
-  track('error', { where: 'uncaughtException', message: err.message });
+  track('error', { where: 'uncaughtException', message: redactMessage(err.message) });
 });
 
 // Gate the API/relay behind a shared token when the server is reachable from

@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, Download, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
 import { useReplay } from '../components/ReplayControls';
-import { sessionToMarkdown } from '@macaron/shared';
+import { sessionToMarkdown, redactMessage } from '@macaron/shared';
 import {
   api,
   basename,
@@ -785,11 +785,17 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
   // the widget — keep showing the last good frame until fresh code compiles.
   const [lastGoodCode, setLastGoodCode] = useState('');
   const [hasRendered, setHasRendered] = useState(false);
+  const reportedRenderRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const toast = useToast();
 
   const onRendered = useCallback((rendered: string) => {
-    track('render_ui_rendered', { codeLen: rendered.length });
+    // The renderer re-fires this for every streamed frame; the funnel counts
+    // widgets, not frames, so only the first one pairs with render_ui_called.
+    if (!reportedRenderRef.current) {
+      reportedRenderRef.current = true;
+      track('render_ui_rendered', { engine: 'claude', codeLen: rendered.length });
+    }
     setLastGoodCode(rendered);
     setHasRendered(true);
   }, []);
@@ -797,7 +803,7 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
   // anymore; StaticGenUIRenderer's own crossfade keeps the last good frame
   // and a later retry (which we let through the filter above) is the fix.
   // It's still the funnel's failure signal, so it reports.
-  const onError = useCallback((err: Error, phase: string) => { track('render_ui_failed', { phase, message: err.message }); }, []);
+  const onError = useCallback((err: Error, phase: string) => { track('render_ui_failed', { engine: 'claude', phase, message: redactMessage(err.message) }); }, []);
 
   const displayCode = code || lastGoodCode;
   const onExport = useCallback(async () => {

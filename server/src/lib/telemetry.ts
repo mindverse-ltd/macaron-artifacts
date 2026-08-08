@@ -52,7 +52,15 @@ function flush(): void {
 
 export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsEvents[K]): void {
   if (!active) return;
-  queue.push({ name, data: data as Record<string, unknown> });
+  const payload = data as Record<string, unknown>;
+  // Redact centrally so a new call site can't leak by forgetting to. Deliberately
+  // a local copy of shared's redactMessage: @macaron/shared must stay types-only
+  // here (see bin/mcc.mjs) — a value import survives `bun build --packages=external`
+  // as a bare specifier the published tarball cannot resolve.
+  if (typeof payload.message === 'string') {
+    payload.message = payload.message.replace(/\b[a-z]+:\/\/\S+/gi, '<url>').replace(/(?:[A-Za-z]:)?[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>').slice(0, 200);
+  }
+  queue.push({ name, data: payload });
   if (queue.length >= FLUSH_AT_COUNT) return flush();
   timer ||= setTimeout(flush, FLUSH_AFTER_MS).unref();
 }

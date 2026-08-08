@@ -21,13 +21,15 @@ export interface AnalyticsEvents {
   run_finished: { engine: string; durationMs: number; ok: boolean };
   /** Client lost the SSE stream ABNORMALLY. A stream that ends because the turn
    * finished is not reported — that's what run_finished is for. */
-  stream_disconnected: { engine: string; durationMs: number; reason: 'abort' | 'error' };
+  stream_disconnected: { engine: string; durationMs: number };
 
   /** Server-side: the model actually called render_ui. */
   render_ui_called: { engine: string; codeLen: number; diagnostics: number };
   /** Client-side: the card reached the screen. The gap vs. called is the funnel,
-   * so this fires ONCE per widget — the renderer itself fires per streamed frame. */
-  render_ui_rendered: { engine: string; codeLen: number };
+   * so this fires ONCE per widget — the renderer itself fires per streamed frame.
+   * No codeLen: the first frame that compiles is a partial, so its length would
+   * be systematically smaller than render_ui_called's (which sees the full code). */
+  render_ui_rendered: { engine: string };
   render_ui_failed: { engine: string; phase: string; message: string };
 
   error: { where: string; message: string };
@@ -41,7 +43,11 @@ export type AnalyticsEventName = keyof AnalyticsEvents;
 export function redactMessage(msg: string): string {
   return msg
     .replace(/\b[a-z]+:\/\/\S+/gi, '<url>')
-    .replace(/(?:[A-Za-z]:)?[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>')
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, '<email>')
+    .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{8,}/g, '<key>')
+    // The lookbehind is what keeps prose out: without it `8/8/2026` and
+    // `and/or/maybe` both match and the message becomes unreadable.
+    .replace(/(?:[A-Za-z]:)?(?<![\w])[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>')
     .slice(0, 200);
 }
 

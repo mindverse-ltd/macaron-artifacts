@@ -8,6 +8,7 @@ import {
   toggleCanvasSid,
   focusCanvasSid,
   subscribeCanvas,
+  addDraftSid,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
 import { useConfirm } from '../components/Confirm';
@@ -176,7 +177,22 @@ export function CodexSidebar({ onNavigate }: {
         </div>
       </Link>
 
-      <button className="cx-sb-new" onClick={() => { navigate('/'); onNavigate?.(); }}>
+      <button
+        className="cx-sb-new"
+        onClick={() => {
+          // In a workspace: drop a draft tile onto that workspace's canvas
+          // so the new thread lives alongside pinned ones instead of jumping
+          // out to a full-screen root. Outside any workspace: fall back to
+          // the plain "/" composer.
+          if (activeProject) {
+            addDraftSid(activeProject);
+            navigate(`/w/${encodeURIComponent(activeProject)}`);
+          } else {
+            navigate('/');
+          }
+          onNavigate?.();
+        }}
+      >
         <Plus size={14} aria-hidden="true" />
         <span>New thread</span>
       </button>
@@ -321,24 +337,6 @@ export function CodexSidebar({ onNavigate }: {
       <div className="cx-sb-grow" />
 
       <div className="cx-sb-tools">
-        <Link className={'cx-sb-tool-link' + (location.pathname === '/skills' ? ' active' : '')} to="/skills" onClick={onNavigate}>
-          <span>Skills</span>
-        </Link>
-        <Link className={'cx-sb-tool-link' + (location.pathname === '/agents' ? ' active' : '')} to="/agents" onClick={onNavigate}>
-          <span>Agents</span>
-        </Link>
-        <Link className={'cx-sb-tool-link' + (location.pathname === '/mcp' ? ' active' : '')} to="/mcp" onClick={onNavigate}>
-          <span>MCP</span>
-        </Link>
-        <Link className={'cx-sb-tool-link' + (location.pathname === '/hooks' ? ' active' : '')} to="/hooks" onClick={onNavigate}>
-          <span>Hooks</span>
-        </Link>
-        <Link className={'cx-sb-tool-link' + (location.pathname === '/prompts' ? ' active' : '')} to="/prompts" onClick={onNavigate}>
-          <span>Prompts</span>
-        </Link>
-        <Link className={'cx-sb-tool-link' + (location.pathname === '/schedules' ? ' active' : '')} to="/schedules" onClick={onNavigate}>
-          <span>Schedules</span>
-        </Link>
         <Link className={'cx-sb-tool-link' + (location.pathname === '/usage' ? ' active' : '')} to="/usage" onClick={onNavigate}>
           <span>Usage</span>
         </Link>

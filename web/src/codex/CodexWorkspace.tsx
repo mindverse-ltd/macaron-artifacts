@@ -29,6 +29,7 @@ import {
   MAX_COL_SPAN,
   MIN_ROW_SPAN,
   MAX_ROW_SPAN,
+  isDraftSid,
   type TileGeom,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
@@ -45,8 +46,14 @@ import { useToast } from '../components/Toast';
 
 const ROW_UNIT_PX = 48;
 
+// Edge / corner the user grabbed. Sign of dx / dy for each axis is derived
+// from the letters — 'w' inverts dx, 'n' inverts dy, absence means that axis
+// doesn't participate for this handle.
+type ResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
 type ResizeState = {
   sid: string;
+  edge: ResizeEdge;
   startX: number;
   startY: number;
   startColSpan: number;
@@ -126,10 +133,14 @@ export function CodexWorkspace() {
   const onResizeMove = useCallback((e: PointerEvent) => {
     const r = resizeRef.current;
     if (!r) return;
-    const dxCols = Math.round((e.clientX - r.startX) / (r.colPx + 12));
-    const dyRows = Math.round((e.clientY - r.startY) / (ROW_UNIT_PX + 12));
-    const nextCol = Math.max(MIN_COL_SPAN, Math.min(MAX_COL_SPAN, r.startColSpan + dxCols));
-    const nextRow = Math.max(MIN_ROW_SPAN, Math.min(MAX_ROW_SPAN, r.startRowSpan + dyRows));
+    // W/N edges flip the sign so dragging outward always grows the tile and
+    // inward shrinks it; E/S handles grow/shrink in the natural direction.
+    const dxSign = r.edge.includes('w') ? -1 : r.edge.includes('e') ? 1 : 0;
+    const dySign = r.edge.includes('n') ? -1 : r.edge.includes('s') ? 1 : 0;
+    const dCols = Math.round(((e.clientX - r.startX) * dxSign) / (r.colPx + 12));
+    const dRows = Math.round(((e.clientY - r.startY) * dySign) / (ROW_UNIT_PX + 12));
+    const nextCol = dxSign === 0 ? r.startColSpan : Math.max(MIN_COL_SPAN, Math.min(MAX_COL_SPAN, r.startColSpan + dCols));
+    const nextRow = dySign === 0 ? r.startRowSpan : Math.max(MIN_ROW_SPAN, Math.min(MAX_ROW_SPAN, r.startRowSpan + dRows));
     canvas.resize(r.sid, { colSpan: nextCol, rowSpan: nextRow });
   }, [canvas]);
 
@@ -138,7 +149,7 @@ export function CodexWorkspace() {
     window.removeEventListener('pointermove', onResizeMove);
   }, [onResizeMove]);
 
-  const startResize = (sid: string, e: React.PointerEvent) => {
+  const startResize = (sid: string, edge: ResizeEdge, e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const tile = canvas.tiles.find((t) => t.sid === sid);
@@ -150,6 +161,7 @@ export function CodexWorkspace() {
     const colPx = (gridRect.width - gapPx * (CANVAS_COLS - 1)) / CANVAS_COLS;
     resizeRef.current = {
       sid,
+      edge,
       startX: e.clientX,
       startY: e.clientY,
       startColSpan: tile.colSpan,
@@ -220,8 +232,8 @@ export function CodexWorkspace() {
           <button
             type="button"
             className="cx-canvas-action"
-            onClick={() => navigate('/')}
-            title="Start a new thread"
+            onClick={() => canvas.addDraft()}
+            title="Start a new thread in this workspace"
           >
             <Plus size={14} aria-hidden="true" />
             <span>Thread</span>
@@ -288,13 +300,16 @@ export function CodexWorkspace() {
               {canvas.tiles.map((tile) => {
                 const file = isFileSid(tile.sid);
                 const terminal = isTerminalSid(tile.sid);
-                const meta = file || terminal ? undefined : sessions.find((x) => x.sessionId === tile.sid);
+                const draft = isDraftSid(tile.sid);
+                const meta = file || terminal || draft ? undefined : sessions.find((x) => x.sessionId === tile.sid);
                 const isFocused = canvas.focusedSid === tile.sid;
-                const label = terminal
-                  ? 'Terminal'
-                  : file
-                    ? filePath(tile.sid).split('/').pop() || 'File'
-                    : meta ? sessionTitle(meta) : tile.sid.slice(0, 8);
+                const label = draft
+                  ? 'New thread'
+                  : terminal
+                    ? 'Terminal'
+                    : file
+                      ? filePath(tile.sid).split('/').pop() || 'File'
+                      : meta ? sessionTitle(meta) : tile.sid.slice(0, 8);
                 return (
                   <SortableTile
                     key={tile.sid}
@@ -304,12 +319,17 @@ export function CodexWorkspace() {
                     project={project}
                     isFile={file}
                     isTerminal={terminal}
+                    isDraft={draft}
+                    onDraftPromoted={(newSid) => {
+                      canvas.promoteDraft(newSid);
+                      load();
+                    }}
                     onFocus={() => canvas.focus(tile.sid)}
                     onRemove={() => {
                       if (terminal) killTerminal(project, tile.sid);
                       canvas.remove(tile.sid);
                     }}
-                    onResizeStart={(e) => startResize(tile.sid, e)}
+                    onResizeStart={(edge, e) => startResize(tile.sid, edge, e)}
                   />
                 );
               })}
@@ -330,6 +350,8 @@ function SortableTile({
   project,
   isFile,
   isTerminal,
+  isDraft,
+  onDraftPromoted,
   onFocus,
   onRemove,
   onResizeStart,
@@ -340,9 +362,11 @@ function SortableTile({
   project: string;
   isFile: boolean;
   isTerminal: boolean;
+  isDraft: boolean;
+  onDraftPromoted: (newSid: string) => void;
   onFocus: () => void;
   onRemove: () => void;
-  onResizeStart: (e: React.PointerEvent) => void;
+  onResizeStart: (edge: ResizeEdge, e: React.PointerEvent) => void;
 }) {
   const {
     attributes,
@@ -379,7 +403,7 @@ function SortableTile({
       <div className="cx-tile-grip" {...attributes} {...listeners} title="Drag to reorder">
         <span className="cx-tile-grip-dots">⋮⋮</span>
         <span className="cx-tile-grip-label">{label}</span>
-        {!isFile && !isTerminal && (
+        {!isFile && !isTerminal && !isDraft && (
           <button
             type="button"
             className="cx-tile-action"
@@ -424,20 +448,28 @@ function SortableTile({
           />
         ) : (
           <CodexChat
-            sid={tile.sid}
+            // Draft tiles carry the sentinel sid; passing '' flips CodexChat
+            // into `isNew` mode so the composer starts a fresh thread. Real
+            // sid takes over once onCreated fires and the parent promotes.
+            sid={isDraft ? '' : tile.sid}
             focused={isFocused}
             hideBar
             refreshKey={refreshKey}
             onSendingChange={setIsRunning}
+            onCreated={isDraft ? onDraftPromoted : undefined}
           />
         )}
       </div>
-      <div
-        className="cx-tile-resize"
-        onPointerDown={onResizeStart}
-        title="Drag to resize"
-        aria-label="Resize"
-      />
+      {/* Edge + corner resize handles. Each handle stops event propagation so
+          dnd-kit doesn't start a reorder drag when the user grabs an edge. */}
+      <div className="cx-tile-edge n" onPointerDown={(e) => onResizeStart('n', e)} title="Drag to resize" aria-label="Resize top" />
+      <div className="cx-tile-edge s" onPointerDown={(e) => onResizeStart('s', e)} title="Drag to resize" aria-label="Resize bottom" />
+      <div className="cx-tile-edge e" onPointerDown={(e) => onResizeStart('e', e)} title="Drag to resize" aria-label="Resize right" />
+      <div className="cx-tile-edge w" onPointerDown={(e) => onResizeStart('w', e)} title="Drag to resize" aria-label="Resize left" />
+      <div className="cx-tile-corner nw" onPointerDown={(e) => onResizeStart('nw', e)} aria-label="Resize top-left" />
+      <div className="cx-tile-corner ne" onPointerDown={(e) => onResizeStart('ne', e)} aria-label="Resize top-right" />
+      <div className="cx-tile-corner sw" onPointerDown={(e) => onResizeStart('sw', e)} aria-label="Resize bottom-left" />
+      <div className="cx-tile-corner se cx-tile-resize" onPointerDown={(e) => onResizeStart('se', e)} title="Drag to resize" aria-label="Resize bottom-right" />
     </div>
   );
 }

@@ -45,6 +45,7 @@ import {
   noteCodexTurnComplete,
   type CodexLoopConfig,
 } from '../lib/codex-loop.js';
+import { track } from '../lib/telemetry.js';
 import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
 import { setLabel } from '../lib/label-store.js';
 
@@ -160,6 +161,9 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     live: { cwd: string; text: string; hasImages: boolean },
   ) => {
     let clientGone = false;
+    const startedAt = performance.now();
+    track('run_started', { engine: 'codex', resumed: sid !== null, hasImages: live.hasImages, promptLen: live.text.length });
+    const finished = (ok: boolean) => track('run_finished', { engine: 'codex', durationMs: Math.round(performance.now() - startedAt), ok });
     reply.raw.on('close', () => { clientGone = true; });
     const safeSend = (payload: Parameters<typeof sseSend>[1]) => {
       if (clientGone) return;
@@ -208,6 +212,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         else if (ev.kind === 'message') relay({ type: 'event', event: 'system', subtype: ev.subtype });
         else if (ev.kind === 'error') relay({ type: 'error', error: ev.error });
         else if (ev.kind === 'done') {
+          finished(ev.exitCode === 0);
           safeSend({ type: 'done', exitCode: ev.exitCode });
           if (capturedSid) {
             liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
@@ -229,6 +234,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
       }
     })().catch((e: unknown) => {
       const msg = (e as Error).message;
+      finished(false);
       if (capturedSid) liveEnd(capturedSid, { type: 'done', exitCode: -1, error: msg });
       safeSend({ type: 'error', error: msg });
       if (!clientGone) sseDone(reply);

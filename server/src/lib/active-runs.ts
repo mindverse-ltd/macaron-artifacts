@@ -3,6 +3,8 @@
 // `.abort()`, which the SDK subprocess honours by killing the child and
 // throwing on the async iterator — the surrounding SSE handler then closes.
 
+import { track } from './telemetry.js';
+
 const runs = new Map<string, AbortController>();
 
 export function registerRun(sid: string, ac: AbortController): void {
@@ -19,6 +21,7 @@ export function abortRun(sid: string): boolean {
   const ac = runs.get(sid);
   if (!ac || ac.signal.aborted) return false;
   ac.abort();
+  track('run_interrupted', { engine: process.env.MACARON_ENGINE || 'claude' });
   return true;
 }
 

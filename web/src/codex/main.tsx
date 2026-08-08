@@ -13,6 +13,7 @@ import { AuthGate } from '../components/AuthGate';
 import { ToastProvider } from '../components/Toast';
 import { ConfirmProvider } from '../components/Confirm';
 import { consumeHandoff } from '../lib/auth';
+import { initTelemetry, track, trackRoutes } from '../lib/telemetry';
 import { registerServiceWorker } from '../lib/pwa';
 // Engine-agnostic pages (user-scope APIs) reused from the Claude bundle so
 // Codex users get the same management surface without a parallel rewrite.
@@ -29,11 +30,21 @@ import { Hooks } from '../views/Hooks';
 import { FileExplorer } from '../views/FileExplorer';
 import './styles.css';
 import '../chat-code.css';
+// Claude-side stylesheet, needed because the borrowed views under `../views/`
+// (Analytics, Examples, Skills, …) style themselves with class names defined
+// only in the Claude bundle (`.examples-*`, `.heatmap-*`, `.ti-*`, `.ws-*`).
+// Codex's own `.cx-*` scope is disjoint from those, so importing after the
+// Codex sheet is safe — no class collisions.
+import '../styles.css';
 
 // Pick up the hosted-mode handoff (docs connect page stashed {server, token}
 // same-tab in sessionStorage). The handoff binds the token to its server origin;
 // nothing secret rides the URL.
 consumeHandoff();
+
+// Telemetry is opt-in (server-side MACARON_TELEMETRY=1); this is a no-op otherwise.
+void initTelemetry();
+track('app_mounted', { engine: 'codex' });
 
 const router = createHashRouter([
   {
@@ -62,6 +73,8 @@ const router = createHashRouter([
     ],
   },
 ]);
+
+trackRoutes(router);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

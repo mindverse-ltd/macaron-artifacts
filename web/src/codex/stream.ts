@@ -2,6 +2,7 @@
 // into typed events the chat view can consume with simple callbacks.
 
 import { authedFetch } from '../lib/auth';
+import { track } from '../lib/telemetry';
 import type { CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import type { CodexLoopSnapshot, CodexRuntimeOverride } from './api';
 
@@ -112,9 +113,13 @@ export async function sendCodexMessage(sid: string, body: Body, h: CodexStreamHa
 // thread after a refresh reconstructs the same live UI as the original POST.
 export function subscribeCodexLive(sid: string, h: CodexStreamHandlers): () => void {
   const ac = new AbortController();
+  const openedAt = performance.now();
   authedFetch(`/api/codex/threads/${encodeURIComponent(sid)}/live`, { signal: ac.signal })
     .then((resp) => pump(resp, h))
-    .catch(() => { /* aborted or disconnected; a remount replays the snapshot */ });
+    .catch(() => {
+      // aborted or disconnected; a remount replays the snapshot
+      track('stream_disconnected', { engine: 'codex', durationMs: Math.round(performance.now() - openedAt), reason: ac.signal.aborted ? 'abort' : 'error' });
+    });
   return () => ac.abort();
 }
 

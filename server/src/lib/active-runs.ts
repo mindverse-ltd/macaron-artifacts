@@ -41,7 +41,15 @@ export function abortRun(sid: string): boolean {
   return true;
 }
 
-export function endRun(sid: string, owner?: AbortController): boolean {
-  if (owner && runs.get(sid)?.ac !== owner) return false;
+// Only the owner may release a claim. Aborting deliberately keeps the claim
+// until this cleanup runs, preventing stop/reclaim/stale-cleanup ABA races.
+export function endRun(sid: string, ac: AbortController): boolean {
+  if (runs.get(sid)?.ac !== ac) return false;
   return runs.delete(sid);
+}
+
+// Idle-gate for the autonomous loop: true while a turn (user or loop) is in
+// flight for this sid, so the loop driver only fires when the session is free.
+export function isRunActive(sid: string): boolean {
+  return runs.has(sid);
 }

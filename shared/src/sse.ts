@@ -16,7 +16,10 @@ export type CodexApprovalKind = 'command' | 'file' | 'network';
 export type CodexDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel';
 
 export type SessionStreamEvent =
-  | { type: 'meta'; cwd: string; sessionId: string; startedAt?: number }
+  // `runId` is the analytics correlation id for the run this stream belongs to
+  // (see telemetry.ts). It is NOT an identifier the client may act on — it
+  // exists so client-emitted events join server-emitted ones for the same turn.
+  | { type: 'meta'; cwd: string; sessionId: string; startedAt?: number; runId?: string }
   | { type: 'starting'; cwd: string }
   | { type: 'user-text'; text: string; images?: Array<{ mimeType: string; dataUrl: string }> }
   | { type: 'delta'; text: string }

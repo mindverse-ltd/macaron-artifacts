@@ -23,21 +23,21 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { getActiveCodexProvider, getCodexConfig, type CodexRuntimeOverride } from './codex-config.js';
-import { CODEX_BINARY, MACARON_MCP_CMD, MACARON_MCP_ARGS, type CodexRunOptions } from './codex-runner.js';
+import { CODEX_BINARY, MACARON_MCP_CMD, macaronMcpArgs, type CodexRunOptions } from './codex-runner.js';
 import { registerApprovalHandler, clearApprovalHandler } from './active-approvals.js';
 import type { RunnerEvent } from './claude-runner.js';
 import type { CodexDecision } from '@macaron/shared';
 
 // Flat config map (dotted keys → JSON values) plus the top-level thread knobs.
 // Same values codex-runner feeds the SDK, reshaped for thread/start params.
-function buildAppServerConfig(override?: CodexRuntimeOverride): { config: Record<string, unknown>; model?: string; sandbox: string; approvalPolicy: string; modelProvider?: string } {
+function buildAppServerConfig(override?: CodexRuntimeOverride, runId?: string): { config: Record<string, unknown>; model?: string; sandbox: string; approvalPolicy: string; modelProvider?: string } {
   const s = getCodexConfig();
   const p = getActiveCodexProvider();
   const sandbox = override?.sandboxMode ?? s.runtime.sandboxMode;
   const approvalPolicy = override?.approvalPolicy ?? s.runtime.approvalPolicy;
   const config: Record<string, unknown> = {
     'mcp_servers.macaron.command': MACARON_MCP_CMD,
-    'mcp_servers.macaron.args': MACARON_MCP_ARGS,
+    'mcp_servers.macaron.args': macaronMcpArgs(runId),
     'mcp_servers.macaron.default_tools_approval_mode': 'approve',
     network_access: 'enabled',
   };
@@ -127,7 +127,7 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
     return new Promise((res) => waiters.push(res));
   };
 
-  const { config, model, sandbox, approvalPolicy, modelProvider } = buildAppServerConfig(opts.runtime);
+  const { config, model, sandbox, approvalPolicy, modelProvider } = buildAppServerConfig(opts.runtime, opts.runId);
   const bin = CODEX_BINARY;
 
   void (async () => {

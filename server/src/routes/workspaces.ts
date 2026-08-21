@@ -11,7 +11,9 @@ import {
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, runFollowup, type AttachedImage } from '../lib/claude-runner.js';
+import { randomUUID } from 'node:crypto';
 import { registerRun, endRun } from '../lib/active-runs.js';
+import { withRunId } from '../lib/run-context.js';
 import { getActiveProviderEnv, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
 import { lookupProjectCwd, unregisterProjectCwd } from '../lib/project-registry.js';
 import path from 'node:path';
@@ -262,8 +264,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
       // NOT abort — only an explicit /stop does.
       const abortController = new AbortController();
       const startedAt = Date.now();
+      const runId = randomUUID();
       const stream = runClaude({ prompt: text, cwd, model, permissionMode, images, envOverrides: providerEnv, abortController });
-      track('run_started', { engine: 'claude', resumed: false, hasImages: images.length > 0, promptLen: text.length });
+      track('run_started', { engine: 'claude', runId, resumed: false, hasImages: images.length > 0, promptLen: text.length });
 
       let clientGone = false;
       reply.raw.on('close', () => {
@@ -281,15 +284,17 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
       let capturedSid = '';
       // Run the iterator in the background so this handler returns immediately
       // (Fastify supports hijacked replies as long as we don't await forever).
-      (async () => {
+      // See lib/run-context.ts — the in-process render_ui handler reads the run
+      // id off AsyncLocalStorage, so the SDK iteration must run inside it.
+      withRunId(runId, async () => {
         for await (const ev of stream) {
           if (ev.kind === 'session' && !capturedSid) {
             capturedSid = ev.sessionId;
-            liveStart(capturedSid, { cwd, startedAt });
-            registerRun(capturedSid, abortController);
+            liveStart(capturedSid, { cwd, startedAt, runId });
+            registerRun(capturedSid, abortController, runId);
             if (pendingWt) bindWorktree(capturedSid, pendingWt).catch(() => {});
             livePush(capturedSid, { type: 'user-text', text, images });
-            safeSend({ type: 'meta', cwd, sessionId: capturedSid, startedAt });
+            safeSend({ type: 'meta', cwd, sessionId: capturedSid, startedAt, runId });
           } else if (ev.kind === 'delta') {
             safeSend({ type: 'delta', text: ev.text });
             if (capturedSid) livePush(capturedSid, { type: 'delta', text: ev.text });
@@ -331,7 +336,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             safeSend({ type: 'error', error: ev.error });
             if (capturedSid) livePush(capturedSid, { type: 'error', error: ev.error });
           } else if (ev.kind === 'done') {
-            track('run_finished', { engine: 'claude', durationMs: Date.now() - startedAt, ok: ev.exitCode === 0 });
+            track('run_finished', { engine: 'claude', runId, durationMs: Date.now() - startedAt, ok: ev.exitCode === 0 });
             safeSend({ type: 'done', exitCode: ev.exitCode });
             if (capturedSid) {
               liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
@@ -359,9 +364,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
         // provider/auth/model). Tear down the pre-created worktree so it doesn't
         // leak untracked — bindWorktree only runs when capturedSid is set.
         if (pendingWt && !capturedSid) await cleanupPendingWorktree(pendingWt);
-      })().catch((e: unknown) => {
+      }).catch((e: unknown) => {
         const msg = (e as Error).message;
-        track('run_finished', { engine: 'claude', durationMs: Date.now() - startedAt, ok: false });
+        track('run_finished', { engine: 'claude', runId, durationMs: Date.now() - startedAt, ok: false });
         safeSend({ type: 'error', error: msg });
         if (pendingWt && !capturedSid) cleanupPendingWorktree(pendingWt).catch(() => {});
         if (capturedSid) {

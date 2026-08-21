@@ -40,3 +40,12 @@ const { command: MACARON_MCP_CMD, args: MACARON_MCP_ARGS } = (() => {
 })();
 
 export { MACARON_MCP_CMD, MACARON_MCP_ARGS };
+
+/** Args for one turn's bridge. The run's analytics id travels as an argv flag
+ * rather than an env var because all three injection points (codex SDK config,
+ * codex app-server config, kimi ACP) already build args per turn, while none of
+ * them exposes the spawned child's environment. The stdio entry reads it back
+ * into MACARON_RUN_ID so lib/run-context.ts stays transport-agnostic. */
+export function macaronMcpArgs(runId?: string): string[] {
+  return runId ? [...MACARON_MCP_ARGS, '--run-id', runId] : MACARON_MCP_ARGS;
+}

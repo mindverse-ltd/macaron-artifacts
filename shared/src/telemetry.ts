@@ -8,6 +8,14 @@
  * it must be a closed set — a stray value silently forks every chart. */
 export type Engine = 'claude' | 'codex' | 'kimi';
 
+/** Ties every event emitted during one turn together — minted server-side per
+ * run, handed to the client on the `meta` SSE frame, and set on the stdio MCP
+ * child via MACARON_RUN_ID. Optional because the events that carry it can also
+ * fire outside a live run: a widget replayed from a transcript has no run, and
+ * a run that died before minting one reports without it. Absent means "not
+ * attributable", never "same run as the last event". */
+export type RunId = string;
+
 export interface AnalyticsEvents {
   /** SPA booted. One per page load, per engine bundle. */
   app_mounted: { engine: Engine };
@@ -19,22 +27,22 @@ export interface AnalyticsEvents {
    * every mutation. Successful fast GETs are deliberately not reported. */
   request: { route: string; method: string; status: number; durationMs: number };
 
-  run_started: { engine: Engine; resumed: boolean; hasImages: boolean; promptLen: number };
+  run_started: { engine: Engine; runId: RunId; resumed: boolean; hasImages: boolean; promptLen: number };
   /** Fired from abortRun() — the one place all three engines' /stop converge. */
-  run_interrupted: { engine: Engine };
-  run_finished: { engine: Engine; durationMs: number; ok: boolean };
+  run_interrupted: { engine: Engine; runId?: RunId };
+  run_finished: { engine: Engine; runId: RunId; durationMs: number; ok: boolean };
   /** Client lost the SSE stream ABNORMALLY. A stream that ends because the turn
    * finished is not reported — that's what run_finished is for. */
-  stream_disconnected: { engine: Engine; durationMs: number };
+  stream_disconnected: { engine: Engine; runId?: RunId; durationMs: number };
 
   /** Server-side: the model actually called render_ui. */
-  render_ui_called: { engine: Engine; codeLen: number; diagnostics: number };
+  render_ui_called: { engine: Engine; runId?: RunId; codeLen: number; diagnostics: number };
   /** Client-side: the card reached the screen. The gap vs. called is the funnel,
    * so this fires ONCE per widget — the renderer itself fires per streamed frame.
    * No codeLen: the first frame that compiles is a partial, so its length would
    * be systematically smaller than render_ui_called's (which sees the full code). */
-  render_ui_rendered: { engine: Engine };
-  render_ui_failed: { engine: Engine; phase: string; message: string };
+  render_ui_rendered: { engine: Engine; runId?: RunId };
+  render_ui_failed: { engine: Engine; runId?: RunId; phase: string; message: string };
 
   error: { where: string; message: string };
 }

@@ -21,6 +21,11 @@ import {
   RENDER_UI_TOOL_DESCRIPTION,
 } from './lib/macaron-render-tool.js';
 
+// `--run-id <uuid>` (see lib/macaron-mcp-path.ts) is folded into the env the
+// rest of the code already reads, so run-context.ts needs no transport branch.
+const runIdFlag = process.argv.indexOf('--run-id');
+if (runIdFlag !== -1 && process.argv[runIdFlag + 1]) process.env.MACARON_RUN_ID = process.argv[runIdFlag + 1];
+
 const server = new Server(
   { name: 'macaron', version: '0.2.0' },
   {

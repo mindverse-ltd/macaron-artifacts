@@ -30,6 +30,7 @@ import {
 } from '../lib/kimi-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
+import { randomUUID } from 'node:crypto';
 import { registerRun, claimRun, abortRun, endRun } from '../lib/active-runs.js';
 import { track } from '../lib/telemetry.js';
 import type { AttachedImage } from '../lib/claude-runner.js';
@@ -105,10 +106,11 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
     sid: string | null,
     owner: AbortController,
     live: { cwd: string; text: string; hasImages: boolean },
+    runId: string,
   ) => {
     let clientGone = false;
     const startedAt = performance.now();
-    track('run_started', { engine: 'kimi', resumed: sid !== null, hasImages: live.hasImages, promptLen: live.text.length });
+    track('run_started', { engine: 'kimi', runId, resumed: sid !== null, hasImages: live.hasImages, promptLen: live.text.length });
     reply.raw.on('close', () => { clientGone = true; });
     const safeSend = (payload: Parameters<typeof sseSend>[1]) => {
       if (clientGone) return;
@@ -122,7 +124,7 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
     const ensureLive = () => {
       if (liveStarted || !capturedSid) return;
       liveStarted = true;
-      liveStart(capturedSid, { cwd: live.cwd });
+      liveStart(capturedSid, { cwd: live.cwd, runId });
       // Seed the user bubble for the reattach snapshot whenever the turn had
       // any input — an image-only turn still needs its bubble.
       if (live.text || live.hasImages) livePush(capturedSid, { type: 'user-text', text: live.text });
@@ -136,7 +138,7 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
     const finishRun = (exitCode: number, error?: string) => {
       if (terminalSent) return;
       terminalSent = true;
-      track('run_finished', { engine: 'kimi', durationMs: Math.round(performance.now() - startedAt), ok: exitCode === 0 });
+      track('run_finished', { engine: 'kimi', runId, durationMs: Math.round(performance.now() - startedAt), ok: exitCode === 0 });
       if (error) safeSend({ type: 'error', error });
       const done = { type: 'done' as const, exitCode, ...(error ? { error } : {}) };
       safeSend(done);
@@ -151,7 +153,7 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
           if (ev.kind === 'session' && !capturedSid) {
             capturedSid = ev.sessionId;
             ensureLive();
-            safeSend({ type: 'meta', cwd: live.cwd, sessionId: capturedSid });
+            safeSend({ type: 'meta', cwd: live.cwd, sessionId: capturedSid, runId });
           } else if (ev.kind === 'delta') relay({ type: 'delta', text: ev.text });
           else if (ev.kind === 'tool_use') relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
           else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
@@ -192,16 +194,17 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
     startSSE(reply);
     sseSend(reply, { type: 'starting', cwd });
     const abortController = new AbortController();
-    const stream = runKimiForRoute({ prompt: text, cwd, images, abortController });
+    const runId = randomUUID();
+    const stream = runKimiForRoute({ prompt: text, cwd, images, abortController, runId });
     // pipeKimiToSSE owns the iteration, so wrap the runner to install the abort
     // under the sid once the first `session` event reveals it.
     const wrapped = (async function* () {
       for await (const ev of stream) {
-        if (ev.kind === 'session') registerRun(ev.sessionId, abortController);
+        if (ev.kind === 'session') registerRun(ev.sessionId, abortController, runId);
         yield ev;
       }
     })();
-    pipeKimiToSSE(reply, wrapped as ReturnType<typeof runKimi>, null, abortController, { cwd, text, hasImages: images.length > 0 });
+    pipeKimiToSSE(reply, wrapped as ReturnType<typeof runKimi>, null, abortController, { cwd, text, hasImages: images.length > 0 }, runId);
   });
 
   app.post<{ Params: SidParams; Body: MessageBody }>(
@@ -221,12 +224,13 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
         return reply.status(404).send({ error: (e as Error).message });
       }
       const abortController = new AbortController();
-      if (!claimRun(sid, abortController)) {
+      const runId = randomUUID();
+      if (!claimRun(sid, abortController, runId)) {
         return reply.status(409).send({ error: 'a turn is already in flight for this thread' });
       }
       startSSE(reply);
-      sseSend(reply, { type: 'meta', sessionId: sid, cwd });
-      pipeKimiToSSE(reply, runKimiForRoute({ prompt: text, cwd, resume: sid, images, abortController }), sid, abortController, { cwd, text, hasImages: images.length > 0 });
+      sseSend(reply, { type: 'meta', sessionId: sid, cwd, runId });
+      pipeKimiToSSE(reply, runKimiForRoute({ prompt: text, cwd, resume: sid, images, abortController, runId }), sid, abortController, { cwd, text, hasImages: images.length > 0 }, runId);
     },
   );
 

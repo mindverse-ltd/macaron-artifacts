@@ -10,6 +10,7 @@
 import type { Message } from '@macaron/shared';
 import { extractPartialCode } from './partialJson';
 import { authedFetch } from './auth';
+import type { Diagnostic } from '@macaron/shared';
 import { track } from './telemetry';
 
 // A single item on the timeline. Text chunks and tool calls are stored in
@@ -18,7 +19,7 @@ import { track } from './telemetry';
 // separating them makes the render look re-ordered).
 export type LiveTurnItem =
   | { kind: 'text'; id: string; text: string }
-  | { kind: 'tool'; id: string; name: string; input: unknown; result?: string; isError?: boolean }
+  | { kind: 'tool'; id: string; name: string; input: unknown; result?: string; isError?: boolean; diagnostics?: Diagnostic[] }
   | {
       kind: 'genui';
       id: string;
@@ -574,6 +575,15 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
                         t.status = 'ready';
                       }
                     }
+                    notify(sid);
+                  }
+                }
+              } else if (sid && p.type === 'diagnostics') {
+                const s = states.get(sid);
+                if (s) {
+                  const t = s.timeline.find((x) => x.kind === 'tool' && x.id === `live-${p.toolUseId}`);
+                  if (t && t.kind === 'tool') {
+                    t.diagnostics = p.diagnostics;
                     notify(sid);
                   }
                 }

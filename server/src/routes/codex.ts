@@ -37,6 +37,7 @@ import {
 } from '../lib/codex-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
+import { randomUUID } from 'node:crypto';
 import { registerRun, claimRun, abortRun, endRun } from '../lib/active-runs.js';
 import {
   getLoopSnapshot,
@@ -159,11 +160,12 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     sid: string | null,
     abortController: AbortController,
     live: { cwd: string; text: string; hasImages: boolean },
+    runId: string,
   ) => {
     let clientGone = false;
     const startedAt = performance.now();
-    track('run_started', { engine: 'codex', resumed: sid !== null, hasImages: live.hasImages, promptLen: live.text.length });
-    const finished = (ok: boolean) => track('run_finished', { engine: 'codex', durationMs: Math.round(performance.now() - startedAt), ok });
+    track('run_started', { engine: 'codex', runId, resumed: sid !== null, hasImages: live.hasImages, promptLen: live.text.length });
+    const finished = (ok: boolean) => track('run_finished', { engine: 'codex', runId, durationMs: Math.round(performance.now() - startedAt), ok });
     reply.raw.on('close', () => { clientGone = true; });
     const safeSend = (payload: Parameters<typeof sseSend>[1]) => {
       if (clientGone) return;
@@ -178,7 +180,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     const ensureLive = () => {
       if (liveStarted || !capturedSid) return;
       liveStarted = true;
-      liveStart(capturedSid, { cwd: live.cwd });
+      liveStart(capturedSid, { cwd: live.cwd, runId });
       // Seed the user bubble for the reattach snapshot whenever the turn had
       // any input — an image-only turn still needs its bubble.
       if (live.text || live.hasImages) livePush(capturedSid, { type: 'user-text', text: live.text });
@@ -193,7 +195,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         if (ev.kind === 'session' && !capturedSid) {
           capturedSid = ev.sessionId;
           ensureLive();
-          safeSend({ type: 'meta', cwd: live.cwd, sessionId: capturedSid });
+          safeSend({ type: 'meta', cwd: live.cwd, sessionId: capturedSid, runId });
         } else if (ev.kind === 'delta') { agentText += ev.text; relay({ type: 'delta', text: ev.text }); }
         else if (ev.kind === 'reasoning') relay({ type: 'reasoning', text: ev.text });
         else if (ev.kind === 'tool_use') relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
@@ -259,16 +261,17 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     startSSE(reply);
     sseSend(reply, { type: 'starting', cwd });
     const abortController = new AbortController();
-    const stream = runCodexTurn({ prompt: text, cwd, images, abortController, runtime: pickRuntimeOverride(req.body) });
+    const runId = randomUUID();
+    const stream = runCodexTurn({ prompt: text, cwd, images, abortController, runtime: pickRuntimeOverride(req.body), runId });
     // pipeCodexToSSE owns the iteration, so wrap the runner to install the abort
     // under the sid once the first `session` event reveals it.
     const wrapped = (async function* () {
       for await (const ev of stream) {
-        if (ev.kind === 'session') registerRun(ev.sessionId, abortController);
+        if (ev.kind === 'session') registerRun(ev.sessionId, abortController, runId);
         yield ev;
       }
     })();
-    pipeCodexToSSE(reply, wrapped as ReturnType<typeof runCodex>, null, abortController, { cwd, text, hasImages: images.length > 0 });
+    pipeCodexToSSE(reply, wrapped as ReturnType<typeof runCodex>, null, abortController, { cwd, text, hasImages: images.length > 0 }, runId);
   });
 
   app.post<{ Params: SidParams; Body: MessageBody }>(
@@ -281,12 +284,13 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'text or images required' });
       }
       const abortController = new AbortController();
+      const runId = randomUUID();
       // Claim before the await: otherwise a loop tick firing during
       // readCodexSessionMessages would see isRunActive === false, start its own
       // iteration, and both turns would runStreamed on one thread (only one
       // abortable via /stop). Rejecting an occupied sid also closes the inverse
       // race where this request arrives after the loop has started.
-      if (!claimRun(sid, abortController)) {
+      if (!claimRun(sid, abortController, runId)) {
         return reply.status(409).send({ error: 'thread already has an active run' });
       }
       let cwd = process.env.HOME || '/tmp';
@@ -298,7 +302,7 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: (e as Error).message });
       }
       startSSE(reply);
-      sseSend(reply, { type: 'meta', sessionId: sid, cwd });
+      sseSend(reply, { type: 'meta', sessionId: sid, cwd, runId });
       pipeCodexToSSE(
         reply,
         runCodexTurn({
@@ -308,10 +312,12 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
           images,
           abortController,
           runtime: pickRuntimeOverride(req.body),
+          runId,
         }),
         sid,
         abortController,
         { cwd, text, hasImages: images.length > 0 },
+        runId,
       );
     },
   );

@@ -16,14 +16,16 @@ const LIVE_RING = 4000;
 const KEEP_AROUND_MS = 60_000;
 const sessions = new Map<string, LiveSession>();
 
-export function liveStart(sid: string, meta: { cwd: string; startedAt?: number }): number {
+export function liveStart(sid: string, meta: { cwd: string; startedAt?: number; runId?: string }): number {
   // A resume on a stable sid (the codex route) can re-liveStart while a prior
   // turn's liveEnd delete timer is still pending — clear it so the fresh entry
   // isn't reaped mid-turn.
   clearTimeout(sessions.get(sid)?.gc);
   const startedAt = meta.startedAt ?? Date.now();
   sessions.set(sid, {
-    events: [{ type: 'meta', cwd: meta.cwd, sessionId: sid, startedAt }],
+    // The seeded meta is what a reattaching client replays first, so carrying
+    // runId here is what lets its post-refresh events still join this run.
+    events: [{ type: 'meta', cwd: meta.cwd, sessionId: sid, startedAt, ...(meta.runId ? { runId: meta.runId } : {}) }],
     subs: new Set(),
     ended: false,
   });

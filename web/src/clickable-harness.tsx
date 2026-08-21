@@ -65,7 +65,7 @@ function App() {
   // rather than a callback.
   return (
     <div style={{ padding: 24 }}>
-      {code ? <GenuiPreview code={code} done engine="harness" /> : <p>waiting for code…</p>}
+      {code ? <GenuiPreview code={code} done /> : <p>waiting for code…</p>}
     </div>
   );
 }

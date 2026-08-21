@@ -41,8 +41,8 @@ import type { RunnerEvent, AttachedImage } from './claude-runner.js';
 // kimi-runner can inject the same bridge without pulling in the codex SDK.
 // Re-exported for the app-server runner (codex-app-server.ts), which injects
 // the same Macaron stdio MCP into its thread/start config.
-import { MACARON_MCP_CMD, MACARON_MCP_ARGS } from './macaron-mcp-path.js';
-export { MACARON_MCP_CMD, MACARON_MCP_ARGS };
+import { MACARON_MCP_CMD, MACARON_MCP_ARGS, macaronMcpArgs } from './macaron-mcp-path.js';
+export { MACARON_MCP_CMD, MACARON_MCP_ARGS, macaronMcpArgs };
 
 // @openai/codex-sdk ships the `codex` binary via platform-specific optional
 // deps. The SDK resolves it from `@openai/codex`'s vendor/ dir; we mirror that
@@ -111,6 +111,9 @@ export type CodexRunOptions = {
   images?: AttachedImage[];
   /** Per-turn runtime knobs; each field falls back to the global default. */
   runtime?: CodexRuntimeOverride;
+  /** Analytics correlation id, forwarded to the stdio MCP bridge so its
+   * render_ui_called joins this turn's run_started. */
+  runId?: string;
 };
 
 // Build the CodexOptions + ThreadOptions from our persisted settings plus an
@@ -126,7 +129,7 @@ export type CodexRunOptions = {
 // ~/.codex/config.toml as-is. Sandbox / approval come from runtime knobs
 // (independent of provider choice) and skipGitRepoCheck stays on so the
 // server can spawn threads from arbitrary cwds.
-function buildOptions(override?: CodexRuntimeOverride): { codex: CodexOptions; thread: ThreadOptions } {
+function buildOptions(override?: CodexRuntimeOverride, runId?: string): { codex: CodexOptions; thread: ThreadOptions } {
   const s = getCodexConfig();
   const p = getActiveCodexProvider();
   const sandboxMode = override?.sandboxMode ?? s.runtime.sandboxMode;
@@ -138,7 +141,7 @@ function buildOptions(override?: CodexRuntimeOverride): { codex: CodexOptions; t
   // `-c mcp_servers.macaron.command=…` overrides on the codex process.
   const mcpConfig = {
     'mcp_servers.macaron.command': MACARON_MCP_CMD,
-    'mcp_servers.macaron.args': MACARON_MCP_ARGS,
+    'mcp_servers.macaron.args': macaronMcpArgs(runId),
     // Under sandbox=workspace-write + approval_policy=never, codex refuses
     // MCP tool calls with "user cancelled MCP tool call" (duration=0)
     // unless the server is explicitly marked auto-approved. `"approve"` is
@@ -258,7 +261,7 @@ export async function* runCodex(opts: CodexRunOptions): AsyncGenerator<RunnerEve
     return new Promise((res) => waiters.push(res));
   };
 
-  const { codex: codexOpts, thread: threadOpts } = buildOptions(opts.runtime);
+  const { codex: codexOpts, thread: threadOpts } = buildOptions(opts.runtime, opts.runId);
   console.log(
     `[codex-runner] starting  model=${threadOpts.model}  effort=${threadOpts.modelReasoningEffort ?? '(default)'}  sandbox=${threadOpts.sandboxMode}  base=${codexOpts.baseUrl || '(sdk default)'}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}  cwd=${opts.cwd}`,
   );

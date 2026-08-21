@@ -29,7 +29,7 @@ import path from 'node:path';
 import type { Client, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, WriteTextFileRequest, ContentBlock, McpServerStdio } from '@agentclientprotocol/sdk';
 import { getActiveKimiProviderEnv } from './kimi-config.js';
 import { findKimiSessionDir } from './kimi-store.js';
-import { MACARON_MCP_CMD, MACARON_MCP_ARGS } from './macaron-mcp-path.js';
+import { MACARON_MCP_CMD, macaronMcpArgs } from './macaron-mcp-path.js';
 import type { RunnerEvent, AttachedImage } from './claude-runner.js';
 
 // Resolution order: explicit env override, common global install paths, then
@@ -67,10 +67,14 @@ export type KimiRunOptions = {
   resume?: string;
   abortController?: AbortController;
   images?: AttachedImage[];
+  /** Analytics correlation id, forwarded to the stdio MCP bridge so its
+   * render_ui_called joins this turn's run_started. */
+  runId?: string;
 };
 
 // The Macaron stdio MCP bridge, shared with codex-runner (render_ui lives here).
-const MACARON_MCP: McpServerStdio = { name: 'macaron', command: MACARON_MCP_CMD, args: MACARON_MCP_ARGS, env: [] };
+// Built per turn: the args carry this run's analytics id.
+const macaronMcp = (runId?: string): McpServerStdio => ({ name: 'macaron', command: MACARON_MCP_CMD, args: macaronMcpArgs(runId), env: [] });
 
 function buildPromptBlocks(text: string, images: AttachedImage[]): ContentBlock[] {
   const blocks: ContentBlock[] = [];
@@ -273,11 +277,11 @@ export async function* runKimi(opts: KimiRunOptions): AsyncGenerator<RunnerEvent
       if (opts.resume) {
         capturedSid = opts.resume;
         replaying = true;
-        await conn.loadSession({ sessionId: opts.resume, cwd: opts.cwd, mcpServers: [MACARON_MCP] });
+        await conn.loadSession({ sessionId: opts.resume, cwd: opts.cwd, mcpServers: [macaronMcp(opts.runId)] });
         replaying = false;
         push({ kind: 'session', sessionId: capturedSid });
       } else {
-        const res = await conn.newSession({ cwd: opts.cwd, mcpServers: [MACARON_MCP] });
+        const res = await conn.newSession({ cwd: opts.cwd, mcpServers: [macaronMcp(opts.runId)] });
         capturedSid = res.sessionId;
         push({ kind: 'session', sessionId: capturedSid });
       }

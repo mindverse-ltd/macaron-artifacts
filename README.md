@@ -138,7 +138,7 @@ Remote requests must then present the token; localhost stays frictionless (loopb
 
 ### Telemetry
 
-macaron reports anonymous usage to our own [umami](https://umami.is) instance so we can see which engines and features actually get used. Only counters and durations are sent — route patterns, engine name, status codes, code lengths — never prompts, transcripts, file paths, or tokens. The browser's Do Not Track setting is honoured.
+macaron reports anonymous usage to our own [umami](https://umami.is) instance so we can see which engines and features actually get used. Almost everything sent is a counter or a duration — route patterns, engine name, status codes, code lengths. Prompts, transcripts, and tokens are never sent. The one free-text field is the message of a failed UI render, which is truncated to 200 characters and stripped of URLs, e-mail addresses, API keys, and filesystem paths before it leaves the machine. The browser's Do Not Track setting is honoured.
 
 To opt out completely, so the tracker script is never injected and the server makes zero outbound requests:
 

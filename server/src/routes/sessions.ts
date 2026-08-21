@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { anthropicMessagesUrl } from '../lib/anthropic-endpoint.js';
 import {
   deleteSession,
@@ -20,6 +21,7 @@ import { liveGet, liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, runFollowup, type AttachedImage, type RunOptions, type RunnerEvent } from '../lib/claude-runner.js';
 import { getActiveProviderEnv, getActiveProviderRaw, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
 import { claimRun, abortRun, endRun } from '../lib/active-runs.js';
+import { withRunId } from '../lib/run-context.js';
 import { track } from '../lib/telemetry.js';
 import { resolvePending } from '../lib/permission-registry.js';
 import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
@@ -383,7 +385,8 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
       // runner's terminal cleanup so a refresh/duplicate tab cannot replace its
       // abort controller or live replay entry with a competing POST.
       const abortController = new AbortController();
-      if (!claimRun(sid, abortController)) {
+      const runId = randomUUID();
+      if (!claimRun(sid, abortController, runId)) {
         return reply.status(409).send({ error: 'session already running' });
       }
 
@@ -392,7 +395,7 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
       let liveStarted = false;
       let terminalSent = false;
       const runStartedAt = performance.now();
-      track('run_started', { engine: 'claude', resumed: true, hasImages: images.length > 0, promptLen: text.length });
+      track('run_started', { engine: 'claude', runId, resumed: true, hasImages: images.length > 0, promptLen: text.length });
       reply.raw.on('close', () => { clientGone = true; });
       const safeSend = (payload: Parameters<typeof sseSend>[1]) => {
         if (!sseStarted || clientGone) return;
@@ -402,7 +405,7 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
       const finishMainRun = (exitCode: number, error?: string) => {
         if (terminalSent) return;
         terminalSent = true;
-        track('run_finished', { engine: 'claude', durationMs: Math.round(performance.now() - runStartedAt), ok: exitCode === 0 && !error });
+        track('run_finished', { engine: 'claude', runId, durationMs: Math.round(performance.now() - runStartedAt), ok: exitCode === 0 && !error });
         if (error) {
           safeSend({ type: 'error', error });
           if (liveStarted) livePush(sid, { type: 'error', error });
@@ -420,13 +423,13 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
         sseStarted = true;
         startSSE(reply);
         const startedAt = Date.now();
-        safeSend({ type: 'meta', cwd, sessionId: sid, startedAt });
+        safeSend({ type: 'meta', cwd, sessionId: sid, startedAt, runId });
 
         // Keep a server-authoritative copy of this turn independent of the
         // original response. A browser refresh closes that response, but the SDK
         // keeps running; /live replays this ring and then follows new events.
         liveStarted = true;
-        liveStart(sid, { cwd, startedAt });
+        liveStart(sid, { cwd, startedAt, runId });
         livePush(sid, { type: 'user-text', text, images });
 
         // The Settings-selected active provider determines which
@@ -448,7 +451,10 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
       const { model: providerModel, env: providerEnv } = provider;
       void model; // eslint: kept in body for future per-message override
 
-      void (async () => {
+      // withRunId wraps the whole iteration, not just the kickoff: the SDK calls
+      // the in-process render_ui handler from inside this loop, and that handler
+      // reads the run id off AsyncLocalStorage (see lib/run-context.ts).
+      void withRunId(runId, async () => {
         try {
           for await (const ev of runClaudeForRoute({ prompt: text, cwd, resume: sid, model: providerModel, permissionMode, images, envOverrides: providerEnv, abortController })) {
             if (ev.kind === 'delta') relay({ type: 'delta', text: ev.text });
@@ -509,7 +515,7 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
           endRun(sid, abortController);
           if (!clientGone) sseDone(reply);
         }
-      })();
+      });
     },
   );
 

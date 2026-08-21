@@ -101,11 +101,20 @@ export function subscribeKimiLive(sid: string, h: KimiStreamHandlers): () => voi
   const ac = new AbortController();
   const openedAt = performance.now();
   authedFetch(`/api/kimi/threads/${encodeURIComponent(sid)}/live`, { signal: ac.signal })
-    .then((resp) => pump(resp, h))
+    .then((resp) => {
+      // An HTTP-level failure never throws, so without this the only losses we'd
+      // ever see are fetch-level ones — a 401 or a dead proxy would look like a
+      // healthy stream.
+      if (!resp.ok) track('stream_disconnected', { engine: 'kimi', durationMs: Math.round(performance.now() - openedAt) });
+      return pump(resp, h);
+    })
     .catch(() => {
       // Only an abnormal end is worth an event — a stream that ends because the
-      // turn finished is already covered by run_finished.
-      track('stream_disconnected', { engine: 'kimi', durationMs: Math.round(performance.now() - openedAt), reason: ac.signal.aborted ? 'abort' : 'error' });
+      // turn finished is already covered by run_finished, and an abort is just the
+      // user navigating away. Skipping aborts is also what keeps this comparable
+      // with claude, whose live attach has no AbortController at all.
+      if (ac.signal.aborted) return;
+      track('stream_disconnected', { engine: 'kimi', durationMs: Math.round(performance.now() - openedAt) });
     });
   return () => ac.abort();
 }

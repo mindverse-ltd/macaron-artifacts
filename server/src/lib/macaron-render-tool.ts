@@ -6,6 +6,8 @@
 
 import { checkGenUI } from './genui-check.js';
 import { track } from './telemetry.js';
+import { currentRunId } from './run-context.js';
+import { ENGINE } from '../config.js';
 
 export type RenderUIResult = {
   /** Text to send back as the tool_result content. */
@@ -70,7 +72,7 @@ function ensureReactImport(src: string): string {
 
 export async function handleRenderUI(code: string): Promise<RenderUIResult> {
   const result = await checkGenUI(ensureReactImport(code));
-  track('render_ui_called', { engine: process.env.MACARON_ENGINE || 'claude', codeLen: code.length, diagnostics: result.ok ? 0 : 1 });
+  track('render_ui_called', { engine: ENGINE, runId: currentRunId(), codeLen: code.length, diagnostics: result.ok ? 0 : 1 });
   const text = result.ok
     ? 'Rendered inline. The user sees the UI now.'
     : `Rendered inline, but the TSX has issues:\n${result.diagnostics}`;

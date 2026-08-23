@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { markdownRemarkPlugins } from '../lib/markdownPlugins';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, Download, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
 import { useReplay } from '../components/ReplayControls';
@@ -471,7 +471,7 @@ function AssistantItem({ text }: { text: string }) {
   return (
     <div className="ti-text md">
       <MarkdownCodeStreamingProvider content={text} streaming={false}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={CHAT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={markdownRemarkPlugins} components={CHAT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
       </MarkdownCodeStreamingProvider>
     </div>
   );
@@ -481,7 +481,7 @@ function LiveAssistantItem({ text, streaming }: { text: string; streaming: boole
   return (
     <div className="ti-text md">
       <MarkdownCodeStreamingProvider content={text} streaming={streaming}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={CHAT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={markdownRemarkPlugins} components={CHAT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
       </MarkdownCodeStreamingProvider>
     </div>
   );
@@ -941,7 +941,7 @@ function PlanApprovalItem({
       </div>
       {plan && (
         <div className="ti-plan-body md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{plan}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={markdownRemarkPlugins}>{plan}</ReactMarkdown>
         </div>
       )}
       <div className="ti-plan-actions">

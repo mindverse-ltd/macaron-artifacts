@@ -10,7 +10,7 @@
 import { Circle, Save } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { markdownRemarkPlugins } from '../lib/markdownPlugins';
 import { api } from '../lib/api';
 import { authedFetch } from '../lib/auth';
 import { useToast } from './Toast';
@@ -149,7 +149,7 @@ export function FileTile({
       return (
         <div className="ft-preview md">
           <div className="ft-reading">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={markdownRemarkPlugins}>{content}</ReactMarkdown>
           </div>
         </div>
       );

@@ -16,15 +16,14 @@ set -euo pipefail
 #  * The script is idempotent: running it twice from a clean cache
 #    installs once; running after `git pull` rebuilds only if source
 #    changed (mtime check).
-#  * Uses pnpm via corepack (Node 22+ ships with it), so plain `node` +
-#    `bash` on the user's machine is enough — no manual npm/pnpm setup.
+#  * Bootstraps pnpm locally with Node's bundled npm — no global pnpm setup.
 
 SRC_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # --- Preflight: dependency check ----------------------------------------
-# Every subsequent step (mirror rsync, corepack pnpm, install, build, node
+# Every subsequent step (mirror rsync, pnpm bootstrap, install, build, node
 # launch) assumes Node 22+ exists. Without this block a fresh install on a
-# machine with no Node blows up ~40 lines later inside `corepack` with a
+# machine with no Node blows up later inside the pnpm bootstrap with a
 # cryptic "command not found", which we've watched real users hit.
 #
 # Strategy: detect early, print platform-specific install guidance, and offer
@@ -217,58 +216,10 @@ FOREGROUND="${MACARON_FOREGROUND:-0}"
 WEB_DIST="$DIR/web/dist"
 SERVER_DIST="$DIR/server/dist/index.js"
 
-# --- pnpm via corepack --------------------------------------------------
+# --- pnpm bootstrap ----------------------------------------------------
 
-# Node 22 ships corepack, which resolves the pnpm range declared in
-# `devEngines.packageManager`. Older Corepack releases auto-pin by default;
-# keep startup from rewriting that range into an exact `packageManager` pin.
-export COREPACK_ENABLE_AUTO_PIN=0
-_GLOBAL_PNPM="$(command -v pnpm 2>/dev/null || true)"
-_PNPM=""
-_PNPM_FIX="pnpm"
-if command -v corepack >/dev/null 2>&1; then
-  # corepack enable is idempotent; --install-directory ensures we don't
-  # need root privileges.
-  _COREPACK_BIN="$DIR/node_modules/.corepack-bin"
-  mkdir -p "$_COREPACK_BIN"
-  corepack enable --install-directory "$_COREPACK_BIN" pnpm >/dev/null 2>&1 || true
-  # Prepend the corepack shim dir so `pnpm` resolves to the declared version.
-  # Some Corepack builds do not create a shim here unless global pnpm is
-  # already installed, so create a local fallback wrapper for package scripts.
-  if [ ! -x "$_COREPACK_BIN/pnpm" ]; then
-    cat > "$_COREPACK_BIN/pnpm" <<'EOF'
-#!/usr/bin/env bash
-exec corepack pnpm "$@"
-EOF
-    chmod +x "$_COREPACK_BIN/pnpm"
-  fi
-  export PATH="$_COREPACK_BIN:$PATH"
-  _PNPM_FIX="corepack pnpm"
-  if pnpm --version >/dev/null 2>&1; then
-    _PNPM="pnpm"
-  elif [ -z "${COREPACK_INTEGRITY_KEYS+x}" ]; then
-    # Older Corepack builds can reject newer pnpm signing keys. If that is the
-    # only blocker, disable the stale key check for this launcher process.
-    export COREPACK_INTEGRITY_KEYS=0
-    _PNPM_FIX="COREPACK_INTEGRITY_KEYS=0 corepack pnpm"
-    if pnpm --version >/dev/null 2>&1; then
-      _PNPM="pnpm"
-    fi
-  fi
-fi
-if [ -z "$_PNPM" ] && [ -n "$_GLOBAL_PNPM" ]; then
-  _PNPM="$_GLOBAL_PNPM"
-  _PNPM_FIX="$_GLOBAL_PNPM"
-fi
-
-if [ -z "$_PNPM" ]; then
-  cat >&2 <<EOF
-[macaron] neither \`corepack\` (Node 22+) nor a global \`pnpm\` is available.
-[macaron] fix: install Node 22+ (corepack ships with it) or run
-[macaron]      \`npm install -g pnpm@12\` and retry.
-EOF
-  exit 1
-fi
+_PNPM="$DIR/scripts/pnpm.sh"
+_PNPM_FIX="\"$_PNPM\""
 
 # --- install ------------------------------------------------------------
 

@@ -3,6 +3,10 @@ title: Web
 description: The React SPA — two entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
 ---
 
+<Callout type="warn" title="Legacy implementation">
+  This page describes the previous application and its discontinued launchers. For the unified `macaron-artifacts` package, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
+
 The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server just hands the browser one of two prebuilt HTML documents and the app takes over from there with a hash router.
 
 ## Two Entries, One Build

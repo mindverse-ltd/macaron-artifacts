@@ -3,6 +3,10 @@ title: GenUI
 description: The render_ui tool and the vendored renderer that compile model-authored TSX into a live component while tokens stream.
 ---
 
+<Callout type="warn" title="Legacy implementation">
+  This page describes the previous application and its discontinued launchers. For the unified `macaron-artifacts` package, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
+
 GenUI is Macaron's headline feature: the model doesn't just describe a UI, it **writes TSX that renders live** in the conversation. Two halves make this work — a server-side tool the model calls, and a browser-side renderer that compiles and mounts the streamed code.
 
 ## The `render_ui` Tool

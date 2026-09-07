@@ -3,6 +3,10 @@ title: Codex Variant
 description: How the same server binary boots a ChatGPT-style Codex UI and drives Codex instead of Claude.
 ---
 
+<Callout type="warn" title="Legacy implementation">
+  This page describes the previous application and its discontinued launchers. For the unified `macaron-artifacts` package, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
+
 `mcx` is not a fork. It is the **same server and the same web build** as `mcc`, booted with `MACARON_ENGINE=codex` so it serves the Codex SPA and drives Codex. This page covers what differs from the Claude path.
 
 ## Two Launchers, One Server

@@ -2,6 +2,18 @@
 
 A single React WebUI for native coding harnesses. Claude Code and Codex share the same conversation, approvals, UI4A rendering, session storage, and themes. The default layout and palette come from `ui4a-playground`.
 
+## Install and run
+
+The only published package and CLI is `macaron-artifacts`. Choose Claude Code or Codex inside the application; installing another package is not required to switch harnesses.
+
+```sh
+bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>
+```
+
+Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port` and `--data-dir`.
+
+## Development
+
 ```sh
 pnpm install
 pnpm dev
@@ -10,7 +22,7 @@ pnpm build
 pnpm start
 ```
 
-Run these commands from the repository root. `MACARON_PORT` and `WEB_PORT` override the ports. Production serves the UI and API together. The new `macaron-artifacts` launcher also accepts `--port` and `--data-dir`.
+Run these commands from the repository root. `MACARON_PORT` and `WEB_PORT` override the ports. Production serves the UI and API together.
 
 Install and authenticate the native Claude Code or Codex CLI first. The app inherits their local configuration; an empty model field uses the harness default. `MACARON_CLAUDE_PATH` and `MACARON_CODEX_PATH` can select an executable. App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` overrides that directory. Workspace files remain in the directory selected for each session. Deleting an app conversation does not delete workspace files.
 
@@ -62,8 +74,12 @@ Generated code runs as trusted local React code in the host page, as in the refe
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm test:package
+MACARON_PACKAGE_SOURCE=https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha> pnpm test:package
 ```
 
 Tests exercise raw Claude/Codex event conversion, real JSONL RPC framing, approval/cancellation, >4,000-event replay, crash recovery, metadata isolation, scoped capabilities and incremental rendering. Browser acceptance uses the real built application for inline and file previews, state retention, relative imports, theme switching and narrow layouts.
 
-This branch introduces the unified app as the default development/build/start path. The old packages and launchers remain available through explicit `*:legacy` scripts while their deployment and native-history migration can be handled separately. OpenCode, dsh, pi and Kimi Code adapters, attachments, and the old administrative panels are outside this first adapter slice.
+`test:package` builds and installs the package into an empty consumer directory, then starts its CLI and checks both harnesses and all client assets. `MACARON_PACKAGE_SOURCE` runs the same acceptance checks against a published preview URL or an existing tarball.
+
+The root package publishes only the unified application. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. OpenCode, dsh, pi and Kimi Code adapters, native session-history migration, attachments, and the old administrative panels are outside this first adapter slice.

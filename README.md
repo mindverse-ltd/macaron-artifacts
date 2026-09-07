@@ -106,6 +106,20 @@ Inside Codex, ask it to open the Macaron WebUI. The Codex-side default port is `
 
 Inside Kimi Code, run `/macaron:macaron`. The Kimi-side default port is `7980`.
 
+### Source Checkout
+
+With Node 22+ and pnpm 12 (`npm install -g pnpm@latest`), run from the repo root:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start                                      # Claude, port 7878
+MACARON_ENGINE=codex MACARON_PORT=7979 pnpm start # Codex
+MACARON_ENGINE=kimi MACARON_PORT=7980 pnpm start  # Kimi
+```
+
+Run one start command per terminal and stop it with Ctrl-C. These commands use exported environment variables; plain `pnpm start` does not load `.env`. The plugin commands continue to use `start.sh`, including its `.env` loading, cache mirroring, and install/build checks.
+
 ### Views
 
 | View          | What it does |

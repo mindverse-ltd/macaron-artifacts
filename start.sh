@@ -16,14 +16,14 @@ set -euo pipefail
 #  * The script is idempotent: running it twice from a clean cache
 #    installs once; running after `git pull` rebuilds only if source
 #    changed (mtime check).
-#  * Bootstraps pnpm locally with Node's bundled npm — no global pnpm setup.
+#  * Runs the latest pnpm through Node's bundled npm — no global pnpm setup.
 
 SRC_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # --- Preflight: dependency check ----------------------------------------
-# Every subsequent step (mirror rsync, pnpm bootstrap, install, build, node
+# Every subsequent step (mirror rsync, install, build, node
 # launch) assumes Node 22+ exists. Without this block a fresh install on a
-# machine with no Node blows up later inside the pnpm bootstrap with a
+# machine with no Node blows up later inside npm with a
 # cryptic "command not found", which we've watched real users hit.
 #
 # Strategy: detect early, print platform-specific install guidance, and offer
@@ -216,10 +216,10 @@ FOREGROUND="${MACARON_FOREGROUND:-0}"
 WEB_DIST="$DIR/web/dist"
 SERVER_DIST="$DIR/server/dist/index.js"
 
-# --- pnpm bootstrap ----------------------------------------------------
+# --- pnpm --------------------------------------------------------------
 
-_PNPM="$DIR/scripts/pnpm.sh"
-_PNPM_FIX="\"$_PNPM\""
+_PNPM=(npm exec --yes --package=pnpm@latest -- pnpm)
+_PNPM_FIX="${_PNPM[*]}"
 
 # --- install ------------------------------------------------------------
 
@@ -240,9 +240,9 @@ if [ "$needs_install" = 1 ]; then
   # lockfile. Fall back to a full resolve if frozen fails (usually because
   # the lockfile drifted after a manual dep bump the user hasn't run
   # `pnpm install` for yet).
-  if ! (cd "$DIR" && "$_PNPM" install --frozen-lockfile 2>&1); then
+  if ! (cd "$DIR" && "${_PNPM[@]}" install --frozen-lockfile 2>&1); then
     echo "[macaron] frozen install failed — retrying without --frozen-lockfile" >&2
-    if ! (cd "$DIR" && "$_PNPM" install 2>&1); then
+    if ! (cd "$DIR" && "${_PNPM[@]}" install 2>&1); then
       cat >&2 <<EOF
 [macaron] pnpm install failed.
 [macaron] fix: cd "$DIR" && rm -rf node_modules && $_PNPM_FIX install
@@ -281,7 +281,7 @@ fi
 
 if [ "$needs_build" = 1 ]; then
   echo "[macaron] building (~30s)…" >&2
-  if ! (cd "$DIR" && "$_PNPM" run build 2>&1); then
+  if ! (cd "$DIR" && "${_PNPM[@]}" run build 2>&1); then
     cat >&2 <<EOF
 [macaron] build failed. Common causes and fixes:
 [macaron]  1. Node version — this project needs Node 22+; check with \`node --version\`.

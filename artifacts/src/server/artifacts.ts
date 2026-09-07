@@ -5,10 +5,10 @@ import { parse } from 'partial-json';
 import type { Artifact, ChatChunk } from '../shared/types.js';
 
 const MAX_BYTES = 2 * 1024 * 1024;
-export const isArtifactEntry = (path: string) => /^\.ui4a\/(?:canvases\/)?[^/]+\.(?:ui4a\.)?tsx$/.test(path);
+export const isArtifactEntry = (path: string) => /^\.artifacts\/(?:canvases\/)?[^/]+\.(?:ui4a\.)?tsx$/.test(path);
 export function ui4aPath(cwd: string, path: string) {
   const target = resolve(cwd, path), rel = relative(resolve(cwd), target);
-  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !rel.startsWith(`.ui4a${sep}`)) throw new Error('Files must be inside this workspace’s .ui4a directory.');
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !rel.startsWith(`.artifacts${sep}`)) throw new Error('Files must be inside this workspace’s .artifacts directory.');
   return target;
 }
 export async function checkedPath(cwd: string, path: string, writing = false): Promise<string> {
@@ -36,7 +36,7 @@ export async function writeUi4aFile(cwd: string, path: string, content: string) 
 }
 export async function listArtifacts(cwd: string, revision = Date.now()): Promise<Artifact[]> {
   const paths: string[] = [];
-  for (const dir of ['.ui4a', '.ui4a/canvases']) {
+  for (const dir of ['.artifacts', '.artifacts/canvases']) {
     for (const item of await readdir(join(cwd, dir), { withFileTypes: true }).catch(() => [])) {
       const path = `${dir}/${item.name}`;
       if (item.isFile() && isArtifactEntry(path)) paths.push(path);
@@ -62,9 +62,9 @@ export class ArtifactObserver {
   async start() {
     const observe = () => {
       if (this.watchers.length > 1 || this.closed) return;
-      try { this.watchers.push(watch(join(this.cwd, '.ui4a'), { recursive: true }, () => this.refresh())); } catch { /* A workspace may not have artifacts yet. */ }
+      try { this.watchers.push(watch(join(this.cwd, '.artifacts'), { recursive: true }, () => this.refresh())); } catch { /* A workspace may not have artifacts yet. */ }
     };
-    this.watchers.push(watch(this.cwd, (_, name) => { if (name === '.ui4a') { observe(); this.refresh(); } }));
+    this.watchers.push(watch(this.cwd, (_, name) => { if (name === '.artifacts') { observe(); this.refresh(); } }));
     observe();
     await this.refresh();
   }

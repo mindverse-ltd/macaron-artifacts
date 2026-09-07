@@ -31,7 +31,7 @@ export function createSurfaceImports(baseImports: Record<string, string>, readFi
       const modules = new Map<string, string>();
       const loaded = new Map<string, { filename: string; source: string }>();
       const localSpecifiers = [...extractImportSpecifiers(source)].filter(relative);
-      if (localSpecifiers.length && !filename) throw new Error("Relative imports require a .ui4a file canvas; inline UI can import React and $ui4a modules directly.");
+      if (localSpecifiers.length && !filename) throw new Error("Relative imports require a .artifacts file canvas; inline UI can import React and $ui4a modules directly.");
       const readModule = async (requested: string) => {
         const cached = loaded.get(requested);
         if (cached) return cached;

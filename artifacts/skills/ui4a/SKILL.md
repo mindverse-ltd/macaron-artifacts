@@ -9,13 +9,13 @@ Use ordinary prose for an answer that needs no interaction. Use inline UI for a 
 
 For inline UI, put one complete React module in a fenced block whose language is exactly `ui4a/tsx`. Export a default React component. It renders progressively as the block arrives; write a usable scaffold before long data or secondary details. Keep component and import names stable while editing. Close every block and include complete final syntax.
 
-For a canvas, write `.ui4a/canvases/<id>.ui4a.tsx`; the UI discovers it and opens a side panel. Use a stable descriptive id. Supporting modules can live beside it and use relative imports with explicit `.tsx`, `.ts`, `.jsx`, `.js`, or `.json` extensions. Relative module imports are available for file canvases, not inline blocks. Keep the dependency graph acyclic. Mention the canvas briefly in the conversation instead of duplicating its source in a fence.
+For a canvas, write `.artifacts/canvases/<id>.ui4a.tsx`; the UI discovers it and opens a side panel. Use a stable descriptive id. Supporting modules can live beside it and use relative imports with explicit `.tsx`, `.ts`, `.jsx`, `.js`, or `.json` extensions. Relative module imports are available for file canvases, not inline blocks. Keep the dependency graph acyclic. Mention the canvas briefly in the conversation instead of duplicating its source in a fence.
 
 Use React and the small `$ui4a/ui` library below by default. Compose native HTML for simple layout; do not wrap every paragraph in a Card. Give controls labels, keyboard access, useful empty states, and real local behavior. Render the user's information immediately; do not replace it with a generic dashboard or mock data. Only send a chat message or write a file after an explicit user action. Surface asynchronous errors beside the relevant control.
 
 Fit the provided container: use width:100%, min-width:0, wrapping text, and container-relative layouts. Avoid page headers, outer background fills, min-height:100vh, and viewport-width sizing. Inherit the host's theme. Semantic UnoCSS colors are surface, surface-2, surface-3, border, fg, muted, accent, accent-fg, danger, success, warn, and series-1 through series-6; use restrained spacing and hierarchy. Do not hard-code a light or dark page.
 
-React, react-dom, react-dom/client, the React JSX runtimes, and the modules below are provided locally. Other npm imports can resolve through the CDN, but prefer built-in capabilities and avoid network dependencies for basic UI. Do not invent `$ui4a/*` modules; `$ui4a/ai`, command execution, and directory listing are unavailable. Persist only JSON-compatible state; do not store credentials. File read/write paths start with `.ui4a/` and are relative to this session's workspace.
+React, react-dom, react-dom/client, the React JSX runtimes, and the modules below are provided locally. Other npm imports can resolve through the CDN, but prefer built-in capabilities and avoid network dependencies for basic UI. Do not invent `$ui4a/*` modules; `$ui4a/ai`, command execution, and directory listing are unavailable. Persist only JSON-compatible state; do not store credentials. File read/write paths start with `.artifacts/` and are relative to this session's workspace.
 
 ### $ui4a/ui
 
@@ -36,8 +36,8 @@ React, react-dom, react-dom/client, the React JSX runtimes, and the modules belo
 
 ### $ui4a/fs
 
-- `readFile`: (path: string) => Promise<string>. Reads UTF-8 text from a workspace-relative .ui4a/ path; rejects unavailable files.
-- `writeFile`: (path: string, content: string) => Promise<void>. Writes UTF-8 text inside .ui4a/. Maximum file size is 2 MB. Show pending/success/error feedback.
+- `readFile`: (path: string) => Promise<string>. Reads UTF-8 text from a workspace-relative .artifacts/ path; rejects unavailable files.
+- `writeFile`: (path: string, content: string) => Promise<void>. Writes UTF-8 text inside .artifacts/. Maximum file size is 2 MB. Show pending/success/error feedback.
 
 Example inline module:
 

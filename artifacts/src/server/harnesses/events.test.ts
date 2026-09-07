@@ -42,12 +42,12 @@ describe('Claude native deltas', () => {
     const mapper = new ClaudeEventMapper(), chunks: ChatChunk[] = [];
     mapper.map(partial({ type: 'message_start', message: { id: 'm1' } }));
     chunks.push(...mapper.map(partial({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'write1', name: 'Write', input: {} } })));
-    const deltas = ['{"file_path":".ui4a/', 'example.tsx","content":"', 'hello\\nworld"}'];
+    const deltas = ['{"file_path":".artifacts/', 'example.tsx","content":"', 'hello\\nworld"}'];
     for (const partial_json of deltas) chunks.push(...mapper.map(partial({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json } })));
     chunks.push(...mapper.map(partial({ type: 'content_block_stop', index: 2 })));
     chunks.push(...mapper.map({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'write1', content: 'saved' }] } }));
     expect(chunks.filter((chunk) => chunk.type === 'tool-input-delta').map((chunk) => chunk.inputTextDelta)).toEqual(deltas);
-    expect(chunks.at(-2)).toMatchObject({ type: 'tool-input-available', input: { file_path: '.ui4a/example.tsx', content: 'hello\nworld' } });
+    expect(chunks.at(-2)).toMatchObject({ type: 'tool-input-available', input: { file_path: '.artifacts/example.tsx', content: 'hello\nworld' } });
     expect(chunks.at(-1)).toMatchObject({ type: 'tool-output-available', toolCallId: 'write1', output: 'saved' });
   });
 

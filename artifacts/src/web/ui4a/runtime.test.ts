@@ -96,25 +96,25 @@ describe("scoped capabilities", () => {
     expect(storageKey("a:b", "c", "d")).not.toBe(storageKey("a", "b:c", "d"));
   });
 
-  test("file actions use the right session and reject paths escaping .ui4a", async () => {
+  test("file actions use the right session and reject paths escaping .artifacts", async () => {
     const requests: [string, RequestInit | undefined][] = [];
     const client = createFileClient("session one", (async (url, init) => { requests.push([String(url), init]); return new Response(init ? '{"ok":true}' : "hello"); }) as typeof fetch);
-    expect(await client.readFile(".ui4a/data.json")).toBe("hello");
-    await client.writeFile(".ui4a/data.json", "updated");
-    expect(requests[0]?.[0]).toBe("/api/sessions/session%20one/files?path=.ui4a%2Fdata.json");
+    expect(await client.readFile(".artifacts/data.json")).toBe("hello");
+    await client.writeFile(".artifacts/data.json", "updated");
+    expect(requests[0]?.[0]).toBe("/api/sessions/session%20one/files?path=.artifacts%2Fdata.json");
     expect(requests[1]?.[1]).toMatchObject({ method: "PUT", body: '{"content":"updated"}' });
-    expect(() => relativeUi4aPath("../../secret", ".ui4a/canvases/main.tsx")).toThrow("inside .ui4a");
+    expect(() => relativeUi4aPath("../../secret", ".artifacts/canvases/main.tsx")).toThrow("inside .artifacts");
   });
 });
 
 describe("file canvas imports", () => {
   const fallback = { kind: "fallback" as const, resolve: () => ({ imports: {} }) };
   test("resolves nested siblings and rewrites import positions without changing displayed path strings", async () => {
-    const files: Record<string, string> = { ".ui4a/canvases/part.tsx": 'import { n } from "./data.ts"; export const Part = () => <div>{n}</div>;', ".ui4a/canvases/data.ts": "export const n = 42;" };
+    const files: Record<string, string> = { ".artifacts/canvases/part.tsx": 'import { n } from "./data.ts"; export const Part = () => <div>{n}</div>;', ".artifacts/canvases/data.ts": "export const n = 42;" };
     const compiled: string[] = [];
     const imports = createSurfaceImports({}, async (path) => files[path]!, { fallback, compiler: { compile: async (code) => { compiled.push(code); return { code, source: code, changed: true }; } }, createModuleUrl: () => `blob:module-${compiled.length}`, revokeModuleUrl: () => {} });
     const source = 'import { Part } from "./part.tsx"; const label = "./part.tsx"; export default Part;';
-    const result = await imports.resolve({ source, filename: ".ui4a/canvases/main.tsx" });
+    const result = await imports.resolve({ source, filename: ".artifacts/canvases/main.tsx" });
     expect(compiled[0]).toContain("42");
     expect(compiled[1]).toContain('from "blob:module-1"');
     expect(result.rewrite(source)).toContain('from "blob:module-2"');
@@ -124,7 +124,7 @@ describe("file canvas imports", () => {
 
   test("a cyclic canvas reports the dependency chain instead of hanging", async () => {
     const imports = createSurfaceImports({}, async () => 'import "./main.tsx";', { fallback });
-    await expect(imports.resolve({ source: 'import "./part.tsx";', filename: ".ui4a/canvases/main.tsx" })).rejects.toThrow("Circular UI4A imports");
+    await expect(imports.resolve({ source: 'import "./part.tsx";', filename: ".artifacts/canvases/main.tsx" })).rejects.toThrow("Circular UI4A imports");
     imports.dispose();
   });
 

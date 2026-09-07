@@ -47,12 +47,12 @@ Metadata retains the same instructions, model and tool catalog, appending only i
 ## UI4A contract
 
 - Inline: a fenced `ui4a/tsx` module renders in the conversation while its text arrives.
-- Canvas: `.ui4a/canvases/<name>.ui4a.tsx` opens in the right panel. Relative TypeScript, TSX and JSON modules resolve inside `.ui4a`.
+- Canvas: `.artifacts/canvases/<name>.ui4a.tsx` opens in the right panel. Relative TypeScript, TSX and JSON modules resolve inside `.artifacts`.
 - Both use `partial-react@0.0.6`, `pushCode`/`finish`, last-good-frame preservation and a shared React instance.
 - `$ui4a/ui` contains Button, Field, Card, Badge, Tabs and Disclosure. `$ui4a/chat`, `$ui4a/state` and `$ui4a/fs` are separate host capabilities.
 - The module manifest generates `skills/ui4a/SKILL.md`; a test checks that the guidance matches the runtime. No theme name is added to the model prompt.
 
-Generated code runs as trusted local React code in the host page, as in the reference playground; this is not an isolation sandbox for untrusted third-party code. File bridge access is restricted to the selected workspace's `.ui4a` tree, including symlink checks. The local API accepts loopback hosts and same-origin browser requests.
+Generated code runs as trusted local React code in the host page, as in the reference playground; this is not an isolation sandbox for untrusted third-party code. File bridge access is restricted to the selected workspace's `.artifacts` tree, including symlink checks. The local API accepts loopback hosts and same-origin browser requests.
 
 ## Validation
 

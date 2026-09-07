@@ -1,12 +1,12 @@
 export function ui4aPath(path: string): string {
-  if (path.includes("\\") || path.includes("\0") || path.includes("?") || path.includes("#") || !path.startsWith(".ui4a/")) throw new Error("UI4A files must use a relative .ui4a/ path");
+  if (path.includes("\\") || path.includes("\0") || path.includes("?") || path.includes("#") || !path.startsWith(".artifacts/")) throw new Error("UI4A files must use a relative .artifacts/ path");
   const parts: string[] = [];
   for (const part of path.split("/")) {
     if (part === "." || part === "") continue;
     if (part === "..") parts.pop(); else parts.push(part);
-    if (parts[0] !== ".ui4a") throw new Error("UI4A files must stay inside .ui4a/");
+    if (parts[0] !== ".artifacts") throw new Error("UI4A files must stay inside .artifacts/");
   }
-  if (parts.length < 2) throw new Error("Expected a file inside .ui4a/");
+  if (parts.length < 2) throw new Error("Expected a file inside .artifacts/");
   return parts.join("/");
 }
 

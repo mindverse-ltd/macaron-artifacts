@@ -69,7 +69,7 @@ test('approval round trip and explicit stop release a waiting harness', async ()
   let waiting!: () => void;
   const ready = new Promise<void>(resolve => { waiting = resolve; });
   const { app, post, session } = await setup(async function* (turn) {
-    const approval = turn.approve({ id: 'approval-1', tool: 'write', input: { path: '.ui4a/test.tsx' } });
+    const approval = turn.approve({ id: 'approval-1', tool: 'write', input: { path: '.artifacts/test.tsx' } });
     waiting();
     const accepted = await approval;
     yield { type: 'text-start', id: 'result' }; yield { type: 'text-delta', id: 'result', delta: String(accepted) }; yield { type: 'text-end', id: 'result' };
@@ -84,11 +84,11 @@ test('blocks foreign origins and file traversal including outward symlinks', asy
   const { base, cwd } = await setup(async function* () {});
   expect((await fetch(base + '/api/sessions', { headers: { origin: 'https://example.com' } })).status).toBe(403);
   expect(() => ui4aPath(cwd, '../secrets')).toThrow();
-  await mkdir(join(cwd, '.ui4a'));
-  await symlink(tmpdir(), join(cwd, '.ui4a/outside'));
-  await expect(writeUi4aFile(cwd, '.ui4a/outside/should-not-exist', 'x')).rejects.toThrow('Symlinks');
-  await writeUi4aFile(cwd, '.ui4a/canvases/a.ui4a.tsx', 'export default () => null');
-  expect(await readUi4aFile(cwd, '.ui4a/canvases/a.ui4a.tsx')).toBe('export default () => null');
+  await mkdir(join(cwd, '.artifacts'));
+  await symlink(tmpdir(), join(cwd, '.artifacts/outside'));
+  await expect(writeUi4aFile(cwd, '.artifacts/outside/should-not-exist', 'x')).rejects.toThrow('Symlinks');
+  await writeUi4aFile(cwd, '.artifacts/canvases/a.ui4a.tsx', 'export default () => null');
+  expect(await readUi4aFile(cwd, '.artifacts/canvases/a.ui4a.tsx')).toBe('export default () => null');
 });
 test('recovers an interrupted disk journal and marks the partial message', async () => {
   const cwd = await workspace(), store = new SessionStore(cwd); await store.load();
@@ -213,18 +213,18 @@ test('native identity is checkpointed before exposing a recoverable partial answ
 
 test('the final artifact scan settles before close and emits nothing after closure', async () => {
   const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
-  await observer.start(); await writeUi4aFile(cwd, '.ui4a/example.tsx', 'export default () => <p>Complete</p>');
+  await observer.start(); await writeUi4aFile(cwd, '.artifacts/example.tsx', 'export default () => <p>Complete</p>');
   await Promise.all([observer.refresh(), observer.finish()]);
   const artifacts = chunks.filter(chunk => chunk.type === 'data-artifact');
   expect(artifacts.at(-1)?.data).toMatchObject({ source: 'export default () => <p>Complete</p>', streaming: false });
   const count = chunks.length;
-  await writeUi4aFile(cwd, '.ui4a/example.tsx', 'changed after finish'); await observer.refresh(); await observer.close();
+  await writeUi4aFile(cwd, '.artifacts/example.tsx', 'changed after finish'); await observer.refresh(); await observer.close();
   expect(chunks).toHaveLength(count);
 });
 
 test('closing an in-flight artifact scan suppresses its late frames', async () => {
   const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
-  await writeUi4aFile(cwd, '.ui4a/example.tsx', 'export default () => null');
+  await writeUi4aFile(cwd, '.artifacts/example.tsx', 'export default () => null');
   const scanning = observer.refresh(); await observer.close(); await scanning;
   expect(chunks).toEqual([]);
 });
@@ -236,7 +236,7 @@ test('production root serves the app and missing workspace modules return 404', 
   const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const root = await fetch(base); expect(root.status).toBe(200); expect(await root.text()).toContain('Artifacts production');
   const session = await (await fetch(`${base}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cwd, harness: 'claude-code' }) })).json() as Session;
-  expect((await fetch(`${base}/api/sessions/${session.id}/files?path=.ui4a/missing`)).status).toBe(404);
+  expect((await fetch(`${base}/api/sessions/${session.id}/files?path=.artifacts/missing`)).status).toBe(404);
   expect((await fetch(`${base}/api/health`, { headers: { origin: 'not a URL' } })).status).toBe(400);
 });
 

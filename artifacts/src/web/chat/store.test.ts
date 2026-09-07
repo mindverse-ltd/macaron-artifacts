@@ -69,7 +69,7 @@ describe('persistent session chat connections', () => {
     await store.select('second');
     expect(streamSignal?.aborted).toBe(false);
     controller.enqueue(encode({ type: 'text-delta', id: 'text', delta: 'after' }));
-    controller.enqueue(encode({ type: 'data-artifact', id: 'file', data: { path: '.ui4a/test.tsx', source: 'export default () => <p>ok</p>', revision: 1, streaming: false } }));
+    controller.enqueue(encode({ type: 'data-artifact', id: 'file', data: { path: '.artifacts/test.tsx', source: 'export default () => <p>ok</p>', revision: 1, streaming: false } }));
     controller.enqueue(encode({ type: 'data-recap', id: 'recap', data: { title: 'First title', suggestions: ['Change it'] } }));
     controller.enqueue(encode({ type: 'text-end', id: 'text' }));
     controller.enqueue(encode({ type: 'finish' }));

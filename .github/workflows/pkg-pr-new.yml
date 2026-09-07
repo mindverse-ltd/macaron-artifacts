@@ -23,6 +23,8 @@ jobs:
       # fires the root `prepack`, which runs `bun build` to bundle the server.
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
       # Run the server suite BEFORE publishing so a green pkg.pr.new check can't
       # ship a broken bundle. CI=1 (set by GitHub Actions) makes the pack+install
       # isolation suite MANDATORY: MACARON_SKIP_PACK_TESTS is ignored and a

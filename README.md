@@ -1,5 +1,7 @@
 # Macaron Artifacts
 
+The unified React WebUI is now the default `pnpm dev`, `pnpm build`, and `pnpm start` application. It supports Claude Code and Codex in the same interface, inline and file-based UI4A, and Shiki themes. See [the new app guide](artifacts/README.md) for architecture, setup, and current scope. The legacy launchers documented below remain available during migration.
+
 Macaron Artifacts publishes the plugin manifests, local WebUI runtime, GenUI tooling, and docs for running Macaron with Claude Code, Codex, and Kimi Code.
 
 1. **Visual sessions** — browse workspaces and sessions with previews, then continue a turn from the browser.

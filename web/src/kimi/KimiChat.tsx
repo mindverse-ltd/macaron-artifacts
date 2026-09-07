@@ -16,7 +16,7 @@ import { KimiComposer } from './KimiComposer';
 import { notify } from '../lib/notify';
 import { cancelAutoSend, createScheduleBridge, type ScheduleBridge } from '../lib/autoSend';
 
-// GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
+// GenuiPreview and its published runtime are behind a lazy
 // import so the default kimi bundle stays small. First render_ui in a
 // thread triggers the load; subsequent ones use the cached chunk.
 const GenuiPreview = lazy(() =>

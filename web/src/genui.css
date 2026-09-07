@@ -1,0 +1,41 @@
+/* Host-owned semantic defaults for the published GenUI component library. */
+@layer base {
+  /* The application uses hex --border/--accent values. Keep these HSL tokens
+     separate so Wind4's on-demand theme variables cannot mix the two formats. */
+  :root {
+    --macaron-background: 40 33% 98%;
+    --macaron-foreground: 240 10% 4%;
+    --macaron-card: 0 0% 100%;
+    --macaron-card-foreground: 240 10% 4%;
+    --macaron-popover: 0 0% 100%;
+    --macaron-popover-foreground: 240 10% 4%;
+    --macaron-primary: 240 6% 10%;
+    --macaron-primary-foreground: 0 0% 98%;
+    --macaron-secondary: 40 18% 94%;
+    --macaron-secondary-foreground: 240 6% 10%;
+    --macaron-muted: 40 18% 94%;
+    --macaron-muted-foreground: 240 4% 46%;
+    --macaron-accent: 40 18% 94%;
+    --macaron-accent-foreground: 240 6% 10%;
+    --macaron-destructive: 0 72% 51%;
+    --macaron-destructive-foreground: 0 0% 98%;
+    --macaron-border: 30 14% 86%;
+    --macaron-input: 30 14% 86%;
+    --macaron-ring: 10 90% 57%;
+    --chart-1: #d85a30;
+    --chart-2: #1d9e75;
+    --chart-3: #7f77dd;
+    --chart-4: #ba7517;
+    --chart-5: #888780;
+    --macaron-radius: 0.5rem;
+    --macaron-font-sans: "Geist Variable", "Noto Sans SC", system-ui, sans-serif;
+    --macaron-font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  }
+}
+
+/* Keep reset overrides unlayered, like the runtime's generated reset, but with
+   zero specificity so explicit border/color utilities always take precedence. */
+:where(.macaron-genui-scope, .macaron-genui-scope *, .macaron-genui-scope ::before, .macaron-genui-scope ::after) {
+  border-color: hsl(var(--macaron-border));
+}
+.macaron-genui-scope { font-family: var(--macaron-font-sans); }

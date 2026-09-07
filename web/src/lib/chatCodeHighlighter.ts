@@ -4,6 +4,7 @@ import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 import type { LanguageRegistration, ThemedToken } from 'shiki';
 import vitesseLight from 'shiki/themes/vitesse-light.mjs';
 import vitesseDark from 'shiki/themes/vitesse-dark.mjs';
+import { loadTheme, type ThemeId } from '../../../artifacts/src/web/theme/themes';
 
 export type ChatCodeLanguage = string;
 export type ChatCodeToken = ThemedToken | RecallToken;
@@ -16,7 +17,6 @@ type LanguageModule = { default: LanguageRegistration[] };
 // default (light) color inline plus a `--shiki-dark` CSS var per token; chat-code.css
 // swaps to the dark var under :root[data-theme="dark"].
 const CHAT_CODE_THEMES = { light: 'vitesse-light', dark: 'vitesse-dark' } as const;
-const CHAT_CODE_THEME_KEY = `${CHAT_CODE_THEMES.light}|${CHAT_CODE_THEMES.dark}`;
 const CODE_HTML_CACHE_LIMIT = 24;
 
 // Curated allowlist: only these grammars ship, each as its own lazily-imported chunk.
@@ -119,12 +119,14 @@ async function ensureLanguageLoaded(highlighter: HighlighterCore, language: Chat
   return (await loadPromise) ? language : 'text';
 }
 
-function getCodeHtmlCacheKey(code: string, language: ChatCodeLanguage) {
-  return `${CHAT_CODE_THEME_KEY}\0${language}\0${code}`;
+async function ensureThemes(highlighter: HighlighterCore, palette: ThemeId) {
+  if (palette === 'playground') return CHAT_CODE_THEMES;
+  if (!highlighter.getLoadedThemes().includes(palette)) await highlighter.loadTheme(await loadTheme(palette));
+  return { light: palette, dark: palette };
 }
 
-export async function renderChatCodeToHtml(code: string, language: ChatCodeLanguage) {
-  const cacheKey = getCodeHtmlCacheKey(code, language);
+export async function renderChatCodeToHtml(code: string, language: ChatCodeLanguage, palette: ThemeId = 'playground') {
+  const cacheKey = `${palette}\0${language}\0${code}`;
   const cached = codeHtmlCache.get(cacheKey);
   if (cached) {
     codeHtmlCache.delete(cacheKey);
@@ -134,7 +136,8 @@ export async function renderChatCodeToHtml(code: string, language: ChatCodeLangu
 
   const highlighter = await getHighlighter();
   const lang = await ensureLanguageLoaded(highlighter, language);
-  const html = highlighter.codeToHtml(code, { lang, themes: CHAT_CODE_THEMES, defaultColor: 'light' });
+  const themes = await ensureThemes(highlighter, palette);
+  const html = highlighter.codeToHtml(code, { lang, themes, defaultColor: 'light' });
   codeHtmlCache.set(cacheKey, html);
   if (codeHtmlCache.size > CODE_HTML_CACHE_LIMIT) {
     const oldestKey = codeHtmlCache.keys().next().value;
@@ -143,7 +146,7 @@ export async function renderChatCodeToHtml(code: string, language: ChatCodeLangu
   return html;
 }
 
-export function createChatCodeDeltaStream(language: ChatCodeLanguage): ChatCodeDeltaController {
+export function createChatCodeDeltaStream(language: ChatCodeLanguage, palette: ThemeId = 'playground'): ChatCodeDeltaController {
   let sourceController: ReadableStreamDefaultController<string> | null = null;
   const source = new ReadableStream<string>({ start(controller) { sourceController = controller; } });
 
@@ -152,9 +155,10 @@ export function createChatCodeDeltaStream(language: ChatCodeLanguage): ChatCodeD
       try {
         const highlighter = await getHighlighter();
         const lang = await ensureLanguageLoaded(highlighter, language);
+        const themes = await ensureThemes(highlighter, palette);
         // The source buffers deltas immediately, so chunks pushed before Shiki boots still replay in order.
         const tokenStream = source.pipeThrough(
-          new CodeToTokenTransformStream({ highlighter, lang, themes: CHAT_CODE_THEMES, defaultColor: 'light', allowRecalls: true }),
+          new CodeToTokenTransformStream({ highlighter, lang, themes, defaultColor: 'light', allowRecalls: true }),
         );
         const reader = tokenStream.getReader();
         let next = await reader.read();

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { checkGenUI } from './genui-check.js';
 import { handleRenderUI } from './macaron-render-tool.js';
+import { loadGenUIUnocssToolkit } from './genui-unocss.js';
 
 const validModule = (className = 'p-4 text-sm') =>
   `export default function App() { return <div className="${className}">Hello</div>; }`;
@@ -20,6 +21,20 @@ test('rejects unknown UnoCSS classes with their source location', async () => {
 
 test('accepts host UnoCSS shortcuts', async () => {
   assert.deepEqual(await checkGenUI(validModule('bg-macaron-gradient')), { ok: true });
+});
+
+test('accepts Wind4-only utilities and migrated legacy component classes', async () => {
+  assert.deepEqual(await checkGenUI(validModule('inset-shadow-sm text-shadow-sm rounded-xs shadow-xs outline-hidden field-sizing-content')), { ok: true });
+});
+
+test('server Wind4 generation retains theme and property preflights without a page reset', async () => {
+  const { generator } = await loadGenUIUnocssToolkit();
+  const result = await generator.generate('bg-background text-primary-foreground rounded-lg shadow-xs ring-2 animate-accordion-down');
+  assert.match(result.css, /--macaron-background/);
+  assert.match(result.css, /--radius-lg: var\(--macaron-radius\)/);
+  assert.match(result.css, /@property --un-ring-shadow/);
+  assert.match(result.css, /@keyframes accordion-down/);
+  assert.doesNotMatch(result.css, /box-sizing: border-box/);
 });
 
 test('rejects UnoCSS utilities assembled across template interpolation', async () => {

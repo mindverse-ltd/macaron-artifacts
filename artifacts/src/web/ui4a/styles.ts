@@ -4,12 +4,12 @@ import { unoConfig } from "../theme/uno";
 export const UI4A_CLASS = "ui4a-surface";
 let generator: ReturnType<typeof createGenerator> | null = null;
 let sheet: HTMLStyleElement | null = null;
+let preflights: HTMLStyleElement | null = null;
+let properties: HTMLStyleElement | null = null;
 let pending = Promise.resolve();
 let generation = 0;
-let preflighted = false;
 const sources = new Map<symbol, Set<string>>();
 const emitted = new Set<string>();
-const scopedReset = `:where(.${UI4A_CLASS}) :where(*, *::before, *::after) { box-sizing: border-box; }\n:where(.${UI4A_CLASS}) :where(button, input, select, textarea) { color: inherit; font: inherit; background: transparent; border: 0 solid; }\n:where(.${UI4A_CLASS}) :where(button) { cursor: pointer; }\n:where(.${UI4A_CLASS}) :where(input, select, textarea) { cursor: text; }\n:where(.${UI4A_CLASS}) :where(h1,h2,h3,h4,h5,h6,p,figure,blockquote,pre,dl,dd) { margin: 0; }\n:where(.${UI4A_CLASS}) :where(ul,ol) { margin: 0; padding: 0; list-style: none; }`;
 
 /** Keep rules local to generated surfaces; an unscoped utility arriving last can otherwise restyle the chat shell. */
 export function createSurfaceStyles(root: HTMLElement) {
@@ -31,19 +31,29 @@ export function createSurfaceStyles(root: HTMLElement) {
       if (epoch !== generation || current !== sequence || !sources.has(key)) return;
       sources.set(key, tokens);
       const fresh = [...tokens].filter((token) => !emitted.has(token));
-      if (partial && preflighted && fresh.length === 0) return;
+      if (partial && fresh.length === 0) return;
+      if (!properties) { properties = document.createElement("style"); properties.dataset.ui4a = "properties"; document.head.append(properties); }
+      if (!preflights) { preflights = document.createElement("style"); preflights.dataset.ui4a = "theme"; document.head.append(preflights); }
       if (!sheet) { sheet = document.createElement("style"); sheet.dataset.ui4a = "utilities"; document.head.append(sheet); }
       if (!partial) {
         emitted.clear();
         for (const values of sources.values()) for (const token of values) emitted.add(token);
-        const { css } = await uno.generate(emitted, { preflights: true });
-        if (epoch === generation && sheet) sheet.textContent = scopedReset + css;
-        preflighted = true;
+        const result = await uno.generate(emitted);
+        if (epoch === generation && sheet && preflights && properties) {
+          properties.textContent = result.getLayers(["properties"]);
+          preflights.textContent = result.getLayers(["theme"]);
+          sheet.textContent = result.getLayers(undefined, ["properties", "theme"]);
+        }
       } else {
         for (const token of fresh) emitted.add(token);
-        const { css } = await uno.generate(fresh, { preflights: !preflighted });
-        if (epoch === generation && sheet) sheet.textContent += (preflighted ? "" : scopedReset) + css;
-        preflighted = true;
+        // Theme dependencies accumulate in Wind4, but @property registrations only
+        // describe this batch. Keep previous registrations alive until settlement.
+        const result = await uno.generate(fresh);
+        if (epoch === generation && sheet && preflights && properties) {
+          properties.textContent += result.getLayers(["properties"]);
+          preflights.textContent = result.getLayers(["theme"]);
+          sheet.textContent += result.getLayers(undefined, ["properties", "theme"]);
+        }
       }
     }).catch((error) => console.error("[ui4a] style generation failed", error));
     return pending;
@@ -56,7 +66,7 @@ export function createSurfaceStyles(root: HTMLElement) {
       sequence++;
       observer.disconnect();
       sources.delete(key);
-      if (!sources.size) { generation++; sheet?.remove(); sheet = null; emitted.clear(); preflighted = false; }
+      if (!sources.size) { generation++; sheet?.remove(); sheet = null; preflights?.remove(); preflights = null; properties?.remove(); properties = null; emitted.clear(); }
     },
   };
 }

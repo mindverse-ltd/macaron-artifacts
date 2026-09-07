@@ -1,8 +1,6 @@
-// $macaron/ui shim — re-exports the real vendored library (src/macaron-vendor/macaron/source.tsx)
-// via window.__macaron_UI set by main.tsx. Enumerates ALL 118 exports from source.tsx
-// (auto-generated from `grep -oE '^export ...' source.tsx`).
+// The host and generated modules share the same published @genui/ui instance.
 const M = globalThis.__macaron_UI;
-if (!M) throw new Error('[genui-shim/ui] window.__macaron_UI not set — make sure main.tsx imported macaron-vendor before mounting GenuiPreview');
+if (!M) throw new Error('[genui-shim/ui] @genui/ui must be registered before mounting GenuiPreview');
 
 export const {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,

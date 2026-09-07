@@ -1,4 +1,4 @@
-// $macaron/ui/charts shim — re-exports the real vendored library via window.
+// $macaron/ui/charts shares the host's published @genui/ui/charts instance.
 const C = globalThis.__macaron_Charts;
 if (!C) throw new Error('[genui-shim/charts] window.__macaron_Charts not set');
 

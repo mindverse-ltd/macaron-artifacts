@@ -1,3 +1,3 @@
-import { defineConfig } from 'unocss';
+import { defineConfig, transformerDirectives, transformerVariantGroup } from 'unocss';
 import { unoConfig } from './src/web/theme/uno';
-export default defineConfig(unoConfig());
+export default defineConfig({ ...unoConfig(), transformers: [transformerVariantGroup(), transformerDirectives()] });

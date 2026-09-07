@@ -55,9 +55,7 @@ export function readableForeground(background: string, foreground: string) {
   return (back + .05) / .05 >= 1.05 / (back + .05) ? '#000000' : '#ffffff';
 }
 
-export function applyTheme(theme: ThemeRegistration, playground: boolean, dark: boolean) {
-  const root = document.documentElement;
-  root.dataset.theme = dark ? 'dark' : 'light';
+export function themePalette(theme: ThemeRegistration, dark: boolean) {
   const colors = theme.colors ?? {};
   const background = colors['editor.background'] ?? theme.bg ?? (dark ? '#0e0e11' : '#ffffff');
   const foreground = colors['editor.foreground'] ?? theme.fg ?? (dark ? '#f2f2f5' : '#16161a');
@@ -69,6 +67,13 @@ export function applyTheme(theme: ThemeRegistration, playground: boolean, dark: 
     danger: colors['errorForeground'] ?? (dark ? '#ff6b83' : '#d9435f'), success: colors['gitDecoration.addedResourceForeground'] ?? (dark ? '#34d399' : '#15803d'), warn: colors['editorWarning.foreground'] ?? (dark ? '#fbbf24' : '#a16207'),
   };
   palette['accent-fg'] = readableForeground(palette.accent, palette['accent-fg']);
+  return palette;
+}
+
+export function applyTheme(theme: ThemeRegistration, playground: boolean, dark: boolean) {
+  const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  const palette = themePalette(theme, dark);
   // Playground remains the exact reference palette; its syntax still comes from Shiki's Vitesse.
   for (const [key, value] of Object.entries(palette)) playground && !['success', 'warn'].includes(key) ? root.style.removeProperty(`--${key}`) : root.style.setProperty(`--${key}`, value);
   root.style.colorScheme = dark ? 'dark' : 'light';

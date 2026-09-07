@@ -3,14 +3,7 @@ import path from 'node:path';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      // Used by the vendored Macaron source (source.tsx, components/ui/*).
-      // Points to /web/src/macaron-vendor — swap to the published npm package
-      // (likely `@macaron/ui`) when the package is published and delete the vendor dir.
-      '@': path.resolve(__dirname, 'src/macaron-vendor'),
-    },
-  },
+  resolve: { dedupe: ['react', 'react-dom', 'partial-react'] },
   plugins: [react()],
   build: {
     outDir: 'dist',

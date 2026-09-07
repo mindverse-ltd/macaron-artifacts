@@ -1,7 +1,8 @@
+// Host-owned tokens for the published GenUI components and their generated code.
 import type { Rule, UserShortcuts } from "@unocss/core";
-import type { Theme } from "@unocss/preset-wind3";
+import type { Theme } from "@unocss/preset-wind4";
 
-const hsl = (name: string) => `hsl(var(--${name}))`;
+const hsl = (name: string) => `hsl(var(--macaron-${name}))`;
 const withForeground = (name: string) => ({ DEFAULT: hsl(name), foreground: hsl(`${name}-foreground`) });
 
 export const unoTheme: Theme = {
@@ -19,12 +20,12 @@ export const unoTheme: Theme = {
     popover: withForeground("popover"),
     card: withForeground("card"),
   },
-  borderRadius: { lg: "var(--radius)", md: "calc(var(--radius) - 2px)", sm: "calc(var(--radius) - 4px)" },
-  fontFamily: {
-    sans: '"Geist Variable", "Noto Sans SC", system-ui, sans-serif',
-    mono: '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  radius: { lg: "var(--macaron-radius)", md: "calc(var(--macaron-radius) - 2px)", sm: "calc(var(--macaron-radius) - 4px)" },
+  font: {
+    sans: 'var(--macaron-font-sans)',
+    mono: 'var(--macaron-font-mono)',
   },
-  // wind3 stores animation data under { keyframes, durations, timingFns }, not Tailwind's animation/keyframes split.
+  // Wind4 retains UnoCSS's animation shape rather than Tailwind's animation/keyframes split.
   animation: {
     keyframes: {
       "accordion-down": "{from{height:0}to{height:var(--radix-accordion-content-height)}}",

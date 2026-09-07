@@ -22,7 +22,7 @@ import { useReplay } from '../components/ReplayControls';
 import { formatDuration } from '../lib/thinkingVerbs';
 import { cancelAutoSend, createScheduleBridge, type ScheduleBridge } from '../lib/autoSend';
 
-// GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
+// GenuiPreview and its published runtime are behind a lazy
 // import so the default codex bundle stays small. First render_ui in a
 // thread triggers the load; subsequent ones use the cached chunk.
 const GenuiPreview = lazy(() =>

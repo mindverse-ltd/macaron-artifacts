@@ -1,11 +1,11 @@
 import type { UnocssLintToolkit } from '@genui/diagnostics/lint';
-import type { Rule, UserShortcuts } from '@unocss/core';
-import type { Theme } from '@unocss/preset-wind3';
+import type { Preset, Rule, UserShortcuts } from '@unocss/core';
+import type { Theme } from '@unocss/preset-wind4';
 
-const hsl = (name: string) => `hsl(var(--${name}))`;
+const hsl = (name: string) => `hsl(var(--macaron-${name}))`;
 const withForeground = (name: string) => ({ DEFAULT: hsl(name), foreground: hsl(`${name}-foreground`) });
 
-// Keep this host configuration aligned with web/src/macaron-vendor/lib/standalone-uno.ts.
+// Keep this host configuration aligned with web/src/lib/genui-theme.ts.
 // The lint implementation stays in @genui/diagnostics/lint; this file only supplies the host's theme extensions.
 const unoTheme: Theme = {
   colors: {
@@ -22,14 +22,14 @@ const unoTheme: Theme = {
     popover: withForeground('popover'),
     card: withForeground('card'),
   },
-  borderRadius: {
-    lg: 'var(--radius)',
-    md: 'calc(var(--radius) - 2px)',
-    sm: 'calc(var(--radius) - 4px)',
+  radius: {
+    lg: 'var(--macaron-radius)',
+    md: 'calc(var(--macaron-radius) - 2px)',
+    sm: 'calc(var(--macaron-radius) - 4px)',
   },
-  fontFamily: {
-    sans: '"Geist Variable", "Noto Sans SC", system-ui, sans-serif',
-    mono: '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  font: {
+    sans: 'var(--macaron-font-sans)',
+    mono: 'var(--macaron-font-mono)',
   },
   animation: {
     keyframes: {
@@ -54,13 +54,16 @@ export const loadGenUIUnocssToolkit = (): Promise<UnocssLintToolkit> =>
   (toolkitPromise ??= Promise.all([
     import('@unocss/core'),
     import('@unocss/autocomplete'),
-    import('@unocss/preset-wind3'),
+    import('@unocss/preset-wind4'),
     import('unocss-preset-animations'),
-  ]).then(async ([core, autocomplete, wind3, animations]) => {
-    const generator = await core.createGenerator(
+  ]).then(async ([core, autocomplete, wind4, animations]) => {
+    // The animation preset still declares the Wind3 theme generic; its CSS-variable
+    // rules also work with Wind4, which preserves the same animation configuration.
+    const animationPreset = animations.presetAnimations() as unknown as Preset<Theme>;
+    const generator = await core.createGenerator<object>(
       { theme: unoTheme, shortcuts: unoShortcuts, rules: unoRules },
       {
-        presets: [wind3.default({ dark: 'class', preflight: false }), animations.presetAnimations()],
+        presets: [wind4.default({ preflights: { reset: false } }), animationPreset],
         separators: [],
       },
     );

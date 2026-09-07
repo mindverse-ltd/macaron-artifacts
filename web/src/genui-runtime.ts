@@ -1,5 +1,5 @@
 // Bootstrapper for the GenUI runtime — sets the __macaron_* globals the
-// vendored sandbox shims re-export from at runtime, then re-exports
+// generated-code shims re-export from at runtime, then re-exports
 // GenuiPreview so the caller can render it. Split into its own module
 // because the Claude bundle sets these globals at boot (see main.tsx) but
 // the Codex bundle deliberately doesn't — this lets the Codex chat
@@ -13,24 +13,13 @@ import * as ReactNamespace from 'react';
 import * as JSXRuntime from 'react/jsx-runtime';
 import * as JSXDevRuntime from 'react/jsx-dev-runtime';
 import * as ReactDOMNamespace from 'react-dom';
-import * as MacaronUI from './macaron-vendor/macaron/source';
-import * as MacaronCharts from './macaron-vendor/genui/charts';
-import * as MacaronLucide from './macaron-vendor/genui/lucide-react';
+import * as MacaronUI from '@genui/ui';
+import * as MacaronCharts from '@genui/ui/charts';
+import * as MacaronLucide from '@genui/ui/icons';
+import '@genui/ui/style.css';
 import * as Motion from 'motion/react';
 
-// UnoCSS runtime — the sandboxed TSX modules render Tailwind-style class
-// strings at runtime (not present at build), so we need the runtime scanner
-// to inject CSS as elements appear.
-import initUnocssRuntime from '@unocss/runtime';
-import presetWind3 from '@unocss/preset-wind3';
-import presetAnimations from 'unocss-preset-animations';
-import { unoTheme, unoShortcuts, unoRules } from './macaron-vendor/lib/standalone-uno';
-
-// $macaron/ui primitives assume a Tailwind element reset (button/input/list
-// normalize); without it native <button> UA borders leak through the
-// preview. Loading these CSS files also has to happen once per session.
-import '@unocss/reset/tailwind.css';
-import './macaron-vendor/base.css';
+import './lib/uno-runtime';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -44,14 +33,6 @@ if (!g.__macaron_React) {
   g.__macaron_Lucide = MacaronLucide;
   g.__macaron_Motion = Motion;
 
-  initUnocssRuntime({
-    defaults: {
-      presets: [presetWind3({ dark: 'class' }), presetAnimations()],
-      theme: unoTheme,
-      shortcuts: unoShortcuts,
-      rules: unoRules,
-    },
-  });
 }
 
 export { GenuiPreview } from './components/GenuiPreview';

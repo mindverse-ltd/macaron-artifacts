@@ -23,7 +23,9 @@ body { margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Low-specificity defaults preserve keyboard focus without overriding outline-none
+   on composite controls, whose enclosing border is their focus indicator. */
+:where(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ui4a-button { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: .5rem; font-weight: 500; transition: color 200ms, background-color 200ms, opacity 200ms, transform 200ms; }
 .ui4a-button:active:not(:disabled) { transform: scale(.98); }
 .ui4a-button:disabled { opacity: .5; pointer-events: none; }
@@ -40,7 +42,7 @@ button:disabled { cursor: not-allowed; }
 .ui4a-field > label { font-size: .75rem; font-weight: 500; color: var(--muted); }
 .ui4a-field > input { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: .5rem; padding: .5rem .75rem; background: transparent; color: var(--fg); font-size: .875rem; }
 .ui4a-field > input::placeholder { color: var(--muted); }
-.ui4a-field > input:focus { border-color: var(--accent); }
+.ui4a-field > input:focus { border-color: var(--accent); outline: none; }
 .ui4a-card { container-type: inline-size; border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
 .ui4a-badge { display: inline-flex; align-items: center; border-radius: 999px; background: var(--surface-3); padding: .125rem .5rem; font-size: .75rem; color: var(--muted); }
 .ui4a-tabs { display: flex; gap: .25rem; border-radius: .5rem; background: var(--surface-3); padding: .25rem; }

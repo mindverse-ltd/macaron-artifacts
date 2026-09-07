@@ -7,7 +7,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch, AlertTriangle, Download } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { markdownRemarkPlugins } from '../lib/markdownPlugins';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
 import type { SessionDetail, Message, Block, CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import { codexApi } from './api';
@@ -357,7 +357,7 @@ function MessageRow({ it, streaming = false, onDecide }: { it: Item; streaming?:
         ) : (
           <div className="cx-msg-text md">
             <MarkdownCodeStreamingProvider content={it.text} streaming={streaming}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={CODEX_MARKDOWN_COMPONENTS}>{it.text}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} components={CODEX_MARKDOWN_COMPONENTS}>{it.text}</ReactMarkdown>
             </MarkdownCodeStreamingProvider>
           </div>
         )}

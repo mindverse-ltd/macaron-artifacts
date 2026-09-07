@@ -32,6 +32,7 @@ import {
   focusCanvasSid,
   subscribeCanvas,
   removeCanvasSid,
+  addDraftSid,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
 
@@ -173,7 +174,12 @@ export function Sidebar({ onNavigate }: {
         {
           icon: <Plus size={14} aria-hidden="true" />,
           label: 'New Session',
-          onClick: () => navigate(`/w/${encodeURIComponent(w.project)}`),
+          onClick: () => {
+            // Navigation alone does not open a composer in an existing workspace.
+            addDraftSid(w.project);
+            navigate(`/w/${encodeURIComponent(w.project)}`);
+            onNavigate?.();
+          },
         },
         {
           icon: <Clipboard size={14} aria-hidden="true" />,

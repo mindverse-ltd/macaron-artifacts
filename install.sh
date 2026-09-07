@@ -24,8 +24,7 @@
 #   1. Checks the local `git` + `node` toolchain.
 #   2. Clones / updates the plugin source to ~/.macaron/artifacts-src (override
 #      with MACARON_ARTIFACTS_HOME=/some/path).
-#   3. Hands off to the plugin's start.sh, which runs `pnpm install && build`
-#      on first launch (~60s) and then serves the WebUI on http://localhost:7878.
+#   3. Installs and builds with pnpm, then serves the WebUI on http://localhost:7878.
 #   4. The server's boot-time seedProviderFromEnv() picks up the env vars above,
 #      upserts them as a saved provider, and (if you were still on the built-in
 #      System provider) activates it. Open the URL and start — no manual
@@ -42,10 +41,9 @@ log() { printf '[macaron] %s\n' "$*"; }
 die() { printf '[macaron] error: %s\n' "$*" >&2; exit 1; }
 
 command -v git  >/dev/null 2>&1 || die "git not found. Install: https://git-scm.com/"
-command -v node >/dev/null 2>&1 || die "node not found. Install Node 22+: https://nodejs.org/"
+command -v node >/dev/null 2>&1 || die "node not found. Install Node 22.9+: https://nodejs.org/"
 
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-[ "$NODE_MAJOR" -ge 22 ] || die "Node $NODE_MAJOR is too old. Macaron needs Node 22+."
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 9) ? 0 : 1)' || die "Source installs need Node 22.9+ for the native .env loader."
 
 # Clone or update the plugin source. Depth 1 keeps the download small; a full
 # reset --hard on refresh means local edits under PLUGIN_HOME are discarded —
@@ -60,12 +58,11 @@ else
   git -C "$PLUGIN_HOME" reset --hard "origin/$BRANCH"
 fi
 
-[ -x "$PLUGIN_HOME/start.sh" ] || die "start.sh missing from $PLUGIN_HOME — repo layout drifted?"
+cd "$PLUGIN_HOME"
+npm exec --yes --package=pnpm@latest -- sh -c 'pnpm install --frozen-lockfile && pnpm build'
 
-# Try to open the browser once the port is up. Backgrounded so start.sh can
-# take over the foreground (its `exec node` blocks intentionally). If start.sh
-# fails before the port binds, this loop just times out silently — the user
-# sees start.sh's stderr and knows what to do.
+# Start the browser probe after the build, so installation time does not consume
+# the readiness timeout. The server stays in the foreground.
 open_when_ready() {
   local url="http://localhost:$PORT"
   local i=0
@@ -85,8 +82,9 @@ open_when_ready() {
 }
 open_when_ready &
 
-# Hand off. start.sh handles pnpm install / build / port conflicts / restart.
 # env vars we care about (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, MACARON_PROVIDER_*)
 # propagate through exec into the Node server, where seedProviderFromEnv reads
 # them at startup.
-exec bash "$PLUGIN_HOME/start.sh"
+export MACARON_ENGINE="${MACARON_ENGINE:-claude}"
+export MACARON_PORT="$PORT"
+exec node --env-file-if-exists=.env server/dist/index.js

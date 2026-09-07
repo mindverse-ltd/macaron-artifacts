@@ -74,30 +74,24 @@ For agents that install Macaron as a plugin rather than running a tarball:
   <Folder name="commands-kimi">
     <File name="macaron.md" />
   </Folder>
-  <File name="start.sh" />
+  <File name="package.json" />
 </Files>
 
-`.claude-plugin/plugin.json` carries the name / description / keywords and `marketplace.json` registers the plugin source; `.codex-plugin/plugin.json` and `.kimi-plugin/plugin.json` are the Codex-side and Kimi-side manifests. `commands/macaron.md` defines the `/macaron` slash command, `commands-kimi/macaron.md` the Kimi-side `/macaron:macaron`, and `start.sh` installs, builds, and launches on first run.
+`.claude-plugin/plugin.json` carries the name / description / keywords and `marketplace.json` registers the plugin source; `.codex-plugin/plugin.json` and `.kimi-plugin/plugin.json` are the Codex-side and Kimi-side manifests. `commands/macaron.md` defines the `/macaron` slash command, and `commands-kimi/macaron.md` the Kimi-side `/macaron:macaron`. Their instructions use the same package scripts as a source checkout.
 
-The `/macaron` command runs `start.sh`, which is the interesting piece:
+Source installs require Node 22.9+ and pnpm 12 (`npm install -g pnpm@latest`). From the plugin root:
 
-<Steps>
-<Step>
-### Mirror out of an ephemeral cache
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+MACARON_ENGINE=claude MACARON_PORT=7878 pnpm start
+```
 
-Plugin cache dirs (`~/.claude/plugins/cache/…`, `~/.codex/plugins/cache/…`) get pruned under the running server. When launched from one, `start.sh` rsyncs source into a stable `~/.macaron/runtime/<version>/` and runs from there so `node_modules` and `dist` survive.
-</Step>
-<Step>
-### Install and build once
+Use `MACARON_ENGINE=codex MACARON_PORT=7979` or `MACARON_ENGINE=kimi MACARON_PORT=7980` for the other engines. `pnpm start` runs the server in the foreground and reads the optional `.env` with Node's native loader; exported variables take precedence. The agent keeps that process in its shell tool's persistent session and checks `/api/health` before opening the browser.
 
-It uses **pnpm via corepack** (ships with Node 22+), installs with `--frozen-lockfile` (falling back to a full resolve), and rebuilds only when a source file is newer than the current `web/dist/index.html` — a fast `find … -print -quit` mtime check.
-</Step>
-<Step>
-### Launch on the right port
+An unchanged checkout can be restarted with just `pnpm start`. After updating or pruning a plugin cache, install/build again and restart the server. Port conflicts are reported by the server; starting it does not kill another listener.
 
-The engine (`claude` / `codex` / `kimi`) picks the default port (`7878` / `7979` / `7980`); if `lsof` is available, any prior process on that port is killed first, then the server boots. Most setup failures (missing Node 22, a broken install) print an actionable `[macaron] fix: …` line to stderr so the launching agent can self-repair and retry — though not every path does (e.g. the post-launch health-check probe just times out).
-</Step>
-</Steps>
+The standalone `install.sh` keeps its source checkout in `~/.macaron/artifacts-src`, installs and builds through pnpm, then starts the same foreground server. Published `mcc` / `mcx` / `mkx` packages continue to run their prebuilt bundles directly.
 
 <Callout type="info" title="Why no committed dist/">
   The plugin ships as **source, not prebuilt** `dist/`. Every commit rebuilding `server/dist` + `web/dist` produced unresolvable rebase conflicts across concurrent PRs, so the build was moved to first-launch instead.

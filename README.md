@@ -100,11 +100,23 @@ Inside Claude Code:
 /macaron
 ```
 
-The slash command starts the local server (`node server/dist/index.js`, fixed port `7878`) and opens `http://localhost:7878` in your browser.
+The slash command installs and builds the plugin source with pnpm, starts the local server on port `7878`, and opens `http://localhost:7878` in your browser. Source installs require Node 22.9+ and pnpm 12 (`npm install -g pnpm@latest`).
 
 Inside Codex, ask it to open the Macaron WebUI. The Codex-side default port is `7979`.
 
 Inside Kimi Code, run `/macaron:macaron`. The Kimi-side default port is `7980`.
+
+To run a source checkout directly:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start                                      # Claude, port 7878
+MACARON_ENGINE=codex MACARON_PORT=7979 pnpm start # Codex
+MACARON_ENGINE=kimi MACARON_PORT=7980 pnpm start  # Kimi
+```
+
+Run one start command per process. `pnpm start` loads `.env` when present; exported variables take precedence. Run install/build again after updating the source. Stop the server with Ctrl-C before updating or restarting it.
 
 ### Views
 
@@ -156,7 +168,7 @@ commands-kimi/                    Kimi Code slash commands (/macaron:macaron)
 skills/genui-builder/             bundled GenUI authoring skill
 skills/macaron-webui-kimi/        Kimi Code WebUI skill
 mkx/                              self-contained Kimi launcher package (port 7980)
-start.sh                          one-time npm install + build, boots server in background
+install.sh                        standalone source installer + foreground server
 shared/                           domain types + SSE protocol (server ↔ web)
 server/                           Fastify API, Claude Agent SDK runner, provider relay
 web/                              Vite + React UI

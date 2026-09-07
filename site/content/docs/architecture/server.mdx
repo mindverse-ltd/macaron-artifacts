@@ -7,7 +7,7 @@ The server is a single Fastify app (`server/src/index.ts`). It owns the agent ru
 
 ## Configuration
 
-The core tunables (port, host, auth token, and optional custom provider settings) live in `server/src/config.ts` and read from the environment, so the launchers and `start.sh` can steer behaviour without touching code. A handful of others are read directly where they're used rather than centralized here — e.g. `MACARON_LOG_LEVEL`, `MACARON_ENGINE`, and `MACARON_CODEX_TRANSPORT`.
+The core tunables (port, host, auth token, and optional custom provider settings) live in `server/src/config.ts` and read from the environment, so the launchers and `pnpm start` can steer behaviour without touching code. A handful of others are read directly where they're used rather than centralized here — e.g. `MACARON_LOG_LEVEL`, `MACARON_ENGINE`, and `MACARON_CODEX_TRANSPORT`.
 
 | name | source | default | meaning |
 | --- | --- | --- | --- |

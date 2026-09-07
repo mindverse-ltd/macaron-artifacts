@@ -9,51 +9,30 @@ Use this skill when the user wants to open the Macaron WebUI — a local browser
 
 **"macaron web ui" is a proper noun, not a task.** Phrases like "open macaron web ui" / "打开 macaron web ui" / "launch the macaron ui" always mean *launch this WebUI*. They do NOT mean "deploy the current project", "build the repo I'm in", or "start a dev server for the surrounding codebase" — regardless of what project the user currently has open. If you're tempted to deploy or serve the current directory in response to one of these phrases, that's the misread this skill exists to prevent: run the bootstrap below instead.
 
-## Resolving the plugin root
+## Launch
 
-Resolve the plugin root from this `SKILL.md` file by going two directories up from `skills/macaron-webui-kimi/`. The launcher script is at `<plugin root>/start.sh`.
-
-## Bootstrap
-
-Run this exactly once. Two env vars matter:
-
-- `MACARON_ENGINE=kimi` — flips the SPA served at `/` from the Claude-focused UI to the Kimi-focused one. **Never omit this.** Without it the user sees the Claude Code UI, not Kimi Code.
-- `MACARON_FOREGROUND=1` — makes `start.sh` `exec node` into the foreground instead of nohup-backgrounding. Backgrounded children get killed when the outer script returns inside your shell tool, so the server would disappear seconds after launch. Foreground keeps the process anchored to the tool session and the URL is printed asynchronously before `exec` blocks.
+Resolve the plugin root by going two directories up from this `SKILL.md`. Use Node 22.9+ and pnpm 12 (`npm install -g pnpm@latest`). The plugin ships as source, so install and build it first:
 
 ```bash
-MACARON_ENGINE=kimi MACARON_FOREGROUND=1 MACARON_PORT=7980 bash "<plugin root>/start.sh"
+pnpm --dir "<plugin root>" install --frozen-lockfile
+pnpm --dir "<plugin root>" build
 ```
 
-Port `7980` is the Kimi-side default so it doesn't collide with the Claude Code plugin (which uses `7878`) or the Codex plugin (`7979`). All three can run at once. If 7980 is busy, tell the user to override with `MACARON_PORT=<n>`.
-
-The script:
-- **Mirrors itself out of the plugin cache on first launch.** `~/.kimi-code/plugins/managed/…` is not a stable working directory — the host can prune it on version sync, which erases `node_modules` + `web/dist` + `server/dist` while any surviving server still listens on 7980 and returns 404s. `start.sh` detects the cache path and rsyncs source into `~/.macaron/runtime/<version>/`, then installs/builds/runs from there. Subsequent launches re-rsync (fast) and reuse the same stable runtime.
-- Uses `corepack pnpm` (Node 22+ ships corepack) to install workspace deps + build on first launch (~60s). If frozen install fails, it retries without the lock. If build fails, it prints a `[macaron] fix: <command>` line — run the printed command and retry.
-- Skips the install/build on subsequent launches if `node_modules` is present and no source file is newer than the current build.
-- Frees the port if a stale `mkx` / `mcx` / `mcc` is bound (`lsof` → `kill`).
-- Prints `Macaron WebUI (engine=kimi): http://localhost:7980` once `/api/health` answers, THEN blocks on `exec node`.
-- Stays in the foreground indefinitely. This is expected — do NOT kill it after launch. The shell tool can move on while this shell keeps the server alive.
-
-Once the URL line prints, open the browser:
+Launch in a persistent shell session. Keep the server in the foreground of that session; do not detach it with `&`, which can lose the process when the shell tool returns. The explicit engine selects the Kimi UI and sessions from `~/.kimi-code/sessions/`:
 
 ```bash
+MACARON_ENGINE=kimi MACARON_PORT=7980 pnpm --dir "<plugin root>" start
+```
+
+`pnpm start` loads the plugin root's optional `.env`; exported variables take precedence. For subsequent launches from an unchanged, already-built checkout, run only the start command. After a plugin update or cache cleanup, install and build again. A running server uses files in that checkout; restart it after the host updates or removes them.
+
+Confirm readiness, then open the browser and return the URL:
+
+```bash
+curl -fsS "http://localhost:7980/api/health"
 open "http://localhost:7980"
 ```
 
-Quote the URL verbatim so the user can click it directly. If `open` fails in a sandbox (`kLSExecutableIncorrectFormat`), tell the user to paste the URL into their browser.
+Use a caller-supplied port in place of `7980` throughout. If the port is busy, inspect the listener. Reuse a healthy Kimi Macaron server, stop only the Macaron process being restarted, or choose another port. Do not kill an unrelated listener.
 
-## What the user sees
-
-- **Dashboard** — every workspace under `~/.kimi-code/sessions/` sorted by last activity.
-- **Workspace** — one project's sessions as tiles on a canvas; pin, reorder, resize, and continue any turn.
-- **Session** — full transcript with tool calls and live GenUI TSX previews.
-- **Settings** — pick the active model/provider (ambient Kimi login, Macaron, or any Kimi / Anthropic / OpenAI-compatible endpoint).
-
-## Notes for the model
-
-- Do NOT run `mkx` / `mcx` / `mcc` directly — always go through `start.sh` so the port-collision handler and env plumbing (especially `MACARON_ENGINE=kimi`) both apply.
-- The Codex and Claude Code flavors of this launcher are separate skills (`macaron-webui` and the Claude plugin's launcher) — this skill is only for Kimi Code sessions.
-- If the port is busy AND the script fails to reclaim it: report the failure verbatim and ask the user for a free port (`MACARON_PORT=<n>`).
-- If `start.sh` errors on install or build: it prints one or more `[macaron] fix: <command>` lines on stderr. Run each printed fix in order, then rerun `start.sh`. Report what happened.
-- The WebUI binds to `127.0.0.1:${port}` — nothing leaves the user's machine.
-- Stop the server with Ctrl-C in the shell that spawned it, or `lsof -ti tcp:${port} | xargs kill`.
+If install or build fails, inspect its output and fix the reported cause before retrying; keep frozen-lockfile enabled. Runtime logs are in the owning shell session. Stop the server with that session's termination control or Ctrl-C.

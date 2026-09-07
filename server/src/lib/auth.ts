@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest, HookHandlerDoneFunction } from 'fastify';
 
-// Loopback peers (the local CLI, start.sh's health curl, a browser on the same
+// Loopback peers (the local CLI, a health-check curl, a browser on the same
 // box) are never challenged — auth only guards access from the network.
 export function isLoopback(ip: string | undefined): boolean {
   if (!ip) return false;

@@ -110,8 +110,15 @@ importers:
   .:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.3.263
+        specifier: 0.3.263
         version: 0.3.263(@anthropic-ai/sdk@0.110.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.4.3))(zod@4.4.3)
+      ai:
+        specifier: 7.0.93
+        version: 7.0.93(zod@4.4.3)
+      partial-json:
+        specifier: 0.1.7
+        version: 0.1.7
+    devDependencies:
       '@fastify/static':
         specifier: ^8.0.0
         version: 8.3.0
@@ -130,9 +137,9 @@ importers:
       '@unocss/preset-wind3':
         specifier: ^66.7.5
         version: 66.7.5
-      ai:
-        specifier: 7.0.93
-        version: 7.0.93(zod@4.4.3)
+      concurrently:
+        specifier: ^9.1.0
+        version: 9.2.3
       croner:
         specifier: ^10.0.1
         version: 10.0.1
@@ -145,9 +152,12 @@ importers:
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
-      partial-json:
-        specifier: 0.1.7
-        version: 0.1.7
+      pkg-pr-new:
+        specifier: ^0.0.75
+        version: 0.0.75
+      playwright-core:
+        specifier: ^1.61.1
+        version: 1.61.1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -163,16 +173,6 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
-    devDependencies:
-      concurrently:
-        specifier: ^9.1.0
-        version: 9.2.3
-      pkg-pr-new:
-        specifier: ^0.0.75
-        version: 0.0.75
-      playwright-core:
-        specifier: ^1.61.1
-        version: 1.61.1
 
   artifacts:
     dependencies:

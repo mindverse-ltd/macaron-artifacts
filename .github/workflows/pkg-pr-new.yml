@@ -25,23 +25,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      # Run the server suite BEFORE publishing so a green pkg.pr.new check can't
-      # ship a broken bundle. CI=1 (set by GitHub Actions) makes the pack+install
-      # isolation suite MANDATORY: MACARON_SKIP_PACK_TESTS is ignored and a
-      # missing toolchain fails hard, so per-engine SDK isolation is always
-      # proven end-to-end (pack → install → boot → real first turn) here.
+      - run: pnpm test:package
       - run: pnpm --filter @macaron/server test
       # `pnpm exec`, not `pnpm dlx`/`bunx`: pkg.pr.new warns against dlx-style
       # runners in CI (they fetch an unpinned build each run). pkg-pr-new is a
       # devDependency, so this executes the lockfile-pinned binary from
-      # node_modules/.bin. publish runs `npm pack`, which fires each package's
-      # `prepack` hook (build shared → bundle server → build web; mcx then stages
-      # those outputs into itself), so both tarballs ship prebuilt server/dist +
-      # web/dist and run without Vite at runtime — no separate build step needed.
+      # node_modules/.bin. The mandatory package test above installs and boots
+      # the same single-package layout in an empty consumer directory.
       # Force long-form URLs because compact URLs require npm repository metadata;
       # these are only published through pkg.pr.new, and --bin shows a CLI command.
-      # Publish `mcc` (root, `.`, Claude), `mcx` (Codex) and `mkx` (Kimi) — three
-      # independent, self-contained packages, each with its own bundle.
-      # `npx mcx@…` / `npx mkx@…` work bare (bin name = package name) and pull
-      # in only that package.
-      - run: pnpm exec pkg-pr-new publish --no-compact --bin . ./mcx ./mkx
+      - run: pnpm exec pkg-pr-new publish --no-compact --bin .

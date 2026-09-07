@@ -25,7 +25,7 @@ GenUI is Macaron's headline feature: the model doesn't just describe a UI, it **
 Both surfaces return an **identical `tool_result` shape**, so the model self-corrects the same way regardless of engine. Before returning, the handler runs `checkGenUI` — a TypeScript diagnose pass over the submitted module — and flips `ok: false` when the code has type errors, so the model gets actionable feedback instead of a silent broken preview.
 
 <Callout type="warn" title="Availability depends on the install form">
-  The full GenUI path — the injected `render_ui` stdio server on the Codex side, and the *semantic* TypeScript diagnostics inside `checkGenUI` — is present when the server runs from **source** (a repo checkout) or a **plugin** install, where `server/src/macaron-mcp-stdio.ts` and `web/src/macaron-vendor` exist. The published pkg.pr.new tarballs (`mcc@…` / `mcx@…`) currently bundle only `server/dist/index.js` + `web/dist`, so they ship neither file: on the Codex path the stdio helper can't be spawned, and `checkGenUI` falls back to compile / syntax / UnoCSS lint only (`serviceUnavailable`, `genui-check.ts`). The in-browser preview renderer still works from `web/dist` on every install form. Packaging those files into the tarball is tracked separately from this docs PR.
+  This describes the retained source application. Its semantic TypeScript diagnostics now resolve `@genui/ui` declarations from the installed package. The unified `macaron-artifacts` distribution has its own harness and UI4A pipeline; see [Packaging](/docs/architecture/packaging).
 </Callout>
 
 <Callout type="info" title="UI changes preview first — by convention">
@@ -34,7 +34,7 @@ Both surfaces return an **identical `tool_result` shape**, so the model self-cor
 
 ## The Live Renderer
 
-On the browser side, `web/src/macaron-vendor/StaticGenUIRenderer.tsx` (wrapped by the thin `GenuiPreview.tsx`) turns streamed TSX text into a mounted React tree. It builds on `partial-react` — a compiler + renderer that tolerates **incomplete** source, so each streamed chunk can re-render without waiting for the full module.
+On the browser side, `web/src/components/GenuiRenderer.tsx` connects the host import map to published `partial-react` and the shared frame-delivery implementation. It tolerates **incomplete** source, so each streamed chunk can render without waiting for the full module. Components and charts come from `@genui/ui`; no renderer or component implementation is copied into this repository.
 
 <Steps>
 <Step>

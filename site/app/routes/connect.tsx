@@ -49,43 +49,43 @@ export default function Connect() {
 
   return (
     <HomeLayout {...baseOptions()}>
-      <div className="p-4 flex flex-col items-center justify-center text-center flex-1">
-        <div className="w-full max-w-md text-left">
-          <h1 className="text-xl font-bold mb-1 text-center">Connect to a Macaron server</h1>
-          <p className="text-fd-muted-foreground mb-6 text-center text-sm">
+      <div className="site:p-4 site:flex site:flex-col site:items-center site:justify-center site:text-center site:flex-1">
+        <div className="site:w-full site:max-w-md site:text-left">
+          <h1 className="site:text-xl site:font-bold site:mb-1 site:text-center">Connect to a Macaron server</h1>
+          <p className="site:text-fd-muted-foreground site:mb-6 site:text-center site:text-sm">
             Start a Macaron server on your machine, then paste its URL here to open its WebUI on this device.
           </p>
 
-          <label className="block text-sm font-medium mb-1">Interface</label>
-          <div className="grid grid-cols-3 gap-2 mb-4">
+          <label className="site:block site:text-sm site:font-medium site:mb-1">Interface</label>
+          <div className="site:grid site:grid-cols-3 site:gap-2 site:mb-4">
             {(['claude', 'codex', 'kimi'] as const).map((e) => (
               <button
                 key={e}
                 type="button"
                 onClick={() => { setEngine(e); track('tab_switch', { group: 'connect-engine', value: e }); }}
-                className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${engine === e ? 'border-fd-primary bg-fd-primary/10 text-fd-primary' : 'border-fd-border text-fd-muted-foreground hovered:bg-fd-accent'}`}
+                className={`site:rounded-md site:border site:px-3 site:py-2 site:text-sm site:font-medium site:transition-colors ${engine === e ? 'site:border-fd-primary site:bg-fd-primary/10 site:text-fd-primary' : 'site:border-fd-border site:text-fd-muted-foreground site:hovered:bg-fd-accent'}`}
               >
                 {e === 'claude' ? 'Claude Code' : e === 'codex' ? 'Codex' : 'Kimi Code'}
               </button>
             ))}
           </div>
 
-          <label className="block text-sm font-medium mb-1">Server URL</label>
+          <label className="site:block site:text-sm site:font-medium site:mb-1">Server URL</label>
           <input
-            className="w-full rounded-md border border-fd-border bg-fd-background px-3 py-2 text-sm mb-1"
+            className="site:w-full site:rounded-md site:border site:border-fd-border site:bg-fd-background site:px-3 site:py-2 site:text-sm site:mb-1"
             placeholder="localhost:7878  ·  https://xxxx.trycloudflare.com/?token=…"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
             autoFocus
           />
-          <p className="text-xs text-fd-muted-foreground mb-4">
+          <p className="site:text-xs site:text-fd-muted-foreground site:mb-4">
             Local server defaults: Claude on <code>localhost:7878</code>, Codex on <code>localhost:7979</code>, Kimi on <code>localhost:7980</code>.
           </p>
 
-          <label className="block text-sm font-medium mb-1">Access token <span className="text-fd-muted-foreground font-normal">(optional if the link already has one)</span></label>
+          <label className="site:block site:text-sm site:font-medium site:mb-1">Access token <span className="site:text-fd-muted-foreground site:font-normal">(optional if the link already has one)</span></label>
           <input
-            className="w-full rounded-md border border-fd-border bg-fd-background px-3 py-2 text-sm mb-4"
+            className="site:w-full site:rounded-md site:border site:border-fd-border site:bg-fd-background site:px-3 site:py-2 site:text-sm site:mb-4"
             placeholder="token"
             type="password"
             autoComplete="off"
@@ -94,20 +94,20 @@ export default function Connect() {
             onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
           />
 
-          {error && <p className="text-sm text-fd-destructive mb-4">{error}</p>}
+          {error && <p className="site:text-sm site:text-fd-destructive site:mb-4">{error}</p>}
 
           <button
             type="button"
-            className="w-full inline-flex items-center justify-center gap-2 text-sm bg-fd-primary text-fd-primary-foreground rounded-full font-medium px-4 py-2.5"
+            className="site:w-full site:inline-flex site:items-center site:justify-center site:gap-2 site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-4 site:py-2.5"
             onClick={go}
           >
-            Open WebUI <ArrowRight className="size-4" />
+            Open WebUI <ArrowRight className="site:size-4" />
           </button>
 
-          <p className="text-xs text-fd-muted-foreground mt-4 text-center">
+          <p className="site:text-xs site:text-fd-muted-foreground site:mt-4 site:text-center">
             The WebUI runs here and talks directly to the server you name — your token is bound to that server, never put in the URL, and never stored on this site.
           </p>
-          <p className="text-xs text-fd-muted-foreground mt-2 text-center">
+          <p className="site:text-xs site:text-fd-muted-foreground site:mt-2 site:text-center">
             Your server must allow this origin: start it with{' '}
             <code>MACARON_ALLOWED_ORIGINS={typeof window !== 'undefined' ? window.location.origin : 'https://artifacts.macaron.im'}</code>. It then requires an access token for cross-origin requests — set <code>MACARON_AUTH_TOKEN</code> or copy the one it prints on start.
           </p>

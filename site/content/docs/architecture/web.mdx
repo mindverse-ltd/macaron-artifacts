@@ -23,7 +23,7 @@ input: {
 The server picks which one is `/` at boot (see [Overview](/docs/architecture/overview)). In dev, Vite serves on `:5273` (`strictPort`) and proxies `/api` to the server on `:7878`.
 
 <Callout title="The @ alias points at vendored source">
-  `@` resolves to `web/src/macaron-vendor` — the vendored Macaron GenUI source (`source.tsx`, `components/ui/*`). When `@macaron/ui` is published on npm, the plan is to swap these imports and delete the vendor dir; the intent is flagged in `main.tsx` and the vendor `README.md`.
+  The retained web application imports `@genui/ui` and `@genui/ui/charts` from the upstream package. Its former `@` alias and copied component sources have been removed; React and `partial-react` are deduplicated by Vite.
 </Callout>
 
 ## Runtime Bootstrap
@@ -41,7 +41,7 @@ React, the JSX runtimes, ReactDOM, the vendored Macaron UI (`MacaronUI`, `Macaro
 <Step>
 ### Boot the UnoCSS runtime
 
-`@unocss/runtime` with `presetWind3` + animations generates utility classes from the DOM at runtime, mirroring Macaron's own `uno.config.ts`. A Tailwind reset is imported first so native control styles don't leak into previews.
+`@unocss/runtime` with `presetWind4` + animations generates utility classes from the DOM at runtime. All three entries share one initialization path and Wind4's built-in reset, so lazily opening a generated UI never injects another reset over the application.
 </Step>
 <Step>
 ### Mount the hash router

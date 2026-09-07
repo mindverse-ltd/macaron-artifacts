@@ -318,7 +318,7 @@ elif [ -n "$(find "$DIR/web/src" "$DIR/server/src" "$DIR/shared/src" \
   needs_build=1
 fi
 
-# A `pnpm bundle` / prepack run leaves dist/index.js as a self-contained bun
+# A `pnpm bundle:legacy` / prepack run leaves dist/index.js as a self-contained bun
 # bundle that inlines server sources. tsc's incremental build only re-emits
 # changed files and never overwrites that entry, so a stale bundle would be
 # served forever ("build succeeded" but nothing changed). Detect the bundle
@@ -330,12 +330,12 @@ fi
 
 if [ "$needs_build" = 1 ]; then
   echo "[macaron] building (~30s)…" >&2
-  if ! (cd "$DIR" && "$_PNPM" run build 2>&1); then
+  if ! (cd "$DIR" && "$_PNPM" run build:legacy 2>&1); then
     cat >&2 <<EOF
 [macaron] build failed. Common causes and fixes:
 [macaron]  1. Node version — this project needs Node 22+; check with \`node --version\`.
 [macaron]  2. Stale install — try:
-[macaron]        cd "$DIR" && rm -rf node_modules && $_PNPM_FIX install && $_PNPM_FIX run build
+[macaron]        cd "$DIR" && rm -rf node_modules && $_PNPM_FIX install && $_PNPM_FIX run build:legacy
 [macaron]  3. Read the build output above for the specific error and share it in an issue.
 EOF
     exit 1

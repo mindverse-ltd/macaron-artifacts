@@ -17,7 +17,7 @@ The default fixture is `replays/checkout-latency.json`. Pass another fixture or
 output path directly to the recorder after building the web app:
 
 ```bash
-pnpm build:web
+pnpm build:web:legacy
 node scripts/replay/render.mjs --input replays/my-session.json --output out/my-session.mp4
 ```
 

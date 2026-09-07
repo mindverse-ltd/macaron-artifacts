@@ -65,7 +65,7 @@ async function main() {
   const fixture = expanded.fixture;
   const webRoot = path.join(repoRoot, 'web/dist');
   if (!fs.existsSync(path.join(webRoot, 'index.html'))) {
-    throw new Error('web/dist is missing. Run `pnpm build:web` before the recorder.');
+    throw new Error('web/dist is missing. Run `pnpm build:web:legacy` before the recorder.');
   }
 
   fs.mkdirSync(path.dirname(options.output), { recursive: true });

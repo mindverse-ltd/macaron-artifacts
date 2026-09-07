@@ -18,7 +18,10 @@ jobs:
         working-directory: site
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/setup@v1
+        with:
+          package-json-file: site/package.json
+          install: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

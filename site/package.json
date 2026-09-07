@@ -2,7 +2,13 @@
   "name": "@macaron/docs",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.28.2",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12",
+      "onFail": "warn"
+    }
+  },
   "scripts": {
     "build": "react-router build && node host-webui.mjs",
     "dev": "react-router dev",

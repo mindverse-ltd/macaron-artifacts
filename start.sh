@@ -219,9 +219,10 @@ SERVER_DIST="$DIR/server/dist/index.js"
 
 # --- pnpm via corepack --------------------------------------------------
 
-# Node 22 ships corepack, which auto-materialises the pnpm binary from the
-# `packageManager` field in package.json. Prefer it over any globally
-# installed pnpm so the version is consistent across machines.
+# Node 22 ships corepack, which resolves the pnpm range declared in
+# `devEngines.packageManager`. Older Corepack releases auto-pin by default;
+# keep startup from rewriting that range into an exact `packageManager` pin.
+export COREPACK_ENABLE_AUTO_PIN=0
 _GLOBAL_PNPM="$(command -v pnpm 2>/dev/null || true)"
 _PNPM=""
 _PNPM_FIX="pnpm"
@@ -231,7 +232,7 @@ if command -v corepack >/dev/null 2>&1; then
   _COREPACK_BIN="$DIR/node_modules/.corepack-bin"
   mkdir -p "$_COREPACK_BIN"
   corepack enable --install-directory "$_COREPACK_BIN" pnpm >/dev/null 2>&1 || true
-  # Prepend the corepack shim dir so `pnpm` resolves to the pinned version.
+  # Prepend the corepack shim dir so `pnpm` resolves to the declared version.
   # Some Corepack builds do not create a shim here unless global pnpm is
   # already installed, so create a local fallback wrapper for package scripts.
   if [ ! -x "$_COREPACK_BIN/pnpm" ]; then
@@ -264,7 +265,7 @@ if [ -z "$_PNPM" ]; then
   cat >&2 <<EOF
 [macaron] neither \`corepack\` (Node 22+) nor a global \`pnpm\` is available.
 [macaron] fix: install Node 22+ (corepack ships with it) or run
-[macaron]      \`npm install -g pnpm@10.28.2\` and retry.
+[macaron]      \`npm install -g pnpm@12\` and retry.
 EOF
   exit 1
 fi

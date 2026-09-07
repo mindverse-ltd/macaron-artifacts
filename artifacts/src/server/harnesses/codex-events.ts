@@ -6,7 +6,7 @@ type Part = { id: string; itemId: string; kind: 'text' | 'reasoning'; ended: boo
 /** Protocol fields verified with `codex app-server generate-ts --experimental` (0.153.4). */
 export class CodexEventMapper {
   private parts = new Map<string, Part>();
-  private tools = new Map<string, string>();
+  private inputs = new Set<string>();
   private outputs = new Set<string>();
 
   map(method: string, raw: unknown): ChatChunk[] {
@@ -40,8 +40,8 @@ export class CodexEventMapper {
       } else {
         const tool = this.tool(item);
         if (tool) {
-          if (!this.tools.has(id)) {
-            this.tools.set(id, tool.name);
+          if (!this.inputs.has(id)) {
+            this.inputs.add(id);
             // App-server exposes complete arguments only. Inventing character deltas here would misrepresent native streaming.
             chunks.push({ type: 'tool-input-available', toolCallId: id, toolName: tool.name, input: tool.input, dynamic: true, providerExecuted: true });
           }

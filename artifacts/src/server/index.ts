@@ -54,7 +54,12 @@ export async function createArtifactsServer(options: { directory: string; instru
           finally { claims.delete(session.id); }
         }
         if (segments.length === 3 && req.method === 'PATCH') { const input = await body(req); if (store.sessions.get(session.id) !== session) return json(res, { error: 'Session not found.' }, 404); if (claims.has(session.id)) return json(res, { error: 'This session is being updated.' }, 409); void metadata.cancel(session.id); if (typeof input.title === 'string' && input.title.trim()) session.title = input.title.trim().slice(0, 100); await store.save(session); return json(res, session); }
-        if (segments[3] === 'stop' && req.method === 'POST') { const run = active.get(session.id); if (run) run.stop(); else void metadata.cancel(session.id); return json(res, { ok: true }); }
+        if (segments[3] === 'stop' && req.method === 'POST') {
+          const run = active.get(session.id);
+          if (run) { run.stop(); await run.done.catch(() => {}); if (active.get(session.id) === run) active.delete(session.id); }
+          else void metadata.cancel(session.id);
+          return json(res, { ok: true });
+        }
         if (segments[3] === 'metadata' && req.method === 'GET') {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' }); req.socket.setNoDelay(true);
           const unsubscribe = metadata.subscribe(session, { update: recap => res.write(`data: ${JSON.stringify(recap)}\n\n`), close: () => res.end() });

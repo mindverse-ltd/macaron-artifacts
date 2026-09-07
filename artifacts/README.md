@@ -14,6 +14,8 @@ Run these commands from the repository root. `MACARON_PORT` and `WEB_PORT` overr
 
 Install and authenticate the native Claude Code or Codex CLI first. The app inherits their local configuration; an empty model field uses the harness default. `MACARON_CLAUDE_PATH` and `MACARON_CODEX_PATH` can select an executable. App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` overrides that directory. Workspace files remain in the directory selected for each session. Deleting an app conversation does not delete workspace files.
 
+For a custom Claude gateway, start the app with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as the CLI. Environment injected only by a shell alias is not inherited by a separately launched app.
+
 ## Boundaries
 
 | Module | Responsibility |

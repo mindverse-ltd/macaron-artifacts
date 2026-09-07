@@ -34,7 +34,7 @@ export class MetadataTasks {
       const startedAt = Date.now();
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]);
       try {
-        for await (const chunk of adapter.run({ sessionId: session.id, nativeId, cwd: session.cwd, prompt: ENRICHMENT_PROMPT, model: session.model, instructions, enrichment: true, signal, onNativeSession: () => {}, approve: async () => false })) {
+        for await (const chunk of adapter.run({ nativeId, cwd: session.cwd, prompt: ENRICHMENT_PROMPT, model: session.model, instructions, enrichment: true, signal, onNativeSession: () => {}, approve: async () => false })) {
           if (signal.aborted || this.tasks.get(session.id) !== task) break;
           if (chunk.type !== 'text-delta') continue;
           text += chunk.delta;
@@ -43,12 +43,15 @@ export class MetadataTasks {
           previous = serialized;
           if (recap.title) session.title = recap.title;
           session.suggestions = recap.suggestions;
+          // Only complete strings reach this branch. Persist them before display so a
+          // cancelled or timed-out fork cannot erase already visible metadata on restart.
+          await this.store.save(session);
+          if (signal.aborted || this.tasks.get(session.id) !== task) break;
           for (const subscriber of subscribers) { try { subscriber.update({ title: session.title, suggestions: session.suggestions }); } catch { subscribers.delete(subscriber); } }
         }
         if (!signal.aborted && this.tasks.get(session.id) === task) {
           const recap = parseRecap(text);
           if (!recap.title && !recap.suggestions.length) console.warn('[metadata]', { sessionId: session.id, harness: adapter.id, durationMs: Date.now() - startedAt, error: 'Metadata response contained no title or suggestions', outputChars: text.length });
-          await this.store.save(session);
         }
       } catch (error) {
         // Metadata remains optional, but a swallowed fork/transport error made production

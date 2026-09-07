@@ -24,6 +24,7 @@ export class WorkspaceStore {
   private loads = new Map<string, Promise<Chat<ChatMessage>>>();
   private chats = new Map<string, Chat<ChatMessage>>();
   private files = new Map<string, Map<string, Artifact>>();
+  private liveRevisions = new Map<string, Map<string, number>>();
   private queues = new Map<string, QueueItem[]>();
   private inflight = new Set<string>();
   private metadata = new Map<string, AbortController>();
@@ -76,7 +77,7 @@ export class WorkspaceStore {
         onFinish: ({ isError, isDisconnect }) => {
           if (!isError && !isDisconnect) this.update(id, { status: 'idle', error: undefined });
           const turn = this.turns.get(id);
-          void this.refresh(id).then(() => { if (!isError && !isDisconnect && this.turns.get(id) === turn) void this.subscribeMetadata(id); });
+          void this.refresh(id, turn, isError || isDisconnect).then(() => { if (!isError && !isDisconnect && this.turns.get(id) === turn) void this.subscribeMetadata(id); });
         },
       });
       this.chats.set(id, chat);
@@ -94,8 +95,12 @@ export class WorkspaceStore {
     if (part.type === 'data-artifact') {
       let files = this.files.get(id);
       if (!files) this.files.set(id, files = new Map());
-      const current = files.get(part.data.path);
-      if (current && current.revision > part.data.revision) return;
+      let revisions = this.liveRevisions.get(id);
+      if (!revisions) this.liveRevisions.set(id, revisions = new Map());
+      // Disk listings use wall-clock snapshot versions; a native turn has its own counter. Only compare revisions from the same stream.
+      const current = revisions.get(part.data.path);
+      if (current !== undefined && current > part.data.revision) return;
+      revisions.set(part.data.path, part.data.revision);
       files.set(part.data.path, part.data);
       // A new file opens the panel. Closing the panel during its stream remains respected.
       if (!this.selectedArtifacts.has(id) && this.dismissed.get(id) !== part.data.path) this.selectedArtifacts.set(id, part.data.path);
@@ -104,12 +109,21 @@ export class WorkspaceStore {
     if (part.type === 'data-recap') this.update(id, { ...(part.data.title ? { title: part.data.title } : {}), suggestions: part.data.suggestions });
   }
 
-  private async refresh(id: string) {
+  private async refresh(id: string, turn = this.turns.get(id), restoreMessages = false) {
     try {
-      const { messages: _messages, ...summary } = await api<Session>(`/api/sessions/${id}`);
-      const status = this.chats.get(id)?.status;
-      this.update(id, { ...summary, ...(status === 'streaming' || status === 'submitted' ? { status: 'running' } : {}) });
-    } catch (error) { this.fail(error); }
+      const { messages, ...summary } = await api<Session>(`/api/sessions/${id}`);
+      if (this.turns.get(id) !== turn) return;
+      const chat = this.chats.get(id);
+      const streaming = chat?.status === 'streaming' || chat?.status === 'submitted';
+      const lastUser = chat?.messages.findLast(message => message.role === 'user');
+      const unacknowledged = lastUser && !messages.some(message => message.id === lastUser.id);
+      // A completed server turn has no resumable journal. Reconcile the durable transcript after a disconnect or a 204 resume.
+      if (restoreMessages && chat && !streaming && summary.status !== 'running' && !unacknowledged) {
+        chat.messages = messages;
+        if (summary.status === 'idle') chat.clearError();
+      }
+      this.update(id, { ...summary, ...(streaming ? { status: 'running' } : unacknowledged ? { status: 'error', error: chat?.error?.message ?? '这条消息尚未发送成功。' } : {}) });
+    } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }
   }
 
   private cancelMetadata(id: string) { this.metadata.get(id)?.abort(); this.metadata.delete(id); }
@@ -139,7 +153,7 @@ export class WorkspaceStore {
   remove = async (id: string) => {
     await api(`/api/sessions/${id}`, { method: 'DELETE' });
     this.cancelMetadata(id); this.turns.delete(id);
-    this.chats.delete(id); this.files.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.dismissed.delete(id);
+    this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.dismissed.delete(id);
     const sessions = this.snapshot.sessions.filter(session => session.id !== id);
     this.publish({ sessions, activeId: this.snapshot.activeId === id ? sessions[0]?.id ?? null : this.snapshot.activeId });
     if (this.snapshot.activeId) await this.select(this.snapshot.activeId);
@@ -161,28 +175,69 @@ export class WorkspaceStore {
     if (!item) return;
     this.queues.set(id, rest);
     this.inflight.add(id);
-    this.turns.set(id, (this.turns.get(id) ?? 0) + 1);
+    const turn = (this.turns.get(id) ?? 0) + 1;
+    this.turns.set(id, turn);
+    this.liveRevisions.delete(id);
     this.dismissed.delete(id);
     this.update(id, { status: 'running', suggestions: [], error: undefined });
     try { chat.clearError(); await chat.sendMessage({ text: item.text }); }
     catch (error) { this.fail(error); }
-    finally { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); }
+    finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
   }
   resume = async (id: string) => {
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id)) return;
+    const turn = this.turns.get(id);
     this.inflight.add(id);
+    this.liveRevisions.delete(id);
     try { chat.clearError(); await chat.resumeStream(); } catch (error) { this.fail(error); }
-    finally { this.inflight.delete(id); await this.refresh(id); void this.drain(id); }
+    finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); await this.refresh(id, turn, true); void this.drain(id); } }
+  };
+  retry = async (id: string) => {
+    const chat = this.chats.get(id);
+    if (!chat || this.inflight.has(id) || chat.status === 'streaming' || chat.status === 'submitted') return;
+    this.inflight.add(id);
+    this.cancelMetadata(id);
+    const turn = (this.turns.get(id) ?? 0) + 1;
+    this.turns.set(id, turn);
+    this.liveRevisions.delete(id);
+    try {
+      const remote = await api<Session>(`/api/sessions/${id}`);
+      if (this.turns.get(id) !== turn) return;
+      const lastUser = chat.messages.findLast(message => message.role === 'user');
+      if (lastUser && !remote.messages.some(message => message.id === lastUser.id)) {
+        if (remote.status === 'running') throw new Error('这个会话仍有一轮正在生成，请稍后重试。');
+        this.update(id, { status: 'running', suggestions: [], error: undefined });
+        chat.clearError();
+        // No argument replays the same message id and intent; appending "continue" would lose a request the server never received.
+        await chat.sendMessage();
+      } else if (remote.status === 'running') {
+        chat.clearError(); await chat.resumeStream(); await this.refresh(id, turn, true);
+      } else {
+        chat.messages = remote.messages; chat.clearError();
+        if (remote.status === 'error') { this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage({ text: '继续。' }); }
+        else { const { messages: _messages, ...summary } = remote; this.update(id, summary); void this.subscribeMetadata(id); }
+      }
+    } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }
+    finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
   };
   stop = async (id: string) => {
     // Cancellation is an explicit server action. Aborting a browser stream alone must never kill the harness.
     this.queues.delete(id);
     this.cancelMetadata(id);
-    await api(`/api/sessions/${id}/stop`, { method: 'POST' });
+    const previousTurn = this.turns.get(id), stopTurn = (previousTurn ?? 0) + 1;
+    this.turns.set(id, stopTurn);
+    try { await api(`/api/sessions/${id}/stop`, { method: 'POST' }); }
+    catch (error) {
+      if (this.turns.get(id) === stopTurn) previousTurn === undefined ? this.turns.delete(id) : this.turns.set(id, previousTurn);
+      const status = this.chats.get(id)?.status;
+      if (status !== 'streaming' && status !== 'submitted') { this.inflight.delete(id); void this.drain(id); }
+      throw error;
+    }
     await this.chats.get(id)?.stop();
     this.inflight.delete(id);
     this.update(id, { status: 'idle' });
+    void this.drain(id);
   };
   approve = (id: string, approvalId: string, approved: boolean) => api(`/api/sessions/${id}/approvals/${encodeURIComponent(approvalId)}`, { method: 'POST', body: JSON.stringify({ approved }) });
   openArtifact = (id: string, path: string) => { this.selectedArtifacts.set(id, path); this.dismissed.delete(id); this.publish(); };

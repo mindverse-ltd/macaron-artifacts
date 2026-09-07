@@ -6,7 +6,7 @@ import { CodexEventMapper } from './codex-events.js';
 import { codexServerRequest, codexThreadParams, runCodexConnection } from './codex.js';
 import type { CodexConnection } from './codex-rpc.js';
 
-const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ sessionId: 'local-session', cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, approve: async () => true, ...overrides });
+const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, approve: async () => true, ...overrides });
 const partial = (event: unknown, parent_tool_use_id: string | null = null) => ({ type: 'stream_event', session_id: 'native-main', parent_tool_use_id, event });
 
 describe('Claude native deltas', () => {
@@ -163,10 +163,64 @@ describe('Codex turn lifecycle', () => {
 
   test('abort interrupts the native turn and releases the connection', async () => {
     const connection = new ReplayConnection('waiting'), controller = new AbortController();
+    const request = connection.request.bind(connection);
+    connection.request = async (method, params) => {
+      const response = await request(method, params);
+      if (method === 'turn/interrupt') connection.notification?.('turn/completed', { threadId: 'native', turn: { status: 'interrupted' } });
+      return response;
+    };
     let error: unknown;
     try { for await (const _ of runCodexConnection(turn({ signal: controller.signal }), connection)) controller.abort(); } catch (caught) { error = caught; }
     expect(error).toMatchObject({ name: 'AbortError' }); expect(connection.closed).toBe(true);
     expect(connection.calls).toContainEqual({ method: 'turn/interrupt', params: { threadId: 'native', turnId: 't1' } });
+  });
+
+  test('abort waits for native completion after interrupt acknowledgement before closing', async () => {
+    const connection = new ReplayConnection('waiting'), controller = new AbortController();
+    let acknowledged!: () => void;
+    const ack = new Promise<void>(resolve => { acknowledged = resolve; }), request = connection.request.bind(connection);
+    connection.request = async (method, params) => { const result = await request(method, params); if (method === 'turn/interrupt') acknowledged(); return result; };
+    const stream = runCodexConnection(turn({ signal: controller.signal }), connection);
+    await stream.next(); controller.abort();
+    const draining = (async () => { try { for await (const _ of stream) {} } catch (error) { expect(error).toMatchObject({ name: 'AbortError' }); } })();
+    await ack;
+    // Let queued cleanup microtasks run: the old implementation closed here immediately.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(connection.closed).toBe(false);
+    connection.notification?.('turn/completed', { threadId: 'native', turn: { status: 'interrupted' } });
+    await draining; expect(connection.closed).toBe(true);
+  });
+
+  test('abort during turn/start waits for the returned turn id and interrupts it', async () => {
+    const connection = new ReplayConnection('waiting'), controller = new AbortController();
+    let starting!: () => void, resolveStart!: (value: Record<string, unknown>) => void;
+    const started = new Promise<void>(resolve => { starting = resolve; }), pendingStart = new Promise<Record<string, unknown>>(resolve => { resolveStart = resolve; });
+    const request = connection.request.bind(connection);
+    connection.request = async (method, params) => {
+      if (method === 'turn/start') { connection.calls.push({ method, params }); starting(); return pendingStart; }
+      const response = await request(method, params);
+      if (method === 'turn/interrupt') connection.notification?.('turn/completed', { threadId: 'native', turn: { status: 'interrupted' } });
+      return response;
+    };
+    const draining = (async () => { try { for await (const _ of runCodexConnection(turn({ signal: controller.signal }), connection)) {} } catch (error) { expect(error).toMatchObject({ name: 'AbortError' }); } })();
+    await started; controller.abort(); await new Promise<void>(resolve => setImmediate(resolve));
+    expect(connection.closed).toBe(false);
+    resolveStart({ turn: { id: 'late-turn' } }); await draining;
+    expect(connection.calls).toContainEqual({ method: 'turn/interrupt', params: { threadId: 'native', turnId: 'late-turn' } });
+    expect(connection.closed).toBe(true);
+  });
+
+  test('an unresponsive turn/start is forcibly closed at the cancellation deadline', async () => {
+    const connection = new ReplayConnection('waiting'), controller = new AbortController();
+    let starting!: () => void, rejectStart!: (error: Error) => void;
+    const started = new Promise<void>(resolve => { starting = resolve; }), pendingStart = new Promise<Record<string, unknown>>((_, reject) => { rejectStart = reject; });
+    const request = connection.request.bind(connection);
+    connection.request = async (method, params) => { if (method === 'turn/start') { starting(); return pendingStart; } return request(method, params); };
+    connection.close = async () => { connection.closed = true; rejectStart(new Error('Connection closed')); };
+    const draining = (async () => { try { for await (const _ of runCodexConnection(turn({ signal: controller.signal }), connection)) {} } catch (error) { expect(error).toMatchObject({ name: 'AbortError' }); } })();
+    await started; const since = performance.now(); controller.abort(); await draining;
+    expect(connection.closed).toBe(true); expect(performance.now() - since).toBeLessThan(3500);
+    expect(connection.calls.some(call => call.method === 'turn/interrupt')).toBe(false);
   });
 
   test('metadata auto-denies native approvals while main turns await the user callback', async () => {

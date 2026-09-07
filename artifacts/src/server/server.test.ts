@@ -65,6 +65,46 @@ test('enrichment keeps bootstrap and native session but does not overwrite its i
   expect(saved.messages).toHaveLength(2);
   expect(saved.messages[1].parts.find(part => part.type === 'text')?.text).toBe('Answer');
 });
+
+test('command output stays as raw deltas through detached replay and durable recovery', async () => {
+  const reached = deferred(), release = deferred();
+  const deltas = ['first\n', 'second\n', 'third\n'];
+  const { app, post, base, session, cwd } = await setup(async function* () {
+    for (const output of deltas) yield { type: 'data-command', data: { toolCallId: 'command', output } };
+    reached.resolve(); await release.promise;
+  });
+  const original = await post('/api/chat', { id: session.id, messages: [message('command-user', 'Run')] });
+  await reached.promise; await original.body?.cancel();
+  const run = app.active.get(session.id)!;
+  const replay = await fetch(`${base}/api/chat/${session.id}/stream`);
+  release.resolve();
+  const chunks = (await replay.text()).split('\n').filter(line => line.startsWith('data: {')).map(line => JSON.parse(line.slice(6)) as ChatChunk);
+  const commands = chunks.filter(chunk => chunk.type === 'data-command');
+  expect(commands.map(chunk => chunk.data.output)).toEqual(deltas);
+  expect(commands.every(chunk => chunk.id === undefined)).toBe(true);
+  await run.done;
+  const restored = new SessionStore(join(cwd, 'sessions')); await restored.load();
+  const outputs = restored.sessions.get(session.id)!.messages[1].parts.flatMap(part => part.type === 'data-command' ? [part.data.output] : []);
+  expect(outputs).toEqual(deltas);
+});
+
+test('visible partial metadata survives cancellation and a server restart', async () => {
+  const reached = deferred();
+  const { post, base, session, cwd } = await setup(async function* (turn) {
+    if (turn.enrichment) {
+      yield { type: 'text-delta', id: 'metadata', delta: '{"title":"Persisted title","suggestions":["First suggestion",' };
+      reached.resolve(); await aborted(turn.signal); return;
+    }
+    turn.onNativeSession('native'); yield { type: 'text-start', id: 'text' }; yield { type: 'text-delta', id: 'text', delta: 'Answer' }; yield { type: 'text-end', id: 'text' };
+  });
+  await (await post('/api/chat', { id: session.id, messages: [message('u1', 'Run')] })).text();
+  await reached.promise;
+  const response = await fetch(`${base}/api/sessions/${session.id}/metadata`);
+  await post(`/api/sessions/${session.id}/stop`, {});
+  expect(await response.text()).toContain('First suggestion');
+  const persisted = JSON.parse(await readFile(join(cwd, 'sessions', `${session.id}.json`), 'utf8')) as Session;
+  expect(persisted.title).toBe('Persisted title'); expect(persisted.suggestions).toEqual(['First suggestion']); expect(persisted.status).toBe('idle');
+});
 test('approval round trip and explicit stop release a waiting harness', async () => {
   let waiting!: () => void;
   const ready = new Promise<void>(resolve => { waiting = resolve; });
@@ -90,6 +130,38 @@ test('blocks foreign origins and file traversal including outward symlinks', asy
   await writeUi4aFile(cwd, '.artifacts/canvases/a.ui4a.tsx', 'export default () => null');
   expect(await readUi4aFile(cwd, '.artifacts/canvases/a.ui4a.tsx')).toBe('export default () => null');
 });
+test('rejects an artifact root symlink for reads and writes inside the workspace', async () => {
+  const cwd = await workspace(), outside = join(cwd, 'private-config');
+  await mkdir(outside); await writeFile(join(outside, 'settings.json'), 'unchanged');
+  await symlink(outside, join(cwd, '.artifacts'));
+  await expect(readUi4aFile(cwd, '.artifacts/settings.json')).rejects.toThrow('Symlinks');
+  await expect(writeUi4aFile(cwd, '.artifacts/settings.json', 'changed')).rejects.toThrow('Symlinks');
+  await expect(writeUi4aFile(cwd, '.artifacts/new.json', 'created')).rejects.toThrow('Symlinks');
+  expect(await readFile(join(outside, 'settings.json'), 'utf8')).toBe('unchanged');
+  await expect(readFile(join(outside, 'new.json'))).rejects.toHaveProperty('code', 'ENOENT');
+});
+test('rejects inner directory and dangling file symlinks leaving the artifact tree', async () => {
+  const cwd = await workspace(), outside = join(cwd, 'private-config');
+  await mkdir(join(cwd, '.artifacts')); await mkdir(outside); await writeFile(join(outside, 'settings.json'), 'unchanged');
+  await symlink('../private-config', join(cwd, '.artifacts/link'));
+  await symlink('../private-config/new.json', join(cwd, '.artifacts/dangling.json'));
+  await expect(readUi4aFile(cwd, '.artifacts/link/settings.json')).rejects.toThrow('Symlinks');
+  await expect(writeUi4aFile(cwd, '.artifacts/link/settings.json', 'changed')).rejects.toThrow('Symlinks');
+  await expect(writeUi4aFile(cwd, '.artifacts/link/nested/new.json', 'created')).rejects.toThrow('Symlinks');
+  await expect(writeUi4aFile(cwd, '.artifacts/dangling.json', 'created')).rejects.toThrow('Symlinks');
+  expect(await readFile(join(outside, 'settings.json'), 'utf8')).toBe('unchanged');
+  await expect(readFile(join(outside, 'new.json'))).rejects.toHaveProperty('code', 'ENOENT');
+});
+test('allows the first artifact write and symlinks resolving within the artifact tree', async () => {
+  const cwd = await workspace();
+  await writeUi4aFile(cwd, '.artifacts/data/settings.json', 'first');
+  await symlink('data', join(cwd, '.artifacts/link'));
+  expect(await readUi4aFile(cwd, '.artifacts/link/settings.json')).toBe('first');
+  await writeUi4aFile(cwd, '.artifacts/link/settings.json', 'updated');
+  await writeUi4aFile(cwd, '.artifacts/link/nested/new.json', 'created');
+  expect(await readFile(join(cwd, '.artifacts/data/settings.json'), 'utf8')).toBe('updated');
+  expect(await readFile(join(cwd, '.artifacts/data/nested/new.json'), 'utf8')).toBe('created');
+});
 test('recovers an interrupted disk journal and marks the partial message', async () => {
   const cwd = await workspace(), store = new SessionStore(cwd); await store.load();
   const session: Session = { id: 'recover', harness: 'codex', cwd, title: 'Recover', messages: [], suggestions: [], createdAt: 0, updatedAt: 0, status: 'running' };
@@ -107,6 +179,26 @@ test('partial metadata exposes only complete strings', () => {
 const deferred = () => { let resolve!: () => void; return { promise: new Promise<void>(done => { resolve = done; }), resolve: () => resolve() }; };
 const aborted = (signal: AbortSignal) => signal.aborted ? Promise.resolve() : new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
 const message = (id: string, text: string) => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+
+test('stop waits for native cancellation before accepting an immediate next turn', async () => {
+  const running = deferred(), cancelling = deferred(), release = deferred(); let turns = 0;
+  const { app, post, session } = await setup(async function* (turn) {
+    turns++;
+    yield { type: 'text-start', id: 'text' };
+    if (turns === 1) { running.resolve(); await aborted(turn.signal); cancelling.resolve(); await release.promise; }
+    else yield { type: 'text-delta', id: 'text', delta: 'Next turn' };
+    yield { type: 'text-end', id: 'text' };
+  });
+  const first = await post('/api/chat', { id: session.id, messages: [message('u1', 'First')] }); await running.promise;
+  let stopReturned = false;
+  const stopped = post(`/api/sessions/${session.id}/stop`, {}).then(response => { stopReturned = true; return response; });
+  await cancelling.promise;
+  expect(stopReturned).toBe(false); expect(app.active.has(session.id)).toBe(true);
+  release.resolve(); expect((await stopped).status).toBe(200);
+  const next = await post('/api/chat', { id: session.id, messages: [message('u2', 'Next')] });
+  expect(next.status).toBe(200); expect(await next.text()).toContain('Next turn');
+  await first.text(); expect(turns).toBe(2);
+});
 
 test('a slow metadata fork cannot block the next user turn or write late metadata', async () => {
   const started = deferred(), forkSignals: AbortSignal[] = [];

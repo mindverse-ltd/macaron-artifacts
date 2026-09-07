@@ -11,32 +11,34 @@ export class SessionStore {
   journalPath(id: string) { return join(this.directory, `${id}.jsonl`); }
   async load() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    for (const name of await readdir(this.directory)) {
-      if (!/^[\w-]+\.json$/.test(name)) continue;
-      const session = JSON.parse(await readFile(join(this.directory, name), 'utf8')) as Session;
-      if (session.status === 'running') {
-        // The journal has no lossy ring limit. Recover complete prefixes even after a process crash.
-        const raw = await readFile(this.journalPath(session.id), 'utf8').catch(() => '');
-        const chunks: ChatChunk[] = [];
-        for (const line of raw.split('\n')) { if (!line) continue; try { chunks.push(JSON.parse(line) as ChatChunk); } catch { break; } }
-        const terminal = chunks.findLast(chunk => chunk.type === 'finish');
-        const interrupted = terminal?.type !== 'finish' || terminal.finishReason !== 'stop';
-        if (chunks.length) {
-          let last: ChatMessage | undefined;
-          const stream = new ReadableStream<ChatChunk>({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } });
-          try { for await (const message of readUIMessageStream<ChatMessage>({ stream })) last = message; } catch { /* Keep the last complete parsed prefix if a final event was torn. */ }
-          if (last?.id) {
-            const recovered = { ...last, ...(interrupted ? { metadata: { ...last.metadata, interrupted: true } } : {}) };
-            session.messages = [...session.messages.filter(message => message.id !== recovered.id), recovered];
-          }
+    const names = (await readdir(this.directory)).filter(name => /^[\w-]+\.json$/.test(name));
+    // Recovery per session is independent, and the server cannot bind its port until this resolves.
+    await Promise.all(names.map(name => this.restore(name)));
+  }
+  private async restore(name: string) {
+    const session = JSON.parse(await readFile(join(this.directory, name), 'utf8')) as Session;
+    if (session.status === 'running') {
+      // The journal has no lossy ring limit. Recover complete prefixes even after a process crash.
+      const raw = await readFile(this.journalPath(session.id), 'utf8').catch(() => '');
+      const chunks: ChatChunk[] = [];
+      for (const line of raw.split('\n')) { if (!line) continue; try { chunks.push(JSON.parse(line) as ChatChunk); } catch { break; } }
+      const terminal = chunks.findLast(chunk => chunk.type === 'finish');
+      const interrupted = terminal?.type !== 'finish' || terminal.finishReason !== 'stop';
+      if (chunks.length) {
+        let last: ChatMessage | undefined;
+        const stream = new ReadableStream<ChatChunk>({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } });
+        try { for await (const message of readUIMessageStream<ChatMessage>({ stream })) last = message; } catch { /* Keep the last complete parsed prefix if a final event was torn. */ }
+        if (last?.id) {
+          const recovered = { ...last, ...(interrupted ? { metadata: { ...last.metadata, interrupted: true } } : {}) };
+          session.messages = [...session.messages.filter(message => message.id !== recovered.id), recovered];
         }
-        session.status = interrupted ? 'error' : 'idle';
-        session.error = interrupted ? 'The server stopped during this turn. The partial response was recovered.' : undefined;
-        await this.save(session);
-        await rm(this.journalPath(session.id), { force: true });
       }
-      this.sessions.set(session.id, session);
+      session.status = interrupted ? 'error' : 'idle';
+      session.error = interrupted ? 'The server stopped during this turn. The partial response was recovered.' : undefined;
+      await this.save(session);
+      await rm(this.journalPath(session.id), { force: true });
     }
+    this.sessions.set(session.id, session);
   }
   list(): SessionSummary[] { return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(({ messages: _, ...summary }) => summary); }
   async save(session: Session) {

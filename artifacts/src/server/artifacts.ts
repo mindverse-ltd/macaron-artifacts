@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, realpath, readdir, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse } from 'partial-json';
 import type { Artifact, ChatChunk } from '../shared/types.js';
@@ -12,16 +12,28 @@ export function ui4aPath(cwd: string, path: string) {
   return target;
 }
 export async function checkedPath(cwd: string, path: string, writing = false): Promise<string> {
-  const target = ui4aPath(cwd, path), base = await realpath(cwd);
+  const target = ui4aPath(cwd, path), base = join(await realpath(cwd), '.artifacts');
+  try {
+    if ((await lstat(base)).isSymbolicLink()) throw new Error('Symlinks cannot replace the .artifacts root.');
+  } catch (error) {
+    // A missing root has no descendants that could redirect the first write.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && writing) return target;
+    throw error;
+  }
   let existing = target;
   while (true) {
     try {
       const actual = await realpath(existing), rel = relative(base, actual);
-      if (rel.startsWith(`..${sep}`) || rel === '..' || isAbsolute(rel)) throw new Error('Symlinks outside the workspace are not accessible.');
-      break;
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || !writing) throw error; existing = dirname(existing); }
+      if (rel.startsWith(`..${sep}`) || rel === '..' || isAbsolute(rel)) throw new Error('Symlinks must stay inside .artifacts.');
+      return resolve(actual, relative(existing, target));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || !writing) throw error;
+      // realpath cannot resolve a dangling link, but writeFile would still follow it
+      // and create its target. Do not mistake that link for a missing path segment.
+      if ((await lstat(existing).catch(() => undefined))?.isSymbolicLink()) throw new Error('Symlinks must resolve inside .artifacts.');
+      existing = dirname(existing);
+    }
   }
-  return target;
 }
 export async function readUi4aFile(cwd: string, path: string) {
   const target = await checkedPath(cwd, path);
@@ -90,13 +102,15 @@ export class ArtifactObserver {
   accept(chunk: ChatChunk) {
     if (chunk.type === 'tool-input-start') this.names.set(chunk.toolCallId, chunk.toolName);
     if (chunk.type !== 'tool-input-delta') return;
+    // Only full-file writes produce speculative frames. An edit's new_string is not a whole module.
+    // Checked before accumulating: every other tool's input would be parsed once per delta and thrown away.
+    if (!/write|create/i.test(this.names.get(chunk.toolCallId) ?? '')) return;
     const json = (this.inputs.get(chunk.toolCallId) ?? '') + chunk.inputTextDelta;
     this.inputs.set(chunk.toolCallId, json);
     try {
       const input = parse(json) as Record<string, unknown>;
       const path = input.file_path ?? input.path;
-      // Only full-file writes produce speculative frames. An edit's new_string is not a whole module.
-      if (typeof path !== 'string' || typeof input.content !== 'string' || !/write|create/i.test(this.names.get(chunk.toolCallId) ?? '')) return;
+      if (typeof path !== 'string' || typeof input.content !== 'string') return;
       const rel = relative(this.cwd, ui4aPath(this.cwd, path)).split(sep).join('/');
       if (!isArtifactEntry(rel) || this.sources.get(rel) === input.content) return;
       this.sources.set(rel, input.content);

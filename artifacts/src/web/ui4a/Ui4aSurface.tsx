@@ -81,5 +81,3 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
     {error ? <div role="alert" className="mt-2 rounded border border-danger/30 p-3 text-sm text-danger">{error}</div> : null}
   </div>;
 }
-
-export default Ui4aSurface;

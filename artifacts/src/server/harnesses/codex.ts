@@ -28,18 +28,22 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
   const queue = new EventQueue<ChatChunk>(), mapper = new CodexEventMapper();
   let nativeId = '', nativeTurnId = '', streaming = false, terminal = false;
   let finish!: () => void, reject!: (error: Error) => void;
+  let turnAvailable!: () => void, nativeSettled!: () => void, cancellation: Promise<void> | undefined;
+  const turnReady = new Promise<void>(resolve => { turnAvailable = resolve; });
+  const nativeDone = new Promise<void>(resolve => { nativeSettled = resolve; });
   const done = new Promise<void>((resolve, fail) => { finish = resolve; reject = fail; });
   // A transport may fail during initialize, before the producer reaches await done.
   void done.catch(() => {});
-  connection.failure = (error) => { reject(error); queue.fail(error); };
+  connection.failure = (error) => { nativeSettled(); reject(error); queue.fail(error); };
   connection.serverRequest = (method, params) => codexServerRequest(turn, method, params);
   connection.notification = (method, raw) => {
     const params = record(raw);
     if (!streaming || (params.threadId && params.threadId !== nativeId)) return;
-    if (method === 'turn/started') nativeTurnId = string(record(params.turn).id);
+    if (method === 'turn/started') { nativeTurnId = string(record(params.turn).id); if (nativeTurnId) turnAvailable(); }
     for (const chunk of mapper.map(method, params)) queue.push(chunk);
     if (method === 'turn/completed') {
       terminal = true;
+      nativeSettled();
       for (const chunk of mapper.finish()) queue.push(chunk);
       const result = record(params.turn);
       if (turn.signal.aborted || result.status === 'interrupted') reject(abortError());
@@ -48,7 +52,19 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
     } else if (method === 'error' && !params.willRetry) reject(new Error(safeError(record(params.error).message || params.message || 'Codex stream failed')));
   };
   const abort = () => {
-    if (nativeId && nativeTurnId && !terminal) void connection.request('turn/interrupt', { threadId: nativeId, turnId: nativeTurnId }).catch(() => {});
+    if (streaming && !terminal && !cancellation) {
+      // Interrupt acknowledgement only accepts cancellation; turn/completed confirms
+      // the native turn actually settled. Keep the process alive for that event, bounded
+      // even when cancellation races a turn/start response that never arrives.
+      let timer: ReturnType<typeof setTimeout>;
+      const deadline = new Promise<void>(resolve => { timer = setTimeout(resolve, 2000); });
+      const interrupt = (async () => {
+        await turnReady;
+        if (!terminal) await connection.request('turn/interrupt', { threadId: nativeId, turnId: nativeTurnId });
+        await nativeDone;
+      })();
+      cancellation = Promise.race([interrupt.catch(() => {}), nativeDone, deadline]).finally(() => clearTimeout(timer));
+    }
     queue.fail(abortError()); reject(abortError());
   };
   turn.signal.addEventListener('abort', abort, { once: true });
@@ -67,6 +83,7 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
     streaming = true;
     const response = await connection.request('turn/start', { threadId: nativeId, input: [{ type: 'text', text: turn.prompt, text_elements: [] }] });
     nativeTurnId ||= string(record(response.turn).id);
+    if (nativeTurnId) turnAvailable();
     await done;
   })();
   void producer.then(() => queue.end(), (error) => queue.fail(error));
@@ -74,6 +91,7 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
   finally {
     turn.signal.removeEventListener('abort', abort);
     reject(abortError());
+    await cancellation;
     await connection.close();
     await producer.catch(() => {});
   }

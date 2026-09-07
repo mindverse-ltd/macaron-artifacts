@@ -1,7 +1,6 @@
 import type { Approval, ChatChunk, HarnessId, HarnessInfo } from '../../shared/types.js';
 
 export interface HarnessTurn {
-  sessionId: string;
   nativeId?: string;
   cwd: string;
   prompt: string;

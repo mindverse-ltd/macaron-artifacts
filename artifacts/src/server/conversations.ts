@@ -15,7 +15,6 @@ export class ActiveConversation {
   private listeners = new Set<ReadableStreamDefaultController<ChatChunk>>();
   private ended = false;
   private mainSettled = false;
-  private commandOutput = new Map<string, string>();
   latest?: ChatMessage;
   readonly done: Promise<void>;
   constructor(private store: SessionStore, readonly session: Session, private adapter: HarnessAdapter, private instructions: string, prompt: string, private metadata: MetadataTasks) {
@@ -44,7 +43,7 @@ export class ActiveConversation {
     for (const listener of this.listeners) { try { listener.enqueue(chunk); } catch { this.listeners.delete(listener); } }
   }
   private async execute(prompt: string) {
-    const session = this.session, before = [...session.messages], commands = this.commandOutput;
+    const session = this.session, before = [...session.messages];
     const disk = createWriteStream(this.store.journalPath(session.id), { mode: 0o600 });
     let diskError: Error | undefined, failure: unknown, nativeCheckpoint: Promise<void> | undefined;
     disk.on('error', error => { diskError = error; this.controller.abort(); });
@@ -52,13 +51,9 @@ export class ActiveConversation {
     const diskDone = finished(disk).catch(error => { diskError = error instanceof Error ? error : new Error(String(error)); });
     const stream = createUIMessageStream<ChatMessage>({
       execute: async ({ writer }) => {
-        const emit = (chunk: ChatChunk) => {
-          if (chunk.type === 'data-command') {
-            const output = (commands.get(chunk.data.toolCallId) ?? '') + chunk.data.output;
-            commands.set(chunk.data.toolCallId, output);
-            writer.write({ ...chunk, id: `command:${chunk.data.toolCallId}`, data: { ...chunk.data, output } });
-          } else writer.write(chunk);
-        };
+        // Command output stays a per-delta part. Rewriting one accumulated part instead would
+        // re-send, re-journal and re-store the whole output on every chunk of a noisy build.
+        const emit = (chunk: ChatChunk) => writer.write(chunk);
         const artifacts = new ArtifactObserver(session.cwd, emit);
         const approve = async (request: Approval) => {
           if (this.controller.signal.aborted) return false;
@@ -77,7 +72,7 @@ export class ActiveConversation {
         writer.write({ type: 'start-step' });
         try {
           await artifacts.start();
-          const turn = { sessionId: session.id, nativeId: session.nativeId, cwd: session.cwd, prompt, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
+          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
             if (session.nativeId === id) return;
             session.nativeId = id;
             // First output waits for this durable identity checkpoint. A recovered partial

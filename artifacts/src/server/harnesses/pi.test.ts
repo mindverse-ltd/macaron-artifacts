@@ -6,7 +6,7 @@ import type { FileEntry } from '@earendil-works/pi-coding-agent';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessTurn } from './types.js';
 import { PiEventMapper } from './pi-events.js';
-import { createPiSession, piMetadataEntries, runPiSession } from './pi.js';
+import { createPiSession, piMetadataEntries, piPayloadPrefix, restorePiPayloadPrefix, runPiSession } from './pi.js';
 
 const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, approve: async () => true, ...overrides });
 const update = (type: string, fields: Record<string, unknown> = {}) => ({ type: 'message_update', assistantMessageEvent: { type, contentIndex: 0, ...fields } });
@@ -63,6 +63,18 @@ describe('Pi event mapping', () => {
   });
 });
 
+test('protects serialized Responses and Google prefixes while retaining the new conversation and abort signal', () => {
+  const source = { model: 'model', instructions: 'parent', tools: [{ name: 'tool' }], prompt_cache_key: 'parent-id', input: [{ role: 'developer', content: 'parent rule' }, { role: 'user', content: 'main' }] };
+  const next = { ...source, instructions: 'changed', prompt_cache_key: 'new-id', input: [{ role: 'developer', content: 'new rule' }, { role: 'assistant', content: 'answer' }, { role: 'user', content: 'metadata' }] };
+  expect(restorePiPayloadPrefix(next, 'openai-responses', piPayloadPrefix(source, 'openai-responses')!)).toEqual({ ...source, input: [source.input[0], ...next.input.slice(1)] });
+  const signal = new AbortController().signal;
+  const google = { model: 'gemini', contents: [{ role: 'user', parts: [{ text: 'metadata' }] }], config: { abortSignal: signal, systemInstruction: 'new', tools: [], temperature: 0.5 } };
+  const result = restorePiPayloadPrefix(google, 'google-generative-ai', piPayloadPrefix({ ...google, config: { systemInstruction: 'parent', tools: [{ functionDeclarations: [] }] } }, 'google-generative-ai')!) as typeof google;
+  expect(result.config.abortSignal).toBe(signal); expect(result.config.systemInstruction).toBe('parent'); expect(result.contents).toEqual(google.contents); expect(result.config.temperature).toBe(0.5);
+  expect(() => restorePiPayloadPrefix({ custom: true }, 'custom', piPayloadPrefix(source, 'openai-responses')!)).toThrow('no longer matches');
+  expect(() => restorePiPayloadPrefix({ ...next, model: 'another-model' }, 'openai-responses', piPayloadPrefix(source, 'openai-responses')!)).toThrow('no longer matches');
+});
+
 describe('Pi native SDK with a local scripted provider', () => {
   let directory: string, agentDir: string, cwd: string, oldAgentDir: string | undefined;
   let server: ReturnType<typeof Bun.serve>, requests: Record<string, unknown>[] = [], answer = 'main';
@@ -95,6 +107,11 @@ describe('Pi native SDK with a local scripted provider', () => {
       pi.registerTool({ name: 'confirm_probe', label: 'Confirm probe', description: 'Test a native extension confirmation', parameters: { type: 'object', properties: {} }, async execute(_id, _args, _signal, _update, ctx) { const ok = await ctx.ui.confirm('Extension confirmation', 'Proceed?'); return { content: [{ type: 'text', text: String(ok) }] }; } });
       pi.on('session_start', (_event, ctx) => pi.appendEntry('test-extension-start', { session: ctx.sessionManager.getSessionId() }));
       pi.on('session_shutdown', () => pi.appendEntry('test-extension-stop', {}));
+      pi.on('before_provider_request', (event, ctx) => {
+        const payload = event.payload, id = ctx.sessionManager.getSessionId();
+        payload.metadata = { user_id: id };
+        return { ...payload, messages: [{ role: 'system', content: 'Final extension prefix: ' + id }, ...payload.messages], tools: payload.tools?.map(tool => ({ ...tool, function: { ...tool.function, description: tool.function.description + ' ' + id } })), prompt_cache_key: 'extension-' + id };
+      });
     }`);
   });
   afterAll(async () => { server?.stop(true); if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir; if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -108,6 +125,7 @@ describe('Pi native SDK with a local scripted provider', () => {
     expect(nativeId).toStartWith(agentDir);
     expect(JSON.stringify(requests[0])).toContain('Native user instruction.');
     expect(JSON.stringify(requests[0])).toContain('Stable UI4A guidance');
+    expect((requests[0]!.messages as { content: string }[])[0]!.content).toStartWith('Final extension prefix: ');
     answer = 'second response'; await run({ nativeId, prompt: 'follow up' });
     expect(JSON.stringify(requests.at(-1))).toContain('first response');
     expect(await readFile(nativeId, 'utf8')).toContain('second response');
@@ -124,6 +142,9 @@ describe('Pi native SDK with a local scripted provider', () => {
     const metadataRequest = requests.at(-1)!;
     expect(JSON.stringify(metadataRequest)).toContain('latest assistant response');
     expect((metadataRequest.messages as unknown[])[0]).toEqual((mainRequest.messages as unknown[])[0]);
+    expect(metadataRequest.prompt_cache_key).toBe(mainRequest.prompt_cache_key);
+    expect(metadataRequest.metadata).toEqual(mainRequest.metadata);
+    expect((metadataRequest.messages as { role: string }[]).filter(message => message.role === 'system')).toEqual((mainRequest.messages as { role: string }[]).filter(message => message.role === 'system'));
     expect(metadataRequest.tools).toEqual(mainRequest.tools);
     expect(await readFile(nativeId, 'utf8')).toBe(original.trimEnd());
     expect(await Bun.file(path.join(cwd, 'forbidden.txt')).exists()).toBe(false);
@@ -141,6 +162,24 @@ describe('Pi native SDK with a local scripted provider', () => {
     finally { await runtime.dispose(); }
     expect(fork.entries).not.toBe(entries);
     expect(() => piMetadataEntries([{ type: 'session', id: 'empty', cwd, timestamp: '', version: 3 }] as FileEntry[])).toThrow('completed');
+  }, 30_000);
+
+  test('metadata uses SSE at the provider boundary without changing the parent transport or affinity', async () => {
+    let nativeId = ''; answer = 'main'; await run({ onNativeSession: id => { nativeId = id; } });
+    const parent = await createPiSession(turn({ cwd, nativeId }));
+    const metadata = await createPiSession(turn({ cwd, nativeId, enrichment: true }));
+    const seen: unknown[] = [], stream = metadata.session.modelRuntime.streamSimple.bind(metadata.session.modelRuntime);
+    metadata.session.modelRuntime.streamSimple = (model, context, options) => { seen.push({ transport: options?.transport, sessionId: options?.sessionId }); return stream(model, context, options); };
+    try {
+      expect(parent.session.agent.transport).toBe('auto');
+      expect(metadata.session.agent.transport).toBe('sse');
+      // Even an extension changing Agent.transport cannot make a metadata request
+      // acquire a provider socket under the concurrently live parent's cache id.
+      metadata.session.agent.transport = 'websocket';
+      answer = 'metadata'; await metadata.session.prompt('metadata only'); await metadata.session.waitForIdle();
+      expect(seen).toEqual([{ transport: 'sse', sessionId: parent.session.sessionId }]);
+      expect(parent.session.agent.transport).toBe('auto'); expect(parent.session.agent.sessionId).toBe(parent.session.sessionId);
+    } finally { await metadata.dispose(); await parent.dispose(); }
   }, 30_000);
 
   test('metadata restores the active native branch without flattening sibling history', async () => {

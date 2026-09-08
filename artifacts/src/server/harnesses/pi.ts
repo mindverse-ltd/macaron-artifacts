@@ -9,9 +9,37 @@ import { PiEventMapper } from './pi-events.js';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 type RequestContext = Parameters<AgentSession['agent']['streamFunction']>[1];
-type Bootstrap = { version: 1; instructions: string; systemPrompt: string; tools: NonNullable<RequestContext['tools']> };
+type PayloadPrefix = { api: string; history: string; fields: Record<string, unknown>; instructions: unknown[] };
+type Bootstrap = { version: 2; instructions: string; systemPrompt: string; tools: NonNullable<RequestContext['tools']>; payload?: PayloadPrefix };
 const BOOTSTRAP = 'macaron-artifacts:pi-bootstrap';
 const toolSchemas = (tools: RequestContext['tools']): NonNullable<RequestContext['tools']> => (tools ?? []).map(tool => ({ name: tool.name, description: tool.description, parameters: JSON.parse(JSON.stringify(tool.parameters)), ...(tool.constrainedSampling !== undefined ? { constrainedSampling: structuredClone(tool.constrainedSampling) } : {}) }));
+const PREFIX_FIELDS = ['model', 'modelId', 'system', 'instructions', 'tools', 'toolConfig', 'prompt_cache_key', 'promptCacheKey', 'user', 'metadata', 'config.systemInstruction', 'config.tools', 'config.toolConfig', 'context.systemPrompt', 'context.tools', 'options.sessionId'];
+const field = (value: unknown, key: string): unknown => key.split('.').reduce<unknown>((value, key) => record(value)[key], value);
+const instruction = (value: unknown) => ['system', 'developer'].includes(String(record(value).role));
+
+/** These are the native SDK's provider payload layouts. Unknown/custom layouts fail closed for metadata. */
+export function piPayloadPrefix(payload: unknown, api: string): PayloadPrefix | undefined {
+  const history = ['messages', 'input', 'contents', 'context.messages'].find(key => Array.isArray(field(payload, key)));
+  if (!history) return;
+  const messages = field(payload, history) as unknown[], first = messages.findIndex(value => !instruction(value));
+  const end = first < 0 ? messages.length : first;
+  if (messages.slice(end).some(instruction)) return;
+  return { api, history, fields: structuredClone(Object.fromEntries(PREFIX_FIELDS.flatMap(key => field(payload, key) === undefined ? [] : [[key, field(payload, key)]]))), instructions: structuredClone(messages.slice(0, end)) };
+}
+
+export function restorePiPayloadPrefix(payload: unknown, api: string, prefix: PayloadPrefix): unknown {
+  const current = piPayloadPrefix(payload, api);
+  if (!current || current.api !== prefix.api || current.history !== prefix.history || current.fields.model !== prefix.fields.model || current.fields.modelId !== prefix.fields.modelId) throw new Error('Pi metadata provider payload no longer matches its parent');
+  const output = { ...record(payload) };
+  const set = (key: string, value: unknown) => {
+    const keys = key.split('.'); let object = output;
+    for (const name of keys.slice(0, -1)) { if (object[name] === undefined && value === undefined) return; object[name] = { ...record(object[name]) }; object = object[name] as Record<string, unknown>; }
+    if (value === undefined) delete object[keys.at(-1)!]; else object[keys.at(-1)!] = structuredClone(value);
+  };
+  for (const key of PREFIX_FIELDS) set(key, prefix.fields[key]);
+  set(prefix.history, [...prefix.instructions, ...(field(payload, prefix.history) as unknown[]).slice(current.instructions.length)]);
+  return output;
+}
 
 /** A unique in-memory native identity prevents cleanup collisions; provider affinity still uses the parent's id. */
 export function piMetadataEntries(entries: FileEntry[]): { entries: FileEntry[]; affinity: string } {
@@ -59,7 +87,7 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
       manager = sdk.SessionManager.inMemory(turn.cwd, undefined, fork.entries);
       const saved = manager.getBranch().findLast(entry => entry.type === 'custom' && entry.customType === BOOTSTRAP);
       const value = saved?.type === 'custom' ? record(saved.data) : {};
-      if (value.version !== 1 || value.instructions !== turn.instructions || typeof value.systemPrompt !== 'string' || !Array.isArray(value.tools)) throw new Error('Pi session is missing its matching UI4A bootstrap');
+      if (value.version !== 2 || value.instructions !== turn.instructions || typeof value.systemPrompt !== 'string' || !Array.isArray(value.tools) || !value.payload) throw new Error('Pi session is missing its matching UI4A bootstrap');
       bootstrap = value as Bootstrap;
     } else manager = sdk.SessionManager.open(turn.nativeId);
   }
@@ -80,13 +108,26 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
     const ui = current.extensionRunner.getUIContext();
     await current.bindExtensions({ mode: 'print', uiContext: { ...ui, confirm: async (title, message, options) => turn.enrichment ? false : abortable(turn.approve({ id: randomUUID(), tool: title, input: { message } }), options?.signal ? AbortSignal.any([turn.signal, options.signal]) : turn.signal) }, abortHandler: () => { void current.abort(); } });
     if (turn.signal.aborted) throw abortError();
-    if (affinity) current.agent.sessionId = affinity;
+    if (affinity) {
+      current.agent.sessionId = affinity;
+      // Pi keys provider WebSocket caches by this affinity, while dispose uses the
+      // distinct native id. SSE preserves server caching without sharing live sockets.
+      current.agent.transport = 'sse';
+    }
     const nativeStream = current.agent.streamFunction;
     let captured: Bootstrap | undefined;
     current.agent.streamFunction = (model, context, options) => {
       if (bootstrap) context = { ...context, systemPrompt: bootstrap.systemPrompt, tools: toolSchemas(bootstrap.tools) };
-      else captured = { version: 1, instructions: turn.instructions, systemPrompt: context.systemPrompt ?? '', tools: toolSchemas(context.tools) };
-      return nativeStream(model, context, options);
+      else captured = { version: 2, instructions: turn.instructions, systemPrompt: context.systemPrompt ?? '', tools: toolSchemas(context.tools) };
+      const previous = options?.onPayload;
+      return nativeStream(model, context, { ...options, ...(bootstrap ? { transport: 'sse' as const } : {}), onPayload: async (payload, model) => {
+        const changed = await previous?.(payload, model), final = changed === undefined ? payload : changed;
+        // The native extension hook runs after provider serialization and can rewrite
+        // system messages, schemas and affinity. Protect its final output, not its input.
+        if (bootstrap) return restorePiPayloadPrefix(final, model.api, bootstrap.payload!);
+        if (captured) { try { captured.payload = piPayloadPrefix(final, model.api); } catch { captured.payload = undefined; } }
+        return changed;
+      } });
     };
     return {
       session: current,

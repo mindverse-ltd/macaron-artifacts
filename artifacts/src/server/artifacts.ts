@@ -3,9 +3,10 @@ import { lstat, mkdir, readFile, realpath, readdir, stat, writeFile } from 'node
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse } from 'partial-json';
 import type { Artifact, ChatChunk } from '../shared/types.js';
+import { isArtifactEntry } from '../shared/artifact-path.js';
+export { isArtifactEntry } from '../shared/artifact-path.js';
 
 const MAX_BYTES = 2 * 1024 * 1024;
-export const isArtifactEntry = (path: string) => /^\.artifacts\/(?:canvases\/)?[^/]+\.(?:ui4a\.)?tsx$/.test(path);
 export function ui4aPath(cwd: string, path: string) {
   const target = resolve(cwd, path), rel = relative(resolve(cwd), target);
   if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !rel.startsWith(`.artifacts${sep}`)) throw new Error('Files must be inside this workspace’s .artifacts directory.');

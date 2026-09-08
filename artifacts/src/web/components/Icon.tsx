@@ -23,6 +23,7 @@ const ICON_PATHS = {
   chevronUp: "m18 15-6-6-6 6",
   arrowDown: "M12 5v14M19 12l-7 7-7-7",
   panelLeft: "M3 3h18v18H3zM9 3v18",
+  sliders: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   ellipsis: "M12 12h.01M19 12h.01M5 12h.01",
 } as const;
 

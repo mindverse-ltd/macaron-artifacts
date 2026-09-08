@@ -19,6 +19,82 @@ describe('persistent session chat connections', () => {
     store.setDraft('first', ''); expect(store.draft('second')).toBe('Unsent in B');
     unsubscribe(); store.setDraft('first', 'New draft'); expect(firstUpdates).toBe(2);
   });
+
+  test('clearing a session profile and model removes old summary values when JSON omits the cleared fields', async () => {
+    const first = { ...session('first'), profileId: 'previous-profile', model: 'previous-model' };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/harnesses') return Response.json([]);
+      if (path === '/api/sessions') return Response.json([first]);
+      if (path.endsWith('/artifacts')) return Response.json([]);
+      if (path.endsWith('/metadata')) return new Response('data: {"suggestions":[]}\n\n');
+      if (init?.method === 'PATCH') {
+        expect(JSON.parse(String(init.body))).toEqual({ profileId: null, model: null });
+        const { profileId: _profile, model: _model, ...cleared } = first;
+        return Response.json(cleared);
+      }
+      return Response.json(first);
+    }) as typeof fetch;
+    const store = new WorkspaceStore(); await store.initialize(); const chat = store.chat('first');
+    expect(store.active()).toMatchObject({ profileId: 'previous-profile', model: 'previous-model' });
+    await store.configure('first', { profileId: null, model: null });
+    expect(store.active()?.profileId).toBeUndefined(); expect(store.active()?.model).toBeUndefined(); expect(store.chat('first')).toBe(chat);
+  });
+
+  test('a delayed finish GET cannot restore the old profile after configuration PATCH or stall the next turn', async () => {
+    const first = { ...session('first'), profileId: 'previous-profile', model: 'previous-model' };
+    let started!: () => void, release!: () => void;
+    const refreshing = new Promise<void>(resolve => { started = resolve; });
+    let reads = 0, sends = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/harnesses') return Response.json([]);
+      if (path === '/api/sessions') return Response.json([first]);
+      if (path.endsWith('/artifacts')) return Response.json([]);
+      if (path.endsWith('/metadata')) return new Response('data: {"suggestions":[]}\n\n');
+      if (path === '/api/chat') {
+        sends++; first.messages = JSON.parse(String(init?.body)).messages;
+        return new Response(`data: {"type":"start","messageId":"answer-${sends}"}\n\ndata: {"type":"finish"}\n\n`, { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
+      }
+      if (init?.method === 'PATCH') { Object.assign(first, JSON.parse(String(init.body))); return Response.json(first); }
+      if (++reads === 2) {
+        const stale = structuredClone(first);
+        return new Promise<Response>(resolve => { release = () => resolve(Response.json(stale)); started(); });
+      }
+      return Response.json(first);
+    }) as typeof fetch;
+    const store = new WorkspaceStore(); await store.initialize();
+    store.send('first', 'Finish the previous turn'); await refreshing;
+    try {
+      await store.configure('first', { profileId: 'next-profile', model: 'next-model' });
+      expect(store.active()).toMatchObject({ profileId: 'next-profile', model: 'next-model' });
+    } finally { release(); }
+    await tick();
+    expect(store.active()).toMatchObject({ profileId: 'next-profile', model: 'next-model' });
+    store.send('first', 'Use the selected profile'); await tick(); await tick();
+    expect(sends).toBe(2); expect(store.chat('first')?.status).toBe('ready');
+  });
+
+  test('configuration saved while the initial transcript loads keeps the newer summary and still initializes chat data', async () => {
+    const first = { ...session('first'), profileId: 'previous-profile', model: 'previous-model', messages: [{ id: 'saved-message', role: 'assistant' as const, parts: [{ type: 'text' as const, text: 'Durable history' }] }] };
+    let started!: () => void, release!: () => void;
+    const loading = new Promise<void>(resolve => { started = resolve; });
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/harnesses') return Response.json([]);
+      if (path === '/api/sessions') return Response.json([first]);
+      if (path.endsWith('/artifacts')) return Response.json([]);
+      if (path.endsWith('/metadata')) return new Response('data: {"suggestions":[]}\n\n');
+      if (init?.method === 'PATCH') return Response.json({ ...first, ...JSON.parse(String(init.body)), title: 'Current title' });
+      return new Promise<Response>(resolve => { release = () => resolve(Response.json(first)); started(); });
+    }) as typeof fetch;
+    const store = new WorkspaceStore(), initialized = store.initialize(); await loading;
+    try { await store.configure('first', { profileId: 'next-profile', model: 'next-model' }); }
+    finally { release(); }
+    await initialized;
+    expect(store.active()).toMatchObject({ title: 'Current title', status: 'idle', profileId: 'next-profile', model: 'next-model' });
+    expect(store.chat('first')?.messages).toEqual(first.messages); expect(store.getSnapshot().loading).toBe(false);
+  });
   for (const failure of ['network', 400, 409] as const) test(`a rejected ${failure} submission preserves its prompt and retries the same message only on demand`, async () => {
     const first = session('first');
     const requests: { id: string; messages: Session['messages'] }[] = [];

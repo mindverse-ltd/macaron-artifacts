@@ -1,6 +1,6 @@
 // Server-side GenUI diagnostics for render_ui. The shared GenUI linter owns compile, strict syntax,
 // and UnoCSS diagnostics; this host adds TS semantic diagnostics over Claude's TSX, with
-// $macaron/ui resolved to the REAL vendored source via compilerOptions.paths — so facade misuse
+// $ui4a/ui resolved to the shared six-component source via compilerOptions.paths — so facade misuse
 // (bad props, missing exports) surfaces with the actual valid types, not degraded to `any`. The
 // LanguageService scaffolding + bag formatting come from @genui/diagnostics, so every surface uses
 // the same diagnostic shape and formatter.
@@ -13,27 +13,18 @@ import { collectGenUILintDiagnostics } from "@genui/diagnostics/lint";
 import { WEB_ROOT } from "../config.js";
 import { loadGenUIUnocssToolkit } from "./genui-unocss.js";
 
-// Facade -> vendored source on disk, relative to WEB_ROOT (the tsconfig dir). Only specifiers the
-// browser resolves to OUR vendored source belong here; bare npm packages (lucide-react, motion)
-// are deliberately omitted so TS resolves them through web/node_modules with their real types —
-// mapping lucide-react here would shadow node_modules and make the facade (export * from
-// "lucide-react") import itself, collapsing every icon export. $macaron/ui/katex is NOT mapped:
-// the vendored source exists but the browser has no katex shim, so the check must reject it.
+// Both UI names resolve to the exact six components registered by the browser. Bare packages
+// (Headless UI, Recharts, Lucide) retain their real types through web/node_modules; removed
+// $macaron/ui submodules are deliberately unmapped so unsupported imports are rejected.
 // `framer-motion` -> motion/react: the browser shim serves framer-motion and motion from one API
 // (motion v12 is framer-motion renamed), but only `motion` is in web/node_modules, so alias
 // framer-motion onto motion/react's types. (motion's .d.ts re-exports framer-motion, so
 // AnimatePresence etc. degrade the same way they do for a native `motion/react` import — matching
 // the browser shim's behavior rather than emitting a false TS2307.)
-// `@/` entries exist for source.tsx's OWN internal imports (@/components/ui/*, @/lib/*) — the
-// browser's BASE_IMPORTS has no @/ entries (and esm.sh can't resolve @/), so user TSX should not
-// import @/ directly; the tool description already forbids bare/relative imports.
 const FACADE_PATHS: Record<string, string[]> = {
-  "$macaron/ui": ["./src/macaron-vendor/macaron/source.tsx"],
-  "$macaron/ui/charts": ["./src/macaron-vendor/genui/charts.tsx"],
+  "$ui4a/ui": ["../artifacts/src/web/components/ui4a-ui.tsx"],
+  "$macaron/ui": ["../artifacts/src/web/components/ui4a-ui.tsx"],
   "framer-motion": ["./node_modules/motion/react"],
-  "@/components/ui/*": ["./src/macaron-vendor/components/ui/*"],
-  "@/lib/*": ["./src/macaron-vendor/lib/*"],
-  "@/*": ["./src/macaron-vendor/*"],
 };
 
 const compilerOptions: ts.CompilerOptions = {
@@ -70,7 +61,7 @@ const toDiag = (d: ts.Diagnostic): GenUIDiagnostic => {
 
 // LanguageService is expensive to build; one shared service handles every render_ui call. The
 // `serviceUnavailable` latch only disables host semantic checks (e.g. when a published install has
-// no vendored source). Shared compile/syntax/UnoCSS lint remains active in that state.
+// no shared component source). Shared compile/syntax/UnoCSS lint remains active in that state.
 let service: TypeCheckService | undefined;
 let serviceUnavailable = false;
 
@@ -78,7 +69,7 @@ const collectSemanticDiagnostics = (code: string): GenUIDiagnostic[] => {
   if (serviceUnavailable) return [];
   try {
     if (!service) {
-      if (!existsSync(path.join(WEB_ROOT, "src", "macaron-vendor"))) {
+      if (!existsSync(path.resolve(WEB_ROOT, FACADE_PATHS["$ui4a/ui"]![0]!))) {
         serviceUnavailable = true;
         return [];
       }

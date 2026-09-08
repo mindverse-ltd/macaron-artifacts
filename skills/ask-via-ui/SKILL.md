@@ -23,7 +23,7 @@ description: "Whenever you would ask the user a question — pick between option
 
 Every widget you render for an answer must:
 1. Show the question clearly at the top (one sentence).
-2. Present the answer surface (buttons / inputs / sliders / whatever fits) using `$macaron/ui` components.
+2. Present the answer surface using the six `$ui4a/ui` components: `Button`, `Field`, `Card`, `Badge`, `Tabs`, and `Disclosure`. Compose layouts with native HTML and UnoCSS Wind4 utilities; use native inputs or `@headlessui/react` for other controls. `$macaron/ui` is only a compatibility alias for these same six components.
 3. On submit / click, call `sendUserMessage(...)` with a natural-language sentence that includes every value the next turn needs. Fold structured data (JSON fenced block) into that string when the fields don't compress into prose.
 4. End your assistant text after render with a one-sentence ack ("Pick one above.", "Fill out the form."). Do NOT restate the options in prose.
 
@@ -32,7 +32,7 @@ Every widget you render for an answer must:
 ### A. Choice picker (2–5 options)
 
 ```tsx
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Stack, Button } from '$macaron/ui';
+import { Card, Button } from '$ui4a/ui';
 import { sendUserMessage } from '$macaron/chat';
 
 const options = [
@@ -43,27 +43,18 @@ const options = [
 export default function App() {
   return (
     <Card className="max-w-md">
-      <CardHeader>
-        <CardTitle>Pick one</CardTitle>
-        <CardDescription>The decision, in one sentence.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Stack className="gap-2">
-          {options.map((o) => (
-            <Button
-              key={o.id}
-              variant="outline"
-              className="justify-start h-auto py-3 text-left"
-              onClick={() => sendUserMessage(o.reply)}
-            >
-              <div className="flex flex-col items-start gap-0.5">
-                <span className="font-medium">{o.label}</span>
-                <span className="text-xs opacity-70">{o.hint}</span>
-              </div>
-            </Button>
-          ))}
-        </Stack>
-      </CardContent>
+      <h2 className="text-lg font-semibold">Pick one</h2>
+      <p className="mt-1 text-sm text-muted">The decision, in one sentence.</p>
+      <div className="mt-4 flex flex-col gap-2">
+        {options.map((o) => (
+          <Button key={o.id} variant="secondary" className="justify-start h-auto py-3 text-left" onClick={() => sendUserMessage(o.reply)}>
+            <span className="flex flex-col items-start gap-0.5">
+              <span className="font-medium">{o.label}</span>
+              <span className="text-xs opacity-70">{o.hint}</span>
+            </span>
+          </Button>
+        ))}
+      </div>
     </Card>
   );
 }
@@ -73,7 +64,7 @@ export default function App() {
 
 ```tsx
 import { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent, Stack, Input, Label, Button, Switch } from '$macaron/ui';
+import { Card, Field, Button } from '$ui4a/ui';
 import { sendUserMessage } from '$macaron/chat';
 
 export default function App() {
@@ -90,15 +81,13 @@ export default function App() {
 
   return (
     <Card className="max-w-md">
-      <CardHeader><CardTitle>Configuration</CardTitle></CardHeader>
-      <CardContent>
-        <Stack className="gap-3">
-          <div><Label>Service name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-api" /></div>
-          <div><Label>Port</Label><Input type="number" value={port} onChange={(e) => setPort(e.target.value)} /></div>
-          <div className="flex items-center justify-between"><Label>Enable SSL</Label><Switch checked={ssl} onCheckedChange={setSsl} /></div>
-          <Button onClick={submit} disabled={!name}>Apply</Button>
-        </Stack>
-      </CardContent>
+      <h2 className="text-lg font-semibold">Configuration</h2>
+      <form className="mt-4 flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <Field label="Service name" value={name} onChange={(event) => setName(event.target.value)} placeholder="my-api" required />
+        <Field label="Port" type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} required />
+        <label className="flex items-center gap-2"><input type="checkbox" checked={ssl} onChange={(event) => setSsl(event.target.checked)} />Enable SSL</label>
+        <Button type="submit" disabled={!name}>Apply</Button>
+      </form>
     </Card>
   );
 }
@@ -111,7 +100,7 @@ The most common question a coding agent asks — "want me to commit this?" — i
 Add the countdown ONLY when the session gives you evidence the user wants the default to just happen: they said "just commit" / "don't ask me", or they've approved the same thing several times already. No evidence → same card, drop the `useAutoSend` line and the `(Ns)` suffix.
 
 ```tsx
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button, Text } from '$macaron/ui';
+import { Card, Button } from '$ui4a/ui';
 import { sendUserMessage, useAutoSend } from '$macaron/chat';
 
 const COMMIT = 'Commit it.';
@@ -125,17 +114,13 @@ export default function App() {
 
   return (
     <Card className="max-w-md">
-      <CardHeader>
-        <CardTitle>Commit these changes?</CardTitle>
-        <CardDescription>3 files, +82 −14 — `feat: add retry to the upload queue`</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Row className="gap-2 justify-end items-center">
-          {left !== null && <Text className="text-xs opacity-60 mr-auto">Committing automatically in {left}s</Text>}
-          <Button variant="ghost" onClick={() => sendUserMessage(SKIP)}>Don't commit</Button>
-          <Button onClick={() => sendUserMessage(COMMIT)}>Commit{left !== null ? ` (${left}s)` : ''}</Button>
-        </Row>
-      </CardContent>
+      <h2 className="text-lg font-semibold">Commit these changes?</h2>
+      <p className="mt-1 text-sm text-muted">3 files, +82 −14 — <code>feat: add retry to the upload queue</code></p>
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+        {left !== null && <span className="text-xs text-muted mr-auto">Committing automatically in {left}s</span>}
+        <Button variant="ghost" onClick={() => sendUserMessage(SKIP)}>Don't commit</Button>
+        <Button onClick={() => sendUserMessage(COMMIT)}>Commit{left !== null ? ` (${left}s)` : ''}</Button>
+      </div>
     </Card>
   );
 }
@@ -146,22 +131,18 @@ Show the file/diff summary in the card — the user is approving a specific chan
 ### D. Confirm before destructive
 
 ```tsx
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button } from '$macaron/ui';
+import { Card, Button } from '$ui4a/ui';
 import { sendUserMessage } from '$macaron/chat';
 
 export default function App() {
   return (
-    <Card className="max-w-md border-amber-200">
-      <CardHeader>
-        <CardTitle>Delete 12 files?</CardTitle>
-        <CardDescription>This can't be undone.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Row className="gap-2 justify-end">
-          <Button variant="outline" onClick={() => sendUserMessage("Cancel, don't delete anything.")}>Cancel</Button>
-          <Button variant="destructive" onClick={() => sendUserMessage('Yes, delete the 12 files.')}>Delete 12 files</Button>
-        </Row>
-      </CardContent>
+    <Card className="max-w-md">
+      <h2 className="text-lg font-semibold">Delete 12 files?</h2>
+      <p className="mt-1 text-sm text-muted">This can't be undone.</p>
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button variant="secondary" onClick={() => sendUserMessage("Cancel, don't delete anything.")}>Cancel</Button>
+        <Button variant="danger" onClick={() => sendUserMessage('Yes, delete the 12 files.')}>Delete 12 files</Button>
+      </div>
     </Card>
   );
 }

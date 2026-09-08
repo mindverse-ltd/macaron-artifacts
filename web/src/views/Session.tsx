@@ -52,7 +52,7 @@ import { toolHeader, bashCommand, isToolExpandable } from '../lib/toolHeader';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
-import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
+import { GenuiRenderer } from '../components/GenuiRenderer';
 import { track, trackFailedOnce, trackRenderedOnce } from '../lib/telemetry';
 import { CreatePrDialog } from '../components/CreatePrDialog';
 import { collapseReadSearchGroups, summarize } from '../lib/collapseReadSearch';
@@ -205,7 +205,7 @@ export function flatten(messages: Message[]): Item[] {
           const toolUseId = (b as unknown as { id?: string }).id || `synthetic-${i}`;
           // Stable key by toolUseId so the live placeholder (created on tool_use)
           // and the post-load jsonl render reconcile into the same component —
-          // otherwise StaticGenUIRenderer would unmount/remount and flash.
+          // otherwise GenuiRenderer would unmount/remount and flash.
           i++;
           const it: Extract<Item, { kind: 'genui' }> = {
             id: `genui-${toolUseId}`,
@@ -794,7 +794,7 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
     setHasRendered(true);
   }, [it.toolUseId]);
   // onError is a no-op now — we don't surface runtime errors as banners
-  // anymore; StaticGenUIRenderer's own crossfade keeps the last good frame
+  // anymore; partial-react keeps the last good frame
   // and a later retry (which we let through the filter above) is the fix.
   // It's still the funnel's failure signal, so it reports.
   const onError = useCallback((err: Error, phase: string) => { if (!streaming) trackFailedOnce(it.toolUseId, 'claude', phase, err.message); }, [streaming, it.toolUseId]);
@@ -837,7 +837,7 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
         aria-hidden={!hasRendered}
         style={!hasRendered ? { height: 0, overflow: 'hidden', visibility: 'hidden' } : undefined}
       >
-        <StaticGenUIRenderer
+        <GenuiRenderer
           code={displayCode}
           active
           streaming={streaming}

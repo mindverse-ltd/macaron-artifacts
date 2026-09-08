@@ -1,11 +1,9 @@
 {
   "name": "mcx",
   "version": "0.1.0",
+  "private": true,
   "description": "Macaron Codex WebUI — ChatGPT-style chat over the Codex SDK. Self-contained launcher, prebuilt server + web bundles.",
   "type": "module",
-  "scripts": {
-    "prepack": "pnpm -w prepack && node scripts/stage.mjs"
-  },
   "bin": {
     "mcx": "./bin/mcx.mjs"
   },
@@ -23,9 +21,9 @@
     "@genui/diagnostics": "https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@251c59f",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/codex-sdk": "^0.142.5",
-    "@unocss/autocomplete": "^66.7.5",
-    "@unocss/core": "^66.7.5",
-    "@unocss/preset-wind3": "^66.7.5",
+    "@unocss/autocomplete": "66.8.1",
+    "@unocss/core": "66.8.1",
+    "@unocss/preset-wind4": "66.8.1",
     "croner": "^10.0.1",
     "fastify": "^5.2.0",
     "ignore": "^7.0.5",

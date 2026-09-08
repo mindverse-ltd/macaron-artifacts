@@ -1,0 +1,3 @@
+.palette-select { display: flex; align-items: center; gap: 1rem; margin-block: .75rem; font-size: .875rem; }
+.palette-select select { max-width: 100%; border: 1px solid var(--cx-border, var(--border)); border-radius: .375rem; padding: .375rem .75rem; color: inherit; background: var(--cx-surface, var(--surface)); }
+.palette-select select:focus-visible { outline: 2px solid var(--cx-text, var(--accent)); outline-offset: 2px; }

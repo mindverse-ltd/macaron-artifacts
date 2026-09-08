@@ -28,17 +28,21 @@ Does NOT fire for:
 
 **Step 1: read the current source.** Find the target component(s). Read enough surrounding code to know what props / state / classes are in play. If it's a large page, read the specific section only.
 
-**Step 2: render the AFTER state.** Call `render_ui` with a TSX module that IS the proposed replacement — same visual, same interactions, ideally re-using the same `$macaron/ui` components. Inline any state / mock props needed to make it visually complete. Do NOT stub interactive parts as "placeholder" — a preview the user can't play with is useless.
+**Step 2: render the AFTER state.** Call `render_ui` with a TSX module that IS the proposed replacement — same visual, same interactions. Use `$ui4a/ui` for `Button`, `Field`, `Card`, `Badge`, `Tabs`, and `Disclosure`; compose other structure with native HTML and UnoCSS Wind4 utilities. `$macaron/ui` aliases these same six components. Inline any state / mock props needed to make it visually complete. Do NOT stub interactive parts as "placeholder" — a preview the user can't play with is useless.
 
 **Step 3: end the widget with 3 buttons.**
 
 ```tsx
-<Row className="gap-2 justify-end mt-4">
+import { Button } from '$ui4a/ui';
+import { sendUserMessage } from '$macaron/chat';
+
+function PreviewActions() {
+  return <div className="flex flex-wrap gap-2 justify-end mt-4">
   <Button variant="ghost"
     onClick={() => sendUserMessage("Discard this preview, keep the current UI.")}>
     Discard
   </Button>
-  <Button variant="outline"
+  <Button variant="secondary"
     onClick={() => sendUserMessage("Tweak this preview: [describe what to change]. Re-render.")}>
     Tweak
   </Button>
@@ -46,7 +50,8 @@ Does NOT fire for:
     onClick={() => sendUserMessage("Apply this preview to the actual file(s). Write the changes now.")}>
     Apply →
   </Button>
-</Row>
+  </div>;
+}
 ```
 
 The Tweak button's message is a template — real code should hint at common tweaks (e.g. "Tweak spacing / colors / copy / layout — say which").

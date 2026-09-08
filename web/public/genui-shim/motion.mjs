@@ -1,4 +1,4 @@
-// motion/react shim — re-exports the real vendored npm package via window
+// motion/react shim — shares the host's installed motion package via window.
 // so user TSX, source.tsx components, and partial-react all share one React.
 const M = globalThis.__macaron_Motion;
 if (!M) throw new Error('[genui-shim/motion] window.__macaron_Motion not set');

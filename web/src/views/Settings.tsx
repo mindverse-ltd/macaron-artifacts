@@ -5,6 +5,7 @@ import { api, type PublicSettings, type PublicCustomProvider, type ProviderInput
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import { useTheme, setTheme, type Theme } from '../lib/theme';
+import { PaletteSelect } from '../components/PaletteSelect';
 import { getPushState, subscribeToPush, unsubscribeFromPush, type PushState } from '../lib/pwa';
 import {
   SOUND_EVENTS,
@@ -235,6 +236,7 @@ export function Settings() {
         <div className="settings-row-head">
           <h2 className="sec-title">Appearance</h2>
         </div>
+        <PaletteSelect />
         <div className="theme-row">
           <div className="theme-seg" role="radiogroup" aria-label="Theme">
             {THEME_OPTIONS.map((o) => (

@@ -37,9 +37,18 @@ test('the most-fired triggers sit early in the instructions', () => {
 });
 
 test('the authoring rules that shape the TSX survive in the description', () => {
-  for (const needle of ['$macaron/ui', '$macaron/chat', 'useAutoSend', 'export default function App()']) {
+  for (const needle of ['$ui4a/ui', '$macaron/ui', '$macaron/chat', 'useAutoSend', 'export default function App()']) {
     const at = RENDER_UI_TOOL_DESCRIPTION.indexOf(needle);
     assert.ok(at > 0 && at < MCP_TEXT_LIMIT, `${needle} at ${at} — past the cut the model writes raw divs`);
+  }
+});
+
+test('authoring guidance advertises the shared minimal runtime', () => {
+  for (const needle of ['Button, Field, Card, Badge, Tabs, Disclosure', '@headlessui/react', 'recharts', 'lucide-react', 'UnoCSS Wind4', 'bg-surface', 'text-fg']) {
+    assert.ok(RENDER_UI_TOOL_DESCRIPTION.includes(needle), needle);
+  }
+  for (const needle of ['$macaron/ui/charts', 'CardHeader', 'StatGrid', 'Tailwind v3', '$ui4a/state', '$ui4a/fs']) {
+    assert.ok(!RENDER_UI_TOOL_DESCRIPTION.includes(needle), needle);
   }
 });
 

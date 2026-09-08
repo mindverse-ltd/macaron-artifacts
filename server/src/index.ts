@@ -271,11 +271,11 @@ try {
   }
   startScheduler();
   // Pre-warm the render_ui TS check: the first diagnose pays full program construction. Do it now,
-  // at boot, instead of mid-turn while an SSE stream is live. The `import "$macaron/ui"` is what
-  // makes this warm the expensive half — it pulls source.tsx and its whole vendored tree into the
+  // at boot, instead of mid-turn while an SSE stream is live. The `import "$ui4a/ui"` is what
+  // makes this warm the expensive half — it pulls the shared components and their dependencies into the
   // snapshot cache; without an import TS lazily skips them and the first real render_ui still pays
   // ~300ms. checkGenUI never throws (it degrades to an ack on failure), so this can't crash boot.
-  setImmediate(() => void checkGenUI('import "$macaron/ui";\nexport default function App() { return null }'));
+  setImmediate(() => void checkGenUI('import "$ui4a/ui";\nexport default function App() { return null }'));
   // Build the search index in the background so first-boot never blocks on a
   // full ~/.claude/projects walk. Best-effort: a failed sync just leaves the
   // index empty until the next self-refreshing search retries it.

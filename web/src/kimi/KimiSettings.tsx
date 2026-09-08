@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useConfirm } from '../components/Confirm';
+import { PaletteSelect } from '../components/PaletteSelect';
 import {
   kimiApi,
   type KimiProviderType,
@@ -74,6 +75,7 @@ export function KimiSettings() {
         </div>
       </header>
 
+      <PaletteSelect />
       <div className="kx-settings-grid">
         <ProviderList
           builtin={builtin!}

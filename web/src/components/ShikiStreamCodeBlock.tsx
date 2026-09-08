@@ -10,6 +10,8 @@ import {
   type ChatCodeTokenStream,
 } from '../lib/chatCodeHighlighter';
 import { nextScrollStickiness } from '../lib/chatCodeScroll';
+import { useTheme } from '../lib/theme';
+import type { ThemeId } from '../../../artifacts/src/web/theme/themes';
 
 type CodeTokenSegment = { key: string; content: string; style?: CSSProperties; animate: boolean };
 type CodeTokenItem = { key: string; segments: CodeTokenSegment[] };
@@ -44,25 +46,25 @@ async function copyChatCode(text: string) {
   if (!copied) throw new Error('Clipboard copy failed');
 }
 
-function StaticHighlightedCode({ code, language }: { code: string; language: ReturnType<typeof resolveChatCodeLanguage> }) {
+function StaticHighlightedCode({ code, language, palette }: { code: string; language: ReturnType<typeof resolveChatCodeLanguage>; palette: ThemeId }) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setHtml('');
     if (!code) return () => undefined;
-    void renderChatCodeToHtml(code, language).then(
+    void renderChatCodeToHtml(code, language, palette).then(
       (next) => { if (!cancelled) setHtml(next); },
       () => { if (!cancelled) setHtml(''); },
     );
     return () => { cancelled = true; };
-  }, [code, language]);
+  }, [code, language, palette]);
 
   if (!html) return <PlainCode code={code} />;
   return <div className="chat-shiki-code__highlight" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function StreamingHighlightedCode({ code, language }: { code: string; language: ReturnType<typeof resolveChatCodeLanguage> }) {
+function StreamingHighlightedCode({ code, language, palette }: { code: string; language: ReturnType<typeof resolveChatCodeLanguage>; palette: ThemeId }) {
   const [tokenStream, setTokenStream] = useState<ChatCodeTokenStream | null>(null);
   const [tokenItems, setTokenItems] = useState<CodeTokenItem[]>([]);
   const [failed, setFailed] = useState(false);
@@ -73,7 +75,7 @@ function StreamingHighlightedCode({ code, language }: { code: string; language: 
   const animatedCharWatermarkRef = useRef(0);
 
   useEffect(() => {
-    const codeStream = createChatCodeDeltaStream(language);
+    const codeStream = createChatCodeDeltaStream(language, palette);
     codeStreamRef.current = codeStream;
     previousCodeRef.current = '';
     segmentSequenceRef.current = 0;
@@ -86,7 +88,7 @@ function StreamingHighlightedCode({ code, language }: { code: string; language: 
       codeStreamRef.current?.close();
       codeStreamRef.current = null;
     };
-  }, [language]);
+  }, [language, palette]);
 
   useEffect(() => {
     let codeStream = codeStreamRef.current;
@@ -101,7 +103,7 @@ function StreamingHighlightedCode({ code, language }: { code: string; language: 
 
     // Non-append edit (resend / rewind): tear the stream down and replay from scratch.
     codeStream.close();
-    codeStream = createChatCodeDeltaStream(language);
+    codeStream = createChatCodeDeltaStream(language, palette);
     codeStreamRef.current = codeStream;
     previousCodeRef.current = code;
     segmentSequenceRef.current = 0;
@@ -111,7 +113,7 @@ function StreamingHighlightedCode({ code, language }: { code: string; language: 
     setFailed(false);
     setTokenStream(codeStream.stream);
     codeStream.push(code);
-  }, [code, language]);
+  }, [code, language, palette]);
 
   useEffect(() => {
     if (!tokenStream) return;
@@ -183,6 +185,7 @@ function StreamingHighlightedCode({ code, language }: { code: string; language: 
 }
 
 const ShikiStreamCodeBlock = memo(function ShikiStreamCodeBlock({ code, language, streaming }: ShikiStreamCodeBlockProps) {
+  const { palette } = useTheme();
   const resolvedLanguage = resolveChatCodeLanguage(language);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -272,9 +275,9 @@ const ShikiStreamCodeBlock = memo(function ShikiStreamCodeBlock({ code, language
       </button>
       <div ref={viewportRef} className="chat-shiki-code__viewport">
         {streaming ? (
-          <StreamingHighlightedCode code={code} language={resolvedLanguage} />
+          <StreamingHighlightedCode key={palette} code={code} language={resolvedLanguage} palette={palette} />
         ) : (
-          <StaticHighlightedCode code={code} language={resolvedLanguage} />
+          <StaticHighlightedCode code={code} language={resolvedLanguage} palette={palette} />
         )}
       </div>
     </div>

@@ -42,10 +42,10 @@ export const RENDER_UI_INSTRUCTIONS =
   '  (UI CHANGE) Asked to modify/restyle/redesign ANY visual thing: Read the source, then render ' +
   'the PROPOSED after-state ending in Apply / Tweak / Discard, and STOP the turn. Do NOT Edit/Write ' +
   'until the user picks Apply. Writing a component/page/css file with no preview is a defect.\n' +
-  '  (COMPARE) 2+ items with attributes — Card / Table / StatGrid, not a Markdown table.\n' +
+  '  (COMPARE) 2+ items with attributes — Card / HTML table / stat layout, not a Markdown table.\n' +
   '  (DATA) The user shared JSON / CSV / records / a config — visualize it.\n' +
-  '  (FORM) Structured input needed — Input / Switch / Slider / Select in a Card.\n' +
-  '  (STATUS) Snapshot of state (build, PR, tests, TODOs, health) — StatGrid / Timeline.\n' +
+  '  (FORM) Structured input needed — Field / native controls in a Card.\n' +
+  '  (STATUS) Snapshot of state (build, PR, tests, TODOs, health) — stat layout / status list.\n' +
   '  (NEXT) "You could do X, Y, or Z" — each an actionable Button.\n' +
   '  (CONFIRM) Before a destructive action — diff summary card + Apply / Cancel.\n' +
   '  (RESEARCH) Multi-section research / metrics breakdown — a report card, not a Markdown wall.\n' +
@@ -82,20 +82,21 @@ export async function handleRenderUI(code: string): Promise<RenderUIResult> {
 /** Tool description mirrored on both sides so the model gets the same
  * authoring rules regardless of which engine it's running under. Kept in
  * sync with macaron-mcp.ts's in-process tool description. */
-export const RENDER_UI_TOOL_DESCRIPTION = `A COMPLETE TSX module, mounted inline via React. WHEN to call is in the server instructions; this is HOW.
+export const RENDER_UI_TOOL_DESCRIPTION = `A complete React TSX module mounted inline. WHEN to call is in server instructions; this is HOW.
 
-# Imports — ONLY these specifiers, no relative paths, no other packages, no fences
+# Imports: no relative paths, other packages, or fences
 
-- ONE import from \`'$macaron/ui'\`, preferred over raw div/span: Stack, Row, Grid, Card+CardHeader/Title/Content, Button, Badge, Text, Input, Switch, Slider, Table, Tabs, Stat, StatGrid, Timeline…
-- \`import { sendUserMessage, useAutoSend } from '$macaron/chat';\` — never \`window.sendUserMessage\`.
-- Charts: \`'$macaron/ui/charts'\` (not 'recharts'). Icons: \`'lucide-react'\`.
-- React: named imports. \`React.x\` also needs \`import React from 'react';\` or the render fails.
+- \`'$ui4a/ui'\`: ONLY Button, Field, Card, Badge, Tabs, Disclosure. \`'$macaron/ui'\` aliases these six. Use native HTML for other layouts/controls.
+- Field needs label; optional hint. Tabs takes items:[{id,label,children}], optional value/onChange(id). Disclosure takes title, children, optional defaultOpen. Button variant: primary/secondary/ghost/danger; size: sm/md.
+- Primitives: \`'@headlessui/react'\`. Charts: \`'recharts'\`. Icons: \`'lucide-react'\`.
+- \`import { sendUserMessage, useAutoSend } from '$macaron/chat';\` Never window.sendUserMessage.
+- React named imports; React.x needs \`import React from 'react';\`.
 
 # Interactivity
 
-\`sendUserMessage(prompt)\` posts \`prompt\` as if the user typed it, driving the next turn. Event handlers only. Phrase it as the user would ("Book the 3pm slot"), folding in every value that turn needs.
+sendUserMessage(prompt): event handlers only; posts as the user. Include every value needed for the next turn.
 
-\`const left = useAutoSend(prompt, seconds?)\` — for a confirm widget with a default ("commit unless you say otherwise"). Counts down and sends \`prompt\` itself if the user does nothing; \`left\` is the seconds left, or \`null\` when nothing counts. Render \`left\` on the default button — that is the whole contract:
+useAutoSend(prompt, seconds?): countdown for a default action, sends if idle. Returns seconds left or null. Show seconds on the default button, with the SAME prompt in both calls:
 
 \`\`\`tsx
 const COMMIT = 'Commit it.';
@@ -103,12 +104,12 @@ const left = useAutoSend(COMMIT, 30);
 <Button onClick={() => sendUserMessage(COMMIT)}>Commit{left !== null ? \` (\${left}s)\` : ''}</Button>
 \`\`\`
 
-ONLY on real evidence of the habit ("just commit", "don't ask me", repeated approvals); else the same buttons without it. Seconds MUST show on the button. Same string in both calls.
+Use countdown ONLY with evidence ("just commit", "don't ask me", repeated approvals); else omit countdown.
 
 # Rules
 
-- One \`export default function App()\`, no fetch/network, helpers at module scope.
-- UnoCSS Tailwind v3 classes via className. Stable \`key\` from data, never \`key={i}\`. No \`as any\` in JSX.
-- Visible copy in the user's own language, not English.
-- Changing an EXISTING component: Read its source and byte-copy the real markup, assets, and copy — only the property under change varies. A mockup makes the choice meaningless.
-- After: ONE sentence of ack, never the code or the layout.`;
+- One \`export default function App()\`; no fetch/network; helpers at module scope.
+- UnoCSS Wind4 className: bg-surface, text-fg, text-muted, border-border, bg-accent, text-accent-fg; complete class literals.
+- Stable keys from data, never key={i}; no as any in JSX.
+- Copy in the user's language. Existing UI: read and byte-copy real markup/assets/copy; vary only the requested property.
+- After: one sentence of ack, never code or layout.`;

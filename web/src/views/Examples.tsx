@@ -137,7 +137,7 @@ const EXAMPLES: Example[] = [
     prompt:
       'Run `find . -type f -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/dist/*" | head -200` ' +
       'in Bash to sample the file tree. Group by extension (.tsx / .ts / .css / .md / .json / other) and ' +
-      'render_ui a StatGrid: one tile per type showing file count + total LOC (a rough wc -l sampling is fine). ' +
+      'render_ui a compact CSS grid: one cell per type showing file count + total LOC (a rough wc -l sampling is fine). ' +
       'Below, a Table of the 10 largest files (by line count), each row with a "View" button that ' +
       'sendUserMessage "Open <file>" so I can drill in next turn.',
   },

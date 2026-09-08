@@ -3,7 +3,7 @@
 // jsdom can prove the hook's logic; it cannot prove that TSX the model just
 // wrote actually COMPILES and MOUNTS through our import map, or that a real
 // mouse click on a $macaron/ui <Button> reaches sendUserMessage. This page runs
-// the production renderer (GenuiPreview → StaticGenUIRenderer) and the
+// the production renderer (GenuiPreview → GenuiRenderer) and the
 // production host bridge (createScheduleBridge), then reports what happened on
 // window.__harness so Playwright can assert on it.
 //
@@ -22,12 +22,14 @@ type Harness = {
    *  widget's button, and every file in a batch silently tests the first one. */
   reset: () => void;
   setCode: (code: string) => void;
+  setStreaming: (streaming: boolean) => void;
 };
 
 const g = globalThis as unknown as { __harness?: Harness };
 
 function App() {
   const [code, setCode] = useState('');
+  const [streaming, setStreaming] = useState(false);
 
   useEffect(() => {
     const harness: Harness = {
@@ -38,8 +40,10 @@ function App() {
         harness.errors.length = 0;
         cancelAutoSend();
         setCode('');
+        setStreaming(false);
       },
       setCode: (next) => setCode(next),
+      setStreaming,
     };
     g.__harness = harness;
 
@@ -65,7 +69,7 @@ function App() {
   // rather than a callback.
   return (
     <div style={{ padding: 24 }}>
-      {code ? <GenuiPreview code={code} done /> : <p>waiting for code…</p>}
+      {code ? <GenuiPreview code={code} done={!streaming} /> : <p>waiting for code…</p>}
     </div>
   );
 }

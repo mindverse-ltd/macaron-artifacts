@@ -1,6 +1,6 @@
 // Kimi WebUI entry. Separate from the claude entry so it doesn't pull in
-// the GenUI runtime, macaron-vendor, UnoCSS, etc. This bundle stays small
-// and focused on chat.
+// the renderer or component facade. All entries share the lightweight Wind4
+// style runtime so the first generated widget cannot introduce a late reset.
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -15,6 +15,7 @@ import { ConfirmProvider } from '../components/Confirm';
 import { consumeHandoff } from '../lib/auth';
 import { initTelemetry, track, trackRoutes } from '../lib/telemetry';
 import { registerServiceWorker } from '../lib/pwa';
+import '../lib/uno-runtime';
 import './styles.css';
 import '../chat-code.css';
 

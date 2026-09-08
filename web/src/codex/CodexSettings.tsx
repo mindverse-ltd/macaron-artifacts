@@ -16,6 +16,7 @@ import {
 // user can flip theme / push / tunnel / config files without leaving the app.
 import { RemoteAccess, ConfigFilesSection, SoundSettings } from '../views/Settings';
 import { useTheme, setTheme, type Theme } from '../lib/theme';
+import { PaletteSelect } from '../components/PaletteSelect';
 import { getPushState, subscribeToPush, unsubscribeFromPush, type PushState } from '../lib/pwa';
 import { useToast } from '../components/Toast';
 
@@ -168,6 +169,7 @@ function PreferencesPane() {
     <>
       <section className="cx-settings-section">
         <div className="cx-section-head"><h2>Appearance</h2></div>
+        <PaletteSelect />
         <div className="cx-field">
           <div className="cx-theme-seg" role="radiogroup" aria-label="Theme">
             {THEME_OPTIONS.map((o) => (

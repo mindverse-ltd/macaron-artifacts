@@ -1,0 +1,21 @@
+import { Dialog, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
+import type { SessionSummary } from '../../shared/types';
+import { Icon } from './Icon';
+import { Select } from './Select';
+import { useTheme } from '../theme/ThemeProvider';
+import { THEME_OPTIONS } from '../theme/themes';
+
+interface Props { sessions: SessionSummary[]; activeId: string | null; cwd: string; onSelect: (id: string) => void; onCreate: () => void; onDelete: (id: string) => void }
+export function Sidebar(props: Props) { return <aside className="hidden w-60 shrink-0 flex-col border-r border-border @md:flex"><SessionList {...props} /></aside>; }
+export function SidebarDrawer({ open, onClose, ...props }: Props & { open: boolean; onClose: () => void }) {
+  return <Dialog open={open} onClose={onClose} className="relative z-50"><div className="fixed inset-0 bg-black/40" /><DialogPanel className="fixed inset-y-0 left-0 flex w-64 flex-col bg-surface"><DialogTitle className="sr-only">会话</DialogTitle><SessionList {...props} onSelect={id => { props.onSelect(id); onClose(); }} onCreate={() => { props.onCreate(); onClose(); }} /></DialogPanel></Dialog>;
+}
+function SessionList({ sessions, activeId, cwd, onSelect, onCreate, onDelete }: Props) {
+  const { appearance, select } = useTheme();
+  const workspaces = [...new Set(sessions.map(session => session.cwd))];
+  const shown = sessions.filter(session => session.cwd === cwd);
+  return <><div className="flex h-12 shrink-0 items-center px-2"><button type="button" onClick={onCreate} className="interactive flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-surface-3 hover:text-fg"><Icon name="plus" />新会话</button></div>
+    <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{shown.map(session => <li key={session.id} className="group relative"><button type="button" onClick={() => onSelect(session.id)} title={session.title} className={`interactive flex w-full items-center gap-2 rounded-lg py-2 pr-8 pl-3 text-left text-sm ${session.id === activeId ? 'bg-surface-3 text-fg' : 'text-muted hover:bg-surface-3 hover:text-fg'}`}>{session.status === 'running' ? <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent" title="正在生成" /> : null}<span className="truncate">{session.title}</span></button><button type="button" disabled={session.status === 'running'} onClick={() => onDelete(session.id)} title={session.status === 'running' ? '停止生成后可删除会话' : '删除会话'} aria-label={`删除会话 ${session.title}`} className="interactive absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted opacity-0 group-hover:opacity-100 hover:text-danger focus:opacity-100 disabled:hidden"><Icon name="x" className="size-3.5" /></button></li>)}</ul>
+    <div className="flex shrink-0 flex-col gap-2 p-2"><Select label="主题" value={appearance.id} onChange={select} options={THEME_OPTIONS.map(theme => ({ value: theme.id, label: theme.label }))} /><Menu><MenuButton title={cwd} className="interactive flex w-full items-center gap-2 truncate rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-surface-3"><span className="truncate">{cwd.split('/').filter(Boolean).at(-1) ?? '工作区'}</span><Icon name="chevronDown" className="ml-auto size-4 shrink-0 text-muted" /></MenuButton><MenuItems anchor={{ to: 'top start', gap: 6 }} className="z-50 max-h-80 min-w-60 overflow-y-auto rounded-xl bg-surface-2 p-1 shadow-xl shadow-black/20 outline-none">{workspaces.map(workspace => <MenuItem key={workspace}><button type="button" onClick={() => { const session = sessions.find(item => item.cwd === workspace); if (session) onSelect(session.id); }} className="interactive block w-full truncate rounded-lg px-3 py-2 text-left text-sm text-muted data-focus:bg-surface-3 data-focus:text-fg">{workspace}</button></MenuItem>)}<MenuItem><button type="button" onClick={onCreate} className="interactive block w-full rounded-lg px-3 py-2 text-left text-sm text-muted data-focus:bg-surface-3 data-focus:text-fg">打开工作区…</button></MenuItem></MenuItems></Menu></div>
+  </>;
+}

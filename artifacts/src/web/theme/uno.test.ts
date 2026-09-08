@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createGenerator } from '@unocss/core';
+import { readFile } from 'node:fs/promises';
 import { unoConfig } from './uno';
 
 test('Wind4 owns the shell reset and scoped surfaces inherit it', async () => {
@@ -20,4 +21,15 @@ test('late streaming utilities include their Wind4 theme and ring dependencies',
   expect(preflights).toContain('--text-7xl-fontSize:');
   expect(preflights).toContain('--un-ring-offset-width');
   expect(result.getLayers(undefined, ['properties', 'theme'])).not.toMatch(/box-sizing:\s*border-box/);
+});
+
+test('Headless UI form states compile into Wind4 utilities', async () => {
+  const generator = await createGenerator(unoConfig());
+  for (const file of ['NewSessionDialog.tsx', 'Select.tsx', 'Sidebar.tsx', 'ui4a-ui.tsx']) {
+    const source = await readFile(new URL(`../components/${file}`, import.meta.url), 'utf8');
+    const tokens = [...source.matchAll(/\bdata-(?:\[[\w-]+\]|[\w-]+):[\w-]+/g)].map(match => match[0]);
+    expect(tokens.length).toBeGreaterThan(0);
+    const { matched } = await generator.generate(tokens.join(' '));
+    for (const token of tokens) expect(matched.has(token)).toBe(true);
+  }
 });

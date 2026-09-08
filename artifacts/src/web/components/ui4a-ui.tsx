@@ -7,11 +7,11 @@ const sizes = { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4 text-sm' };
 const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
 export function Button({ variant = 'primary', size = 'md', className = '', type = 'button', ...props }: ComponentProps<'button'> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; size?: 'sm' | 'md' }) {
-  return <HeadlessButton type={type} className={`interactive inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap active:scale-[0.98] data-disabled:pointer-events-none data-disabled:opacity-50 ${focus} ${variants[variant]} ${sizes[size]} ${className}`} {...props} />;
+  return <HeadlessButton type={type} className={`interactive inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap active:scale-[0.98] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 ${focus} ${variants[variant]} ${sizes[size]} ${className}`} {...props} />;
 }
 
 export function Field({ label, hint, className = '', ...props }: ComponentProps<'input'> & { label: string; hint?: string }) {
-  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-border px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none data-disabled:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
+  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-border px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
 }
 
 export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl border border-border p-4 ${className}`} {...props} />; }
@@ -19,7 +19,7 @@ export function Badge({ className = '', ...props }: ComponentProps<'span'>) { re
 
 export function Tabs({ items, value, onChange }: { items: { id: string; label: ReactNode; children: ReactNode }[]; value?: string; onChange?: (id: string) => void }) {
   const index = value === undefined ? undefined : Math.max(0, items.findIndex(item => item.id === value));
-  return <TabGroup selectedIndex={index} onChange={next => { const item = items[next]; if (item) onChange?.(item.id); }}><TabList className="flex gap-1 rounded-lg bg-surface-3 p-1">{items.map(item => <Tab key={item.id} className={`interactive flex-1 rounded-md px-3 py-1.5 text-sm text-muted data-selected:bg-surface data-selected:text-fg ${focus}`}>{item.label}</Tab>)}</TabList><TabPanels className="mt-3">{items.map(item => <TabPanel key={item.id}>{item.children}</TabPanel>)}</TabPanels></TabGroup>;
+  return <TabGroup selectedIndex={index} onChange={next => { const item = items[next]; if (item) onChange?.(item.id); }}><TabList className="flex gap-1 rounded-lg bg-surface-3 p-1">{items.map(item => <Tab key={item.id} className={`interactive flex-1 rounded-md px-3 py-1.5 text-sm text-muted data-[selected]:bg-surface data-[selected]:text-fg ${focus}`}>{item.label}</Tab>)}</TabList><TabPanels className="mt-3">{items.map(item => <TabPanel key={item.id}>{item.children}</TabPanel>)}</TabPanels></TabGroup>;
 }
 
 export function Disclosure({ title, children, defaultOpen }: { title: ReactNode; children: ReactNode; defaultOpen?: boolean }) {

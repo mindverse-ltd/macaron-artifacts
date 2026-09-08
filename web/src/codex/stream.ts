@@ -4,7 +4,7 @@
 import { authedFetch } from '../lib/auth';
 import { track } from '../lib/telemetry';
 import type { CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
-import type { CodexRuntimeOverride } from './api';
+import type { CodexLoopSnapshot, CodexRuntimeOverride } from './api';
 
 export type CodexStreamEvent =
   | { type: 'starting'; cwd?: string }
@@ -21,6 +21,7 @@ export type CodexStreamEvent =
   | { type: 'codex_approval_resolved'; id: string; decision?: CodexDecision | 'stale' }
   | { type: 'error'; error: string }
   | { type: 'done'; exitCode: number }
+  | { type: 'loop_status'; snapshot: CodexLoopSnapshot }
   | { type: 'live-end'; reason?: string };
 
 export type CodexStreamHandlers = {
@@ -38,6 +39,7 @@ export type CodexStreamHandlers = {
   onError?: (msg: string) => void;
   onDone?: (exitCode: number) => void;
   onLiveEnd?: (reason?: string) => void;
+  onLoopStatus?: (snapshot: CodexLoopSnapshot) => void;
 };
 
 type Body = { text: string; cwd?: string; images?: Array<{ mimeType: string; dataUrl: string }>; runtime?: CodexRuntimeOverride };
@@ -83,6 +85,7 @@ async function pump(resp: Response, h: CodexStreamHandlers): Promise<void> {
         case 'error': h.onError?.(p.error); break;
         case 'done': h.onDone?.(p.exitCode); break;
         case 'live-end': h.onLiveEnd?.(p.reason); break;
+        case 'loop_status': h.onLoopStatus?.(p.snapshot); break;
       }
     }
   }
@@ -127,5 +130,17 @@ export function subscribeCodexLive(sid: string, h: CodexStreamHandlers): () => v
       if (ac.signal.aborted) return;
       track('stream_disconnected', { engine: 'codex', durationMs: Math.round(performance.now() - openedAt) });
     });
+  return () => ac.abort();
+}
+
+// Subscribe to a thread's autonomous-loop stream: lifecycle status plus the
+// runner events of each auto-driven iteration. Returns an unsubscribe fn that
+// aborts the SSE connection. The loop lives server-side, so this is a passive
+// viewer — closing it does not stop the loop.
+export function subscribeCodexLoop(sid: string, h: CodexStreamHandlers): () => void {
+  const ac = new AbortController();
+  authedFetch(`/api/codex/threads/${encodeURIComponent(sid)}/loop/live`, { signal: ac.signal })
+    .then((resp) => pump(resp, h))
+    .catch(() => { /* aborted or network drop — silent, the caller re-subscribes on remount */ });
   return () => ac.abort();
 }

@@ -41,18 +41,46 @@ export async function highlighter(language: string, theme: string) {
 }
 
 function luminance(color: string): number | null {
-  const short = /^#([\da-f]{3})$/i.exec(color);
-  const hex = short ? short[1].split('').map(value => value + value).join('') : /^#([\da-f]{6})$/i.exec(color)?.[1];
+  const hex = parseHex(color)?.hex;
   if (!hex) return null;
   const channels = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
   return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
 }
+
+function parseHex(color: string) {
+  const match = /^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.exec(color);
+  if (!match) return null;
+  const value = match[1].length <= 4 ? match[1].split('').map(channel => channel + channel).join('') : match[1];
+  return { hex: value.slice(0, 6), alpha: value.length === 8 ? Number.parseInt(value.slice(6), 16) / 255 : 1 };
+}
+
+function contrastRatio(background: string, foreground: string) {
+  const back = parseHex(background);
+  const front = parseHex(foreground);
+  if (!back || !front) return null;
+  const backRgb = [0, 2, 4].map(index => Number.parseInt(back.hex.slice(index, index + 2), 16) / 255);
+  const frontRgb = [0, 2, 4].map(index => Number.parseInt(front.hex.slice(index, index + 2), 16) / 255);
+  const composited = frontRgb.map((channel, index) => channel * front.alpha + backRgb[index] * (1 - front.alpha));
+  const toLinear = (channel: number) => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+  const backLum = backRgb.map(toLinear).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+  const frontLum = composited.map(toLinear).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+  const [low, high] = [backLum, frontLum].sort((a, b) => a - b);
+  return (high + .05) / (low + .05);
+}
 export function readableForeground(background: string, foreground: string) {
   const back = luminance(background);
   const front = luminance(foreground);
-  if (back === null || front === null || (Math.max(back, front) + .05) / (Math.min(back, front) + .05) >= 4.5) return foreground;
+  if (back === null || front === null || (contrastRatio(background, foreground) ?? 4.5) >= 4.5) return foreground;
   // Editor themes are not necessarily accessible UI palettes: preserve the accent hue and choose a readable label.
   return (back + .05) / .05 >= 1.05 / (back + .05) ? '#000000' : '#ffffff';
+}
+
+/** Shiki description colors often carry alpha; keep their hue but avoid translucent text below AA contrast. */
+export function readableMutedForeground(background: string, foreground: string) {
+  if ((contrastRatio(background, foreground) ?? 4.5) >= 4.5) return foreground;
+  const opaque = parseHex(foreground);
+  if (opaque && (contrastRatio(background, `#${opaque.hex}`) ?? 0) >= 4.5) return `#${opaque.hex}`;
+  return readableForeground(background, foreground);
 }
 
 export function themePalette(theme: ThemeRegistration, dark: boolean) {
@@ -62,7 +90,7 @@ export function themePalette(theme: ThemeRegistration, dark: boolean) {
   const blend = (amount: number) => `color-mix(in srgb, ${foreground} ${amount}%, ${background})`;
   const palette: Record<string, string> = {
     surface: background, 'surface-2': colors['editorWidget.background'] ?? blend(4), 'surface-3': colors['list.hoverBackground'] ?? blend(8),
-    fg: foreground, border: colors['panel.border'] ?? blend(14), muted: colors.descriptionForeground ?? blend(58),
+    fg: foreground, border: colors['panel.border'] ?? blend(14), muted: readableMutedForeground(background, colors.descriptionForeground ?? blend(58)),
     accent: colors['button.background'] ?? foreground, 'accent-fg': colors['button.foreground'] ?? background,
     danger: colors['errorForeground'] ?? (dark ? '#ff6b83' : '#d9435f'), success: colors['gitDecoration.addedResourceForeground'] ?? (dark ? '#34d399' : '#15803d'), warn: colors['editorWarning.foreground'] ?? (dark ? '#fbbf24' : '#a16207'),
   };

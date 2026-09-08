@@ -106,10 +106,11 @@ export class ClaudeEventMapper {
 
 export function claudeOptions(turn: HarnessTurn, abortController: AbortController): Options {
   return {
-    cwd: turn.cwd, ...(turn.nativeId ? { resume: turn.nativeId } : {}), ...(turn.model ? { model: turn.model } : {}), abortController,
+    cwd: turn.cwd, ...(turn.nativeId && !turn.retry ? { resume: turn.nativeId } : {}), ...(turn.model ? { model: turn.model } : {}), abortController,
     ...(process.env.MACARON_CLAUDE_PATH ? { pathToClaudeCodeExecutable: process.env.MACARON_CLAUDE_PATH } : {}),
     systemPrompt: { type: 'preset', preset: 'claude_code', append: turn.instructions }, includePartialMessages: true, permissionMode: 'default',
     ...(turn.enrichment ? { forkSession: true, persistSession: false, maxTurns: 1 } : {}),
+    ...(turn.retry ? { continue: true } : {}),
     // Always register the same callbacks, including for forks. Removing tools or interactive callbacks changes the cached prompt prefix.
     hooks: { PreToolUse: [{ hooks: [async () => turn.enrichment ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Metadata generation cannot execute tools' } } : {}] }] },
     canUseTool: async (tool, input, context) => {

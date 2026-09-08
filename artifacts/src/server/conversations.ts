@@ -17,7 +17,7 @@ export class ActiveConversation {
   private mainSettled = false;
   latest?: ChatMessage;
   readonly done: Promise<void>;
-  constructor(private store: SessionStore, readonly session: Session, private adapter: HarnessAdapter, private instructions: string, prompt: string, private metadata: MetadataTasks) {
+  constructor(private store: SessionStore, readonly session: Session, private adapter: HarnessAdapter, private instructions: string, prompt: string, private metadata: MetadataTasks, private retry = false) {
     this.done = this.execute(prompt);
   }
   stream(): ReadableStream<ChatChunk> {
@@ -68,11 +68,12 @@ export class ActiveConversation {
           emit({ type: 'data-approval', id: request.id, data: { ...request, resolved: true } });
           return approved;
         };
-        writer.write({ type: 'start', messageId: crypto.randomUUID() });
+        const previousAssistant = this.retry ? session.messages.findLast(message => message.role === 'assistant') : undefined;
+        writer.write({ type: 'start', messageId: previousAssistant?.id ?? crypto.randomUUID() });
         writer.write({ type: 'start-step' });
         try {
           await artifacts.start();
-          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
+          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, retry: this.retry, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
             if (session.nativeId === id) return;
             session.nativeId = id;
             // First output waits for this durable identity checkpoint. A recovered partial
@@ -116,7 +117,13 @@ export class ActiveConversation {
       const settled = await Promise.allSettled([broadcastTask, snapshotTask]);
       for (const result of settled) if (result.status === 'rejected') failure ??= result.reason;
       disk.end(); await diskDone;
-      if (this.latest) session.messages = [...before, this.latest];
+      if (this.latest) {
+        const previousAssistant = this.retry ? before.findLast(message => message.role === 'assistant') : undefined;
+        if (previousAssistant && this.latest.role === 'assistant' && this.latest.id === previousAssistant.id) {
+          const index = before.lastIndexOf(previousAssistant);
+          session.messages = [...before.slice(0, index), { ...this.latest, parts: [...previousAssistant.parts, ...this.latest.parts] }];
+        } else session.messages = [...before, this.latest];
+      }
       session.status = failure || diskError ? 'error' : 'idle';
       session.error = diskError?.message || (failure instanceof Error ? failure.message : failure ? String(failure) : undefined);
       session.updatedAt = Date.now();

@@ -155,7 +155,7 @@ export async function* runPiSession(turn: HarnessTurn, create = createPiSession)
     }
     task = (async () => {
       try {
-        await session.prompt(turn.prompt);
+        if (turn.retry) await session.agent.continue(); else await session.prompt(turn.prompt);
         await session.waitForIdle();
         if (signal.aborted) throw abortError();
         const assistant = session.messages.findLast(message => message.role === 'assistant');

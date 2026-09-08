@@ -72,6 +72,11 @@ describe('Claude native deltas', () => {
     const gate = await hook({ hook_event_name: 'PreToolUse', session_id: 'fork', transcript_path: '', cwd: '/tmp', tool_name: 'Write', tool_input: {}, tool_use_id: 't1' }, 't1', { signal: new AbortController().signal });
     expect(gate).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
   });
+  test('uses Claude native continuation for a failed-turn retry', () => {
+    const options = claudeOptions(turn({ nativeId: 'main', retry: true }), new AbortController());
+    expect(options.continue).toBe(true);
+    expect(options.resume).toBeUndefined();
+  });
 });
 
 describe('Codex native deltas', () => {
@@ -136,6 +141,11 @@ describe('Codex turn lifecycle', () => {
     expect(connection.calls.map((call) => call.method)).toEqual(['initialize', 'initialized', 'thread/resume', 'turn/start']);
     expect(chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.delta)).toEqual(['fresh']);
     expect(ids).toEqual(['native']); expect(connection.closed).toBe(true);
+  });
+  test('starts a failed-turn retry with Codex native empty input', async () => {
+    const connection = new ReplayConnection();
+    for await (const _chunk of runCodexConnection(turn({ nativeId: 'native', retry: true }), connection)) { /* Drain the actual adapter. */ }
+    expect(connection.calls.find(call => call.method === 'turn/start')?.params).toMatchObject({ threadId: 'native', input: [] });
   });
 
   test('an ephemeral metadata fork cannot overwrite the durable native id', async () => {

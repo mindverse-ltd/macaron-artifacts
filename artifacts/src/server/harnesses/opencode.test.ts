@@ -66,6 +66,7 @@ class FakeConnection implements OpenCodeConnection {
     finally { signal.removeEventListener('abort', stop); }
   }
   async prompt(id: string, prompt: OpenCodePrompt) { this.calls.push({ method: 'prompt', value: { id, prompt } }); this.onPrompt(id); }
+  async retry(id: string, text: string) { this.calls.push({ method: 'retry', value: { id, text } }); this.onPrompt(id); }
   async replyPermission(id: string, approved: boolean) { this.calls.push({ method: 'reply', value: { id, approved } }); this.emit('native', 'session.idle'); }
   async rejectQuestion(id: string) { this.calls.push({ method: 'question-reject', value: id }); this.emit('native', 'session.idle'); }
   async abort(id: string) { this.calls.push({ method: 'abort', value: id }); this.queue.end(); }
@@ -83,6 +84,12 @@ describe('OpenCode lifecycle', () => {
     expect(chunks.map(chunk => chunk.type)).toEqual(['text-start', 'text-delta', 'text-end']);
     expect(connection.calls.map(call => call.method)).toEqual(['get', 'prompt', 'close']);
     expect(connection.calls[1]?.value).toMatchObject({ id: 'native', prompt: { system: 'stable instructions', agent: 'build', model: { providerID: 'provider', modelID: 'model' }, variant: 'high' } });
+  });
+  test('uses the native V2 resume operation for failed-turn retry', async () => {
+    const connection = new FakeConnection();
+    await collect(makeTurn({ nativeId: 'native', retry: true }), connection);
+    expect(connection.calls.map(call => call.method)).toEqual(['get', 'retry', 'close']);
+    expect(connection.calls[1]?.value).toEqual({ id: 'native', text: 'hello' });
   });
   test('forks the complete history, guards execution before prompt and deletes only the fork', async () => {
     const connection = new FakeConnection(), nativeIDs: string[] = [];

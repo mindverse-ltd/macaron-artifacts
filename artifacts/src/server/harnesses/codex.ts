@@ -81,7 +81,7 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
     if (!turn.enrichment) turn.onNativeSession(nativeId);
     if (turn.signal.aborted) throw abortError();
     streaming = true;
-    const response = await connection.request('turn/start', { threadId: nativeId, input: [{ type: 'text', text: turn.prompt, text_elements: [] }] });
+    const response = await connection.request('turn/start', { threadId: nativeId, input: turn.retry ? [] : [{ type: 'text', text: turn.prompt, text_elements: [] }] });
     nativeTurnId ||= string(record(response.turn).id);
     if (nativeTurnId) turnAvailable();
     await done;

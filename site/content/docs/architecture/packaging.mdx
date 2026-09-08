@@ -49,11 +49,13 @@ release_dir="$(mktemp -d)"
 npm pack --pack-destination "$release_dir"
 release_version="$(node -p 'require("./package.json").version')"
 MACARON_PACKAGE_SOURCE="$release_dir/macaron-artifacts-$release_version.tgz" pnpm test:package
-npm publish "$release_dir/macaron-artifacts-$release_version.tgz" --access public --tag latest
+npm publish "$release_dir/macaron-artifacts-$release_version.tgz"
 )
 ```
 
 Subsequent releases need only a new root package version committed to `main` and the matching `v<version>` tag pushed to GitHub. Each version can be published once; do not rerun a successful publish for that version. No npm token secret is required. GitHub-hosted runners and npm 11.5.1 or newer are required for Trusted Publishing. The workflow has read-only Git permissions and publishes the tagged commit without creating another commit or tag during the run.
+
+For example, after manually publishing `0.1.0`, bump the root package to `0.1.1` on `main` before pushing `v0.1.1` for the first automated release. Leave `--tag` unset so npm's default-tag check prevents an older version from replacing `latest`.
 
 ## Release and updates
 

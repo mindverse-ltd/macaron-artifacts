@@ -23,7 +23,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const queued = store.queue(session.id);
   return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto"><div ref={content} className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
-      {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
+      {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
       {chat.status === 'submitted' ? <p className="flex items-center gap-2 text-xs text-muted" role="status"><span className="size-1.5 animate-pulse rounded-full bg-accent" />正在连接…</p> : null}
       {chat.error || session.status === 'error' ? <div role="alert" className="flex items-center gap-3 rounded-xl border border-danger/40 px-3 py-2 text-xs text-danger"><span className="min-w-0 flex-1 break-words">{chat.error?.message ?? session.error ?? '这轮没有跑完'}</span><Button size="sm" variant="ghost" onClick={() => void store.retry(session.id)}>重试</Button></div> : null}
     </div></div>
@@ -36,7 +36,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   </div>;
 }
 
-const Message = memo(function Message({ message, streaming, sessionId, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; sessionId: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {
+const Message = memo(function Message({ message, streaming, sessionId, cwd, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {
   // The server forwards one part per output delta; the joined text exists only here.
   const outputs = new Map<string, string>();
   const firstDelta = new Map<string, number>();
@@ -53,7 +53,7 @@ const Message = memo(function Message({ message, streaming, sessionId, onSend, o
     {message.parts.map((part, index) => {
       if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
       if (part.type === 'reasoning') return <details key={index} className="overflow-clip rounded-lg border border-border text-xs text-muted"><summary className="cursor-pointer px-3 py-2 select-none">思考过程</summary><Collapsible className="border-t border-border"><p className="px-3 py-2 leading-relaxed whitespace-pre-wrap">{part.text}</p></Collapsible></details>;
-      if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') return <ToolCall key={index} part={part} commandOutput={'toolCallId' in part ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />;
+      if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') return <ToolCall key={index} cwd={cwd} part={part} commandOutput={'toolCallId' in part ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />;
       if (part.type === 'data-approval') return <ApprovalCard key={part.data.id} approval={part.data} onDecide={approved => onApprove(part.data.id, approved)} />;
       // An orphan command stream renders once, at its first delta, carrying the joined output.
       if (part.type === 'data-command') return !toolIds.has(part.data.toolCallId) && firstDelta.get(part.data.toolCallId) === index ? <ToolCall key={index} part={{ type: 'tool-command', state: streaming ? 'input-available' : 'output-available', output: outputs.get(part.data.toolCallId) }} onArtifact={onArtifact} /> : null;

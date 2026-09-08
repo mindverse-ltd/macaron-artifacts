@@ -2,6 +2,7 @@ import { Chat } from '@ai-sdk/react';
 import { DefaultChatTransport, type DataUIPart } from 'ai';
 import type { Artifact, ChatMessage, HarnessId, HarnessInfo, MessageData, Session, SessionSummary } from '../../shared/types';
 import { consumeMetadata } from './metadata';
+import { artifactEntryPath } from '../../shared/artifact-path';
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } });
@@ -240,6 +241,6 @@ export class WorkspaceStore {
     void this.drain(id);
   };
   approve = (id: string, approvalId: string, approved: boolean) => api(`/api/sessions/${id}/approvals/${encodeURIComponent(approvalId)}`, { method: 'POST', body: JSON.stringify({ approved }) });
-  openArtifact = (id: string, path: string) => { this.selectedArtifacts.set(id, path); this.dismissed.delete(id); this.publish(); };
+  openArtifact = (id: string, path: string) => { const session = this.snapshot.sessions.find(session => session.id === id), entry = session && artifactEntryPath(path, session.cwd); if (!entry) return; this.selectedArtifacts.set(id, entry); this.dismissed.delete(id); this.publish(); };
   closeArtifact = (id: string) => { const path = this.selectedArtifacts.get(id); if (path) this.dismissed.set(id, path); this.selectedArtifacts.delete(id); this.publish(); };
 }

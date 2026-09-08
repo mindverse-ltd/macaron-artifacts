@@ -84,6 +84,7 @@ test('retries a failed native turn in place without adding a continuation messag
   expect((await post('/api/chat', { id: session.id, messages: failed.messages })).ok).toBe(true);
   const recovered = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session;
   expect(turns.map(turn => turn.retry)).toEqual([false, true]);
+  expect(turns[1]?.messageId).toBe('retry-user');
   expect(recovered.messages.filter(message => message.role === 'user')).toHaveLength(1);
   expect(recovered.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
 });

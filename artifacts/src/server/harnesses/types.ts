@@ -4,6 +4,7 @@ export interface HarnessTurn {
   nativeId?: string;
   cwd: string;
   prompt: string;
+  messageId?: string;
   /** Resume the failed native turn without adding another user message. */
   retry?: boolean;
   model?: string;

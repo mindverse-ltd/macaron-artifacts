@@ -73,7 +73,7 @@ export class ActiveConversation {
         writer.write({ type: 'start-step' });
         try {
           await artifacts.start();
-          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, retry: this.retry, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
+          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, messageId: session.messages.findLast(message => message.role === 'user')?.id, retry: this.retry, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
             if (session.nativeId === id) return;
             session.nativeId = id;
             // First output waits for this durable identity checkpoint. A recovered partial

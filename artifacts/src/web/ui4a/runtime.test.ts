@@ -58,6 +58,49 @@ describe("surface delivery", () => {
     expect(calls.at(-1)).toEqual(["push", 'import "b";']);
   });
 
+  test("retains importing and last-good graphs while releasing coalesced and failed revisions", async () => {
+    const released: string[] = [];
+    const submitted: { source: string; serial: number }[] = [];
+    const { renderer } = recorder();
+    renderer.render = (source, serial) => { submitted.push({ source, serial: serial! }); };
+    const delivery = new SurfaceDelivery(renderer, async ({ source }) => ({ ...prepared(), release: () => { released.push(source); } }), () => {});
+    const update = async (source: string) => { delivery.update({ source, streaming: false, revision: source }); await tick(); return submitted.at(-1)!; };
+    const first = await update("first");
+    delivery.compiling(first.source); delivery.ready(first.source); delivery.rendered(first.serial);
+    const second = await update("second");
+    delivery.compiling(second.source);
+    await update("coalesced");
+    const latest = await update("latest");
+    expect(released).toEqual(["coalesced"]);
+    delivery.ready(second.source); delivery.failed(second.source, "render");
+    expect(released).toEqual(["coalesced", "second"]);
+    delivery.compiling(latest.source); delivery.ready(latest.source); delivery.rendered(latest.serial);
+    expect(released).toEqual(["coalesced", "second", "first"]);
+    delivery.rendered(first.serial);
+    delivery.dispose();
+    expect(released).toEqual(["coalesced", "second", "first", "latest"]);
+  });
+
+  test("failed imports leave the committed graph retained and stale leases release immediately", async () => {
+    const released: string[] = [];
+    const resolves: ((value: PreparedImports) => void)[] = [];
+    let renderedSerial = 0;
+    const { renderer } = recorder();
+    renderer.render = (_source, serial) => { renderedSerial = serial!; };
+    const delivery = new SurfaceDelivery(renderer, () => new Promise((done) => { resolves.push(done); }), () => {});
+    const lease = (id: string) => ({ ...prepared(), release: () => { released.push(id); } });
+    delivery.update({ source: "first", streaming: false, revision: 1 });
+    resolves[0]!(lease("first")); await tick();
+    delivery.compiling("first"); delivery.ready("first"); delivery.rendered(renderedSerial);
+    delivery.update({ source: "obsolete", streaming: false, revision: 2 });
+    delivery.update({ source: "latest", streaming: false, revision: 3 });
+    resolves[1]!(lease("obsolete")); await tick();
+    expect(released).toEqual(["obsolete"]);
+    delivery.dispose();
+    resolves[2]!(lease("latest")); await tick();
+    expect(released).toEqual(["obsolete", "first", "latest"]);
+  });
+
   test("import errors suppressed while streaming are reported on the final frame", async () => {
     const errors: string[] = [];
     const { renderer } = recorder();

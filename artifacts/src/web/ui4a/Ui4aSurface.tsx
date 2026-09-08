@@ -50,6 +50,9 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
     let disposed = false;
     setPainted(false);
     let renderer: GenUIRenderer | null = null;
+    let surfaceDelivery: SurfaceDelivery | null = null;
+    let compilingSource: string | undefined, readySource: string | undefined;
+    const compiler = createTsxCompiler();
     const modules = createSurfaceModules(sessionId, scope, (text) => send(text));
     const imports = createSurfaceImports(modules.imports, modules.readFile);
     const surfaceStyles = createSurfaceStyles(target);
@@ -57,21 +60,26 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
     void surfaceStyles.update(latest.current.source, latest.current.streaming);
     void GenUIRenderer.create(target, {
       filename, importmap: { imports: modules.imports }, preserveStateOnUpdate: true, flushMode: "immediate",
-      callbacks: { onError: (error) => { if (!disposed) report(error); }, onRendered: () => { if (!disposed) setPainted(true); } },
+      compiler: { compile: (code, options) => { compilingSource = code; surfaceDelivery?.compiling(code); return compiler.compile(code, options); } },
+      callbacks: {
+        onReady: (_component, _url, code) => { readySource = code; if (code !== undefined) surfaceDelivery?.ready(code); },
+        onError: (error, phase) => { if (!disposed) { surfaceDelivery?.failed(phase === "render" ? readySource : compilingSource, phase); report(error); } },
+        onRendered: (_component, _code, serial) => { if (!disposed) { surfaceDelivery?.rendered(serial); setPainted(true); } },
+      },
     }).then((created) => {
       if (disposed) { created.detach(); return; }
       renderer = created;
-      delivery.current = new SurfaceDelivery(created, imports.resolve, (error) => report(error));
+      surfaceDelivery = new SurfaceDelivery(created, imports.resolve, (error) => report(error));
+      delivery.current = surfaceDelivery;
       delivery.current.update(latest.current);
     }).catch((error) => { if (!disposed) report(error); });
     return () => {
       disposed = true;
-      delivery.current?.dispose();
       delivery.current = null;
       styles.current = null;
       surfaceStyles.dispose();
       // The nested React root must finish its parent's commit before unmounting; then no generated callback can read a released bridge.
-      queueMicrotask(() => { renderer?.detach(); imports.dispose(); modules.dispose(); });
+      queueMicrotask(() => { renderer?.detach(); surfaceDelivery?.dispose(); imports.dispose(); modules.dispose(); });
     };
   }, [sessionId, scope, filename]);
 

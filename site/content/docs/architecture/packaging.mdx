@@ -47,4 +47,4 @@ The docs replace `<sha>` with the current build's short commit SHA using `VERCEL
 
 An additional harness implements `HarnessAdapter` and declares the events it supports. It does not require another package, launcher, or SPA.
 
-The generated component API follows `ui4a-playground`: `$ui4a/ui` exposes Button, Field, Card, Badge, Tabs, and Disclosure. Layout uses native HTML and UnoCSS `presetWind4`; additional controls and charts import directly from `@headlessui/react` and `recharts`. The module manifest generates the unified app's UI4A skill so model guidance follows the runtime contract.
+Components follow `ui4a-playground`'s lightweight Headless UI and Wind4 approach. This application adds its own small `$ui4a/ui` library: Button, Field, Card, Badge, Tabs, and Disclosure. Layout uses native HTML and UnoCSS `presetWind4`; additional controls and charts import directly from `@headlessui/react` and `recharts`. The module manifest generates the unified app's UI4A skill so model guidance follows the runtime contract.

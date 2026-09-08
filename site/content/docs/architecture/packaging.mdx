@@ -30,7 +30,7 @@ bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaro
 The docs replace `<sha>` with the current build's short commit SHA using `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, or the local Git revision. Use a commit with a successful package preview build.
 
 <Callout title="Distribution boundary">
-  The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Source retained for the old application is historical code, not another install target for the unified app. Start with [Usage](/docs/usage) for the current installation flow.
+  The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Their source and plugin launchers are archived on the [`v0` branch](https://github.com/mindverse-ltd/macaron-artifacts/tree/v0). Start with [Usage](/docs/usage) for the current installation flow.
 </Callout>
 
 ## Application modules
@@ -42,7 +42,7 @@ The docs replace `<sha>` with the current build's short commit SHA using `VERCEL
 | `artifacts/src/server/enrichment.ts` | Independent title and follow-up generation on disposable native forks |
 | `artifacts/src/web/chat` | One persistent Chat instance per conversation, queueing, and reconnection |
 | `artifacts/src/web/ui4a` | Incremental rendering, scoped capabilities, relative imports, and state |
-| `artifacts/src/web/components/ui4a-ui.tsx` | Six lightweight components shared by the unified and retained applications |
+| `artifacts/src/web/components/ui4a-ui.tsx` | Six lightweight components for the interface and generated UI |
 | `artifacts/src/web/theme` | Shiki themes mapped to shared semantic interface colors |
 
 An additional harness implements `HarnessAdapter` and declares the events it supports. It does not require another package, launcher, or SPA.

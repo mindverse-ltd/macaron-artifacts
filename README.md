@@ -28,6 +28,8 @@ macaron-artifacts --help
 
 There is one published package and one launcher. The old `mcc`, `mcx`, and `mkx` distributions are discontinued; harness selection belongs inside the unified application.
 
+The previous WebUI, plugin launchers, and replay tools are archived on the [`v0` branch](https://github.com/mindverse-ltd/macaron-artifacts/tree/v0).
+
 ## Features
 
 - Native text, reasoning, tool arguments, and command output stream at the granularity each harness exposes.

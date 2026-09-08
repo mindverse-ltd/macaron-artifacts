@@ -74,8 +74,14 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
     })();
     void pump.catch(fail);
     await abortable(Promise.race([ready, done]), signal);
-    const selectedModel = turn.model ? openCodeModel(turn.model) : original?.model ? { providerID: original.model.providerID, modelID: original.model.id } : undefined;
-    const prompt: OpenCodePrompt = { system: turn.instructions, parts: [{ type: 'text', text: turn.prompt }], ...(selectedModel ? { model: selectedModel } : {}), ...(original?.agent ? { agent: original.agent } : {}), ...(original?.model?.variant ? { variant: original.model.variant } : {}) };
+    const defaults = turn.profile && !turn.enrichment && !turn.retry ? await connection.defaults(signal) : undefined;
+    const selected = turn.profile?.config, model = turn.model || selected?.model || defaults?.model;
+    const selectedModel = model ? openCodeModel(model) : original?.model ? { providerID: original.model.providerID, modelID: original.model.id } : undefined;
+    const agent = selected?.agent || defaults?.agent || original?.agent;
+    // A previous model's variant can be invalid for the newly selected model.
+    const sameModel = selectedModel?.providerID === original?.model?.providerID && selectedModel?.modelID === original?.model?.id;
+    const variant = selected?.variant || (defaults ? defaults.variant ?? '' : sameModel ? original?.model?.variant : undefined);
+    const prompt: OpenCodePrompt = { system: turn.instructions, parts: [{ type: 'text', text: turn.prompt }], ...(selectedModel ? { model: selectedModel } : {}), ...(agent ? { agent } : {}), ...(variant !== undefined ? { variant } : {}) };
     started = true;
     if (turn.retry) await connection.retry(nativeID, turn.messageId, turn.prompt, signal); else await connection.prompt(nativeID, prompt, signal);
     await abortable(done, signal);
@@ -100,5 +106,9 @@ export const openCodeAdapter: HarnessAdapter = {
     const version = await executableVersion(process.env.MACARON_OPENCODE_PATH || 'opencode');
     return { id: 'opencode', name: 'OpenCode', available: Boolean(version), detail: version || 'Install the OpenCode CLI', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: false, approvals: true, fork: true } };
   },
-  async *run(turn) { yield* runOpenCodeConnection(turn, await startOpenCode(turn.cwd, turn.signal)); },
+  async profileOptions(cwd, profile) {
+    const signal = AbortSignal.timeout(20_000), connection = await startOpenCode(cwd, signal, profile);
+    try { return await connection.profileOptions(signal); } finally { await connection.close(); }
+  },
+  async *run(turn) { yield* runOpenCodeConnection(turn, await startOpenCode(turn.cwd, turn.signal, turn.profile, turn.model)); },
 };

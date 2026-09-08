@@ -3,7 +3,8 @@ import { rm } from 'node:fs/promises';
 import { finished } from 'node:stream/promises';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
 import type { Approval, ChatChunk, ChatMessage, Session } from '../shared/types.js';
-import type { HarnessAdapter } from './harnesses/types.js';
+import type { HarnessAdapter, ResolvedProfile } from './harnesses/types.js';
+import { safeProfileError } from './harnesses/common.js';
 import { ArtifactObserver } from './artifacts.js';
 import { MetadataTasks } from './enrichment.js';
 import { SessionStore } from './store.js';
@@ -17,7 +18,7 @@ export class ActiveConversation {
   private mainSettled = false;
   latest?: ChatMessage;
   readonly done: Promise<void>;
-  constructor(private store: SessionStore, readonly session: Session, private adapter: HarnessAdapter, private instructions: string, prompt: string, private metadata: MetadataTasks, private retry = false) {
+  constructor(private store: SessionStore, readonly session: Session, private adapter: HarnessAdapter, private instructions: string, prompt: string, private metadata: MetadataTasks, private retry = false, private profile?: ResolvedProfile, private model = session.model) {
     this.done = this.execute(prompt);
   }
   stream(): ReadableStream<ChatChunk> {
@@ -53,7 +54,7 @@ export class ActiveConversation {
       execute: async ({ writer }) => {
         // Command output stays a per-delta part. Rewriting one accumulated part instead would
         // re-send, re-journal and re-store the whole output on every chunk of a noisy build.
-        const emit = (chunk: ChatChunk) => writer.write(chunk);
+        const emit = (chunk: ChatChunk) => writer.write('errorText' in chunk && typeof chunk.errorText === 'string' ? { ...chunk, errorText: safeProfileError(chunk.errorText, this.profile) } : chunk);
         const artifacts = new ArtifactObserver(session.cwd, emit);
         const approve = async (request: Approval) => {
           if (this.controller.signal.aborted) return false;
@@ -73,7 +74,7 @@ export class ActiveConversation {
         writer.write({ type: 'start-step' });
         try {
           await artifacts.start();
-          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, messageId: session.messages.findLast(message => message.role === 'user')?.id, retry: this.retry, model: session.model, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
+          const turn = { nativeId: session.nativeId, cwd: session.cwd, prompt, messageId: session.messages.findLast(message => message.role === 'user')?.id, retry: this.retry, model: this.model, profile: this.profile, instructions: this.instructions, signal: this.controller.signal, onNativeSession: (id: string) => {
             if (session.nativeId === id) return;
             session.nativeId = id;
             // First output waits for this durable identity checkpoint. A recovered partial
@@ -95,7 +96,7 @@ export class ActiveConversation {
           writer.write({ type: 'finish', finishReason: 'stop' });
         } catch (error) {
           failure = error; this.mainSettled = true;
-          writer.write({ type: 'error', errorText: error instanceof Error ? error.message : 'The harness failed.' });
+          emit({ type: 'error', errorText: safeProfileError(error, this.profile) });
           writer.write({ type: 'finish', finishReason: 'error', messageMetadata: { interrupted: true } });
         } finally { await artifacts.close(); }
       },
@@ -125,16 +126,18 @@ export class ActiveConversation {
         } else session.messages = [...before, this.latest];
       }
       session.status = failure || diskError ? 'error' : 'idle';
-      session.error = diskError?.message || (failure instanceof Error ? failure.message : failure ? String(failure) : undefined);
+      session.error = diskError || failure ? safeProfileError(diskError || failure, this.profile) : undefined;
       session.updatedAt = Date.now();
       await this.store.save(session);
       if (!diskError) await rm(this.store.journalPath(session.id), { force: true });
-      if (!failure && !diskError && session.nativeId && !this.controller.signal.aborted) this.metadata.start(session, this.adapter, this.instructions);
+      // A profile edit affects the next user turn, never this turn's cache-friendly metadata fork.
+      if (!failure && !diskError && session.nativeId && !this.controller.signal.aborted) this.metadata.start(session, this.adapter, this.instructions, this.profile, this.model);
     } catch (error) {
-      session.status = 'error'; session.error = error instanceof Error ? error.message : 'Session persistence failed.';
+      session.status = 'error'; session.error = safeProfileError(error, this.profile);
       this.publish({ type: 'error', errorText: session.error });
       this.publish({ type: 'finish', finishReason: 'error', messageMetadata: { interrupted: true } });
-      throw error;
+      // The server logs rejected persistence promises; keep that terminal diagnostic as private as the SSE response.
+      throw new Error(session.error);
     } finally {
       this.mainSettled = true;
       if (!disk.writableEnded) disk.end();

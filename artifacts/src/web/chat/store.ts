@@ -32,6 +32,7 @@ export class WorkspaceStore {
   private inflight = new Set<string>();
   private metadata = new Map<string, AbortController>();
   private turns = new Map<string, number>();
+  private configurationRevisions = new Map<string, number>();
   private selectedArtifacts = new Map<string, string>();
   private dismissed = new Map<string, string>();
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -78,6 +79,7 @@ export class WorkspaceStore {
     if (existing) return Promise.resolve(existing);
     const pending = this.loads.get(id);
     if (pending) return pending;
+    const configuration = this.configurationRevisions.get(id);
     const task = Promise.all([api<Session>(`/api/sessions/${id}`), api<Artifact[]>(`/api/sessions/${id}/artifacts`)]).then(([session, artifacts]) => {
       this.files.set(id, new Map(artifacts.map(artifact => [artifact.path, artifact])));
       const chat = new Chat<ChatMessage>({
@@ -93,8 +95,10 @@ export class WorkspaceStore {
       });
       this.chats.set(id, chat);
       const { messages: _messages, ...summary } = session;
-      this.update(id, summary);
-      if (session.status === 'running') void this.resume(id);
+      // Settings can be saved from the session-list summary while the full transcript is still loading.
+      if (this.configurationRevisions.get(id) === configuration) this.update(id, { ...summary, model: summary.model, profileId: summary.profileId });
+      const current = this.snapshot.sessions.find(item => item.id === id) ?? summary;
+      if (current.status === 'running') void this.resume(id);
       else void this.subscribeMetadata(id);
       return chat;
     }).finally(() => this.loads.delete(id));
@@ -121,9 +125,10 @@ export class WorkspaceStore {
   }
 
   private async refresh(id: string, turn = this.turns.get(id), restoreMessages = false) {
+    const configuration = this.configurationRevisions.get(id);
     try {
       const { messages, ...summary } = await api<Session>(`/api/sessions/${id}`);
-      if (this.turns.get(id) !== turn) return;
+      if (this.turns.get(id) !== turn || this.configurationRevisions.get(id) !== configuration) return;
       const chat = this.chats.get(id);
       const streaming = chat?.status === 'streaming' || chat?.status === 'submitted';
       const lastUser = chat?.messages.findLast(message => message.role === 'user');
@@ -133,7 +138,7 @@ export class WorkspaceStore {
         chat.messages = messages;
         if (summary.status === 'idle') chat.clearError();
       }
-      this.update(id, { ...summary, ...(streaming ? { status: 'running' } : unacknowledged ? { status: 'error', error: chat?.error?.message ?? '这条消息尚未发送成功。' } : {}) });
+      this.update(id, { ...summary, model: summary.model, profileId: summary.profileId, ...(streaming ? { status: 'running' } : unacknowledged ? { status: 'error', error: chat?.error?.message ?? '这条消息尚未发送成功。' } : {}) });
     } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }
   }
 
@@ -154,16 +159,22 @@ export class WorkspaceStore {
     finally { if (this.metadata.get(id) === controller) this.metadata.delete(id); }
   }
 
-  create = async (input: { harness: HarnessId; cwd: string; model?: string }) => {
+  create = async (input: { harness: HarnessId; cwd: string; model?: string; profileId?: string | null }) => {
     const session = await api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify(input) });
     remember(LAST_CWD, session.cwd);
     const { messages: _messages, ...summary } = session;
     this.publish({ sessions: [summary, ...this.snapshot.sessions] });
     await this.select(session.id);
   };
+  configure = async (id: string, input: { profileId: string | null; model: string | null }) => {
+    const { messages: _messages, ...summary } = await api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+    // A GET begun before PATCH must not restore stale settings after the confirmed write.
+    this.configurationRevisions.set(id, (this.configurationRevisions.get(id) ?? 0) + 1);
+    this.cancelMetadata(id); this.update(id, { ...summary, model: summary.model, profileId: summary.profileId });
+  };
   remove = async (id: string) => {
     await api(`/api/sessions/${id}`, { method: 'DELETE' });
-    this.cancelMetadata(id); this.turns.delete(id); this.setDraft(id, '');
+    this.cancelMetadata(id); this.turns.delete(id); this.configurationRevisions.delete(id); this.setDraft(id, '');
     this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.dismissed.delete(id);
     const sessions = this.snapshot.sessions.filter(session => session.id !== id);
     this.publish({ sessions, activeId: this.snapshot.activeId === id ? sessions[0]?.id ?? null : this.snapshot.activeId });

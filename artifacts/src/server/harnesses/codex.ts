@@ -1,11 +1,13 @@
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
-import { abortable, abortError, EventQueue, executableVersion, record, safeError, string } from './common.js';
+import { abortable, abortError, EventQueue, executableVersion, record, safeProfileError, string } from './common.js';
 import { CodexEventMapper } from './codex-events.js';
 import { CodexRpc, type CodexConnection } from './codex-rpc.js';
+import { codexProfileRuntime, initializeCodex, readCodexProfileOptions } from './codex-profiles.js';
 
 export function codexThreadParams(turn: HarnessTurn): Record<string, unknown> {
-  const common = { cwd: turn.cwd, developerInstructions: turn.instructions, ...(turn.model ? { model: turn.model } : {}), approvalPolicy: 'on-request', approvalsReviewer: 'user' };
+  const config = codexProfileRuntime(turn.profile).config, model = turn.model || string(config.model);
+  const common = { cwd: turn.cwd, developerInstructions: turn.instructions, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}), ...(config.model_provider ? { modelProvider: config.model_provider } : {}), approvalPolicy: 'on-request', approvalsReviewer: 'user' };
   if (turn.enrichment) return { ...common, threadId: turn.nativeId, ephemeral: true, excludeTurns: true, sandbox: 'read-only' };
   return turn.nativeId ? { ...common, threadId: turn.nativeId, excludeTurns: true, sandbox: 'workspace-write' } : { ...common, sandbox: 'workspace-write' };
 }
@@ -26,6 +28,7 @@ export async function codexServerRequest(turn: HarnessTurn, method: string, valu
 /** Kept separate from process startup so raw protocol replay tests exercise the actual orchestration. */
 export async function* runCodexConnection(turn: HarnessTurn, connection: CodexConnection): AsyncGenerator<ChatChunk> {
   const queue = new EventQueue<ChatChunk>(), mapper = new CodexEventMapper();
+  const diagnostic = (value: unknown) => safeProfileError(value, turn.profile);
   let nativeId = '', nativeTurnId = '', streaming = false, terminal = false;
   let finish!: () => void, reject!: (error: Error) => void;
   let turnAvailable!: () => void, nativeSettled!: () => void, cancellation: Promise<void> | undefined;
@@ -47,9 +50,9 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
       for (const chunk of mapper.finish()) queue.push(chunk);
       const result = record(params.turn);
       if (turn.signal.aborted || result.status === 'interrupted') reject(abortError());
-      else if (result.status === 'failed') reject(new Error(safeError(record(result.error).message || 'Codex turn failed')));
+      else if (result.status === 'failed') reject(new Error(diagnostic(record(result.error).message || 'Codex turn failed')));
       else finish();
-    } else if (method === 'error' && !params.willRetry) reject(new Error(safeError(record(params.error).message || params.message || 'Codex stream failed')));
+    } else if (method === 'error' && !params.willRetry) reject(new Error(diagnostic(record(params.error).message || params.message || 'Codex stream failed')));
   };
   const abort = () => {
     if (streaming && !terminal && !cancellation) {
@@ -71,8 +74,7 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
   const producer = (async () => {
     if (turn.signal.aborted) throw abortError();
     if (turn.enrichment && !turn.nativeId) throw new Error('Metadata generation requires a completed native Codex thread');
-    await connection.request('initialize', { clientInfo: { name: 'macaron_artifacts', title: 'Macaron Artifacts', version: '0.1.0' }, capabilities: { experimentalApi: true } });
-    connection.notify('initialized', {});
+    await initializeCodex(connection);
     const method = turn.enrichment ? 'thread/fork' : turn.nativeId ? 'thread/resume' : 'thread/start';
     const result = await connection.request(method, codexThreadParams(turn));
     nativeId = string(record(result.thread).id);
@@ -81,7 +83,7 @@ export async function* runCodexConnection(turn: HarnessTurn, connection: CodexCo
     if (!turn.enrichment) turn.onNativeSession(nativeId);
     if (turn.signal.aborted) throw abortError();
     streaming = true;
-    const response = await connection.request('turn/start', { threadId: nativeId, input: turn.retry ? [] : [{ type: 'text', text: turn.prompt, text_elements: [] }] });
+    const response = await connection.request('turn/start', { threadId: nativeId, input: turn.retry ? [] : [{ type: 'text', text: turn.prompt, text_elements: [] }], ...(turn.profile?.config.effort ? { effort: turn.profile.config.effort } : {}) });
     nativeTurnId ||= string(record(response.turn).id);
     if (nativeTurnId) turnAvailable();
     await done;
@@ -103,8 +105,14 @@ export const codexAdapter: HarnessAdapter = {
     const version = await executableVersion(process.env.MACARON_CODEX_PATH || 'codex');
     return { id: 'codex', name: 'Codex', available: Boolean(version), detail: version || 'Install the Codex CLI', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: true, approvals: true, fork: true } };
   },
+  async profileOptions(cwd, profile) {
+    const runtime = codexProfileRuntime(profile), connection = new CodexRpc(process.env.MACARON_CODEX_PATH || 'codex', { cwd, env: runtime.env, config: runtime.startup, secrets: runtime.secrets });
+    try { return await readCodexProfileOptions(connection, cwd, profile); }
+    finally { await connection.close(); }
+  },
   async *run(turn) {
     if (turn.signal.aborted) throw abortError();
-    yield* runCodexConnection(turn, new CodexRpc(process.env.MACARON_CODEX_PATH || 'codex'));
+    const runtime = codexProfileRuntime(turn.profile);
+    yield* runCodexConnection(turn, new CodexRpc(process.env.MACARON_CODEX_PATH || 'codex', { cwd: turn.cwd, env: runtime.env, config: runtime.startup, secrets: runtime.secrets }));
   },
 };

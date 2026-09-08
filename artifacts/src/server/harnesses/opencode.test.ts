@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Session } from '@opencode-ai/sdk/v2/types';
+import type { Agent, Provider, Session } from '@opencode-ai/sdk/v2/types';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessTurn } from './types.js';
 import { EventQueue } from './common.js';
 import { OpenCodeEventMapper } from './opencode-events.js';
-import { openCodeGuardPlugin, type OpenCodeConnection, type OpenCodePrompt } from './opencode-server.js';
+import { openCodeDefaultModel, openCodeGuardPlugin, openCodeProfileConfig, openCodeProfileOptions, type OpenCodeConnection, type OpenCodePrompt } from './opencode-server.js';
 import { openCodeModel, runOpenCodeConnection } from './opencode.js';
 
 const event = (type: string, properties: Record<string, unknown> = {}) => ({ type, properties });
@@ -71,12 +71,29 @@ class FakeConnection implements OpenCodeConnection {
   async rejectQuestion(id: string) { this.calls.push({ method: 'question-reject', value: id }); this.emit('native', 'session.idle'); }
   async abort(id: string) { this.calls.push({ method: 'abort', value: id }); this.queue.end(); }
   async deleteSession(id: string) { this.calls.push({ method: 'delete', value: id }); }
+  async profileOptions() { return { models: [], efforts: [] }; }
+  async defaults() { this.calls.push({ method: 'defaults' }); return { model: 'native/default', agent: 'build' }; }
   async close() { this.calls.push({ method: 'close' }); this.queue.end(); }
 }
 const makeTurn = (extra: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'stable instructions', signal: new AbortController().signal, onNativeSession: () => {}, approve: async () => true, ...extra });
 async function collect(turn: HarnessTurn, connection: OpenCodeConnection) { const chunks: ChatChunk[] = []; for await (const chunk of runOpenCodeConnection(turn, connection)) chunks.push(chunk); return chunks; }
 
 describe('OpenCode lifecycle', () => {
+  test('applies profile model, variant and agent on the next turn without leaking an old variant to a new model', async () => {
+    const first = new FakeConnection(), second = new FakeConnection();
+    await collect(makeTurn({ nativeId: 'native', profile: { config: { model: 'profile/model', variant: 'max', agent: 'plan' } }, model: 'override/model' }), first);
+    await collect(makeTurn({ nativeId: 'native', profile: { config: { model: 'profile/model' } } }), second);
+    expect(first.calls.find(call => call.method === 'prompt')?.value).toMatchObject({ prompt: { model: { providerID: 'override', modelID: 'model' }, agent: 'plan', variant: 'max' } });
+    expect((second.calls.find(call => call.method === 'prompt')?.value as { prompt: OpenCodePrompt }).prompt.variant).toBe('');
+  });
+  test('an explicit inherit profile restores native defaults while metadata keeps the completed parent configuration', async () => {
+    const connection = new FakeConnection(), metadata = new FakeConnection();
+    await collect(makeTurn({ nativeId: 'native', profile: { config: {} } }), connection);
+    expect(connection.calls.find(call => call.method === 'prompt')?.value).toMatchObject({ prompt: { model: { providerID: 'native', modelID: 'default' }, agent: 'build', variant: '' } });
+    await collect(makeTurn({ nativeId: 'native', profile: { config: {} }, enrichment: true }), metadata);
+    expect(metadata.calls.some(call => call.method === 'defaults')).toBe(false);
+    expect(metadata.calls.find(call => call.method === 'prompt')?.value).toMatchObject({ prompt: { model: { providerID: 'provider', modelID: 'model' }, variant: 'high' } });
+  });
   test('ignores initial idle, resumes the native session and streams the accepted turn', async () => {
     const connection = new FakeConnection(), nativeIDs: string[] = [];
     const chunks = await collect(makeTurn({ nativeId: 'native', onNativeSession: id => nativeIDs.push(id) }), connection);
@@ -190,5 +207,35 @@ describe('OpenCode lifecycle', () => {
       await hooks['chat.headers']({ sessionID: 'fork', model: { providerID: 'opencode', headers: {} } }, zen);
       expect(zen.headers).toEqual({ 'x-opencode-session': 'main' });
     } finally { if (original === undefined) delete process.env.MACARON_OPENCODE_GUARD_FILE; else process.env.MACARON_OPENCODE_GUARD_FILE = original; await rm(directory, { recursive: true, force: true }); }
+  });
+});
+
+describe('OpenCode profiles', () => {
+  test('native defaults honor config, valid recents, then the native ranked model of a configured provider', () => {
+    const providers = [{ id: 'first', models: { main: { id: 'main' } } }, { id: 'configured', models: { preferred: { id: 'preferred' }, recent: { id: 'recent' } } }] as unknown as Provider[];
+    const catalog = { providers, default: { first: 'main', configured: 'preferred' } };
+    expect(openCodeDefaultModel({ model: 'explicit/model' }, catalog, {})).toBe('explicit/model');
+    expect(openCodeDefaultModel({}, catalog, { recent: [{ providerID: 'missing', modelID: 'x' }, { providerID: 'configured', modelID: 'recent' }] })).toBe('configured/recent');
+    expect(openCodeDefaultModel({ provider: { configured: {} } }, catalog, { recent: [{ providerID: 'configured', modelID: 'gone' }] })).toBe('configured/preferred');
+    expect(openCodeDefaultModel({}, catalog, null)).toBe('first/main');
+  });
+  test('isolates overlays and preserves native provider, agents, plugins and small model', () => {
+    const native = { model: 'local/native', small_model: 'local/small', plugin: ['native-plugin'], agent: { explore: { temperature: 0.1, model: 'local/native' } }, provider: { local: { npm: '@ai-sdk/openai-compatible', options: { baseURL: 'https://native.example', apiKey: 'native-key', setCacheKey: true }, models: { native: { name: 'Native' } } } } };
+    const before = structuredClone(native), env = process.env.OPENCODE_CONFIG_CONTENT;
+    const one = openCodeProfileConfig(native, { config: { model: 'local/one', baseUrl: 'https://one.example', agent: 'plan', agentModels: { explore: 'local/child' } }, apiKey: 'one-key' });
+    const two = openCodeProfileConfig(native, { config: { model: 'local/two', baseUrl: 'https://two.example' }, apiKey: 'two-key' });
+    expect(one.provider!.local!.options).toEqual({ baseURL: 'https://one.example', apiKey: 'one-key', setCacheKey: true });
+    expect(two.provider!.local!.options).toEqual({ baseURL: 'https://two.example', apiKey: 'two-key', setCacheKey: true });
+    expect(one.agent!.explore).toEqual({ temperature: 0.1, model: 'local/child' });
+    expect(one.small_model).toBe('local/small'); expect(one.plugin).toEqual(['native-plugin']); expect(one.default_agent).toBe('plan');
+    expect(one.provider!.local!.models).toEqual(native.provider.local.models); expect(native).toEqual(before); expect(process.env.OPENCODE_CONFIG_CONTENT).toBe(env);
+    expect(openCodeProfileConfig(native, { config: { model: 'local/native', authMode: 'inherit' }, apiKey: 'unused' }).provider!.local!.options!.apiKey).toBe('native-key');
+    expect(() => openCodeProfileConfig({}, { config: { baseUrl: 'https://proxy.example' } })).toThrow('Choose an OpenCode provider');
+    expect(openCodeProfileConfig({}, { config: { model: 'profile/main' }, apiKey: 'key' }, 'override/main').provider).toEqual({ override: { options: { apiKey: 'key' } } });
+  });
+  test('publishes model-specific variants and agent names without native secrets', () => {
+    const providers = [{ id: 'local', name: 'Local', key: 'secret', options: { apiKey: 'secret' }, models: { main: { id: 'main', name: 'Main', headers: { Authorization: 'secret' }, variants: { high: { reasoningEffort: 'high' }, disabled: { disabled: true } } } } }] as unknown as Provider[];
+    const agents: Agent[] = [{ name: 'build', mode: 'primary', prompt: 'private', permission: [], options: {} }, { name: 'explore', mode: 'subagent', permission: [], options: { apiKey: 'secret' } }];
+    expect(openCodeProfileOptions(providers, agents)).toEqual({ models: [{ id: 'local/main', name: 'Main', provider: 'local', efforts: ['high'] }], efforts: [], agents: [{ id: 'build', name: 'build', subagent: false }, { id: 'explore', name: 'explore', subagent: true }] });
   });
 });

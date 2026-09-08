@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentSession, CreateAgentSessionOptions, FileEntry, SessionHeader, SessionManager } from '@earendil-works/pi-coding-agent';
 import type { ChatChunk } from '../../shared/types.js';
-import type { HarnessAdapter, HarnessTurn } from './types.js';
+import type { ProfileOptions } from '../../shared/profiles.js';
+import type { HarnessAdapter, HarnessTurn, ResolvedProfile } from './types.js';
 import { abortable, abortError, EventQueue, record, safeError } from './common.js';
 import { PiEventMapper } from './pi-events.js';
 
@@ -16,6 +17,32 @@ const toolSchemas = (tools: RequestContext['tools']): NonNullable<RequestContext
 const PREFIX_FIELDS = ['model', 'modelId', 'system', 'instructions', 'tools', 'toolConfig', 'prompt_cache_key', 'promptCacheKey', 'user', 'metadata', 'config.systemInstruction', 'config.tools', 'config.toolConfig', 'context.systemPrompt', 'context.tools', 'options.sessionId'];
 const field = (value: unknown, key: string): unknown => key.split('.').reduce<unknown>((value, key) => record(value)[key], value);
 const instruction = (value: unknown) => ['system', 'developer'].includes(String(record(value).role));
+
+/** A fresh runtime owns each turn's provider overlays and temporary credentials, including metadata forks. */
+export async function createPiModelRuntime(sdk: PiSdk, agentDir: string, signal: AbortSignal, profile?: ResolvedProfile, modelOverride?: string) {
+  const modelRuntime = await sdk.ModelRuntime.create({ authPath: path.join(agentDir, 'auth.json'), modelsPath: path.join(agentDir, 'models.json'), signal });
+  const config = profile?.config, selection = modelOverride || config?.model, apiKey = config?.authMode === 'inherit' ? undefined : profile?.apiKey;
+  let resolved = selection ? sdk.resolveCliModel({ cliModel: selection, modelRuntime }) : undefined;
+  if (resolved?.error) throw new Error(resolved.error);
+  const provider = config?.provider || resolved?.model?.provider;
+  if (config?.baseUrl || apiKey) {
+    if (!provider) throw new Error('Choose a pi provider or model before overriding its endpoint or API key');
+    if (!modelRuntime.getProvider(provider)) throw new Error('Configure this provider in pi models.json before using it in a profile');
+    // Registering only an endpoint keeps the native model catalog, compatibility settings and authentication intact.
+    if (config?.baseUrl) modelRuntime.registerProvider(provider, { baseUrl: config.baseUrl });
+    if (apiKey) await modelRuntime.setRuntimeApiKey(provider, apiKey, { signal });
+    resolved = selection ? sdk.resolveCliModel({ cliModel: selection, modelRuntime }) : undefined;
+    if (resolved?.error) throw new Error(resolved.error);
+  }
+  return { modelRuntime, resolved };
+}
+
+export async function piProfileOptions(profile?: ResolvedProfile, sdk?: PiSdk): Promise<ProfileOptions> {
+  const runtimeSdk = sdk ?? await import('@earendil-works/pi-coding-agent');
+  const { getSupportedThinkingLevels } = await import('@earendil-works/pi-ai/compat');
+  const { modelRuntime } = await createPiModelRuntime(runtimeSdk, runtimeSdk.getAgentDir(), AbortSignal.timeout(15_000), profile);
+  return { models: modelRuntime.getModels().map(model => ({ id: `${model.provider}/${model.id}`, name: model.name, provider: model.provider, efforts: getSupportedThinkingLevels(model) })), efforts: [] };
+}
 
 /** These are the native SDK's provider payload layouts. Unknown/custom layouts fail closed for metadata. */
 export function piPayloadPrefix(payload: unknown, api: string): PayloadPrefix | undefined {
@@ -94,13 +121,27 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
   try {
     await loader.reload();
     if (turn.signal.aborted) throw abortError();
-    const modelRuntime = await sdk.ModelRuntime.create({ authPath: path.join(agentDir, 'auth.json'), modelsPath: path.join(agentDir, 'models.json'), signal: turn.signal });
-    const model = turn.model ? sdk.resolveCliModel({ cliModel: turn.model, modelRuntime }) : undefined;
-    if (model?.error) throw new Error(model.error);
-    const options: CreateAgentSessionOptions = { cwd: turn.cwd, agentDir, settingsManager, resourceLoader: loader, modelRuntime, sessionManager: manager, ...(model?.model ? { model: model.model, thinkingLevel: model.thinkingLevel } : {}) };
+    const { modelRuntime, resolved: model } = await createPiModelRuntime(sdk, agentDir, turn.signal, turn.profile, turn.model);
+    const effort = turn.profile?.config.effort;
+    let options: CreateAgentSessionOptions = { cwd: turn.cwd, agentDir, settingsManager, resourceLoader: loader, modelRuntime, sessionManager: manager, ...(model?.model ? { model: model.model, thinkingLevel: model.thinkingLevel } : {}), ...(effort ? { thinkingLevel: effort as CreateAgentSessionOptions['thinkingLevel'] } : {}) };
+    if (turn.profile && turn.nativeId && !turn.enrichment && !turn.retry) {
+      // Ask the native SDK for startup defaults without old model-change entries. This keeps
+      // native provider fallback and per-model effort rules intact when an override is removed.
+      const defaults = await sdk.createAgentSession({ ...options, sessionManager: sdk.SessionManager.inMemory(turn.cwd) });
+      try { options = { ...options, model: defaults.session.model, thinkingLevel: defaults.session.thinkingLevel }; }
+      finally { defaults.session.dispose(); }
+    }
     const created = await sdk.createAgentSession(options);
     session = created.session;
+    if (effort && !session.getAvailableThinkingLevels().includes(effort as NonNullable<CreateAgentSessionOptions['thinkingLevel']>)) throw new Error(`This pi model does not support thinking level ${effort}`);
     if (turn.enrichment && created.modelFallbackMessage) throw new Error(created.modelFallbackMessage);
+    if (turn.profile && turn.nativeId && !turn.enrichment && !turn.retry) {
+      // createAgentSession accepts resume overrides but does not record them. Metadata must
+      // restore the configuration that actually produced the latest response.
+      const previous = session.sessionManager.buildSessionContext(), currentModel = session.model;
+      if (currentModel && (previous.model?.provider !== currentModel.provider || previous.model?.modelId !== currentModel.id)) session.sessionManager.appendModelChange(currentModel.provider, currentModel.id);
+      if (previous.thinkingLevel !== session.thinkingLevel) session.sessionManager.appendThinkingLevelChange(session.thinkingLevel);
+    }
     const current = session;
     installPiApprovalGate(current, turn);
     // Confirmation requests from native extensions can use the shared approval UI;
@@ -181,5 +222,6 @@ export const piAdapter: HarnessAdapter = {
     try { version = (await import('@earendil-works/pi-coding-agent')).VERSION; } catch { /* Optional harness dependency may be unavailable. */ }
     return { id: 'pi', name: 'pi', available: Boolean(version), detail: version ? `pi SDK ${version}` : 'Install the Pi coding-agent SDK', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } };
   },
+  async profileOptions(_cwd, profile) { return piProfileOptions(profile); },
   run: runPiSession,
 };

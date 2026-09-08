@@ -1,8 +1,8 @@
 import { Allow, parse } from 'partial-json';
 import type { Session } from '../shared/types.js';
-import type { HarnessAdapter } from './harnesses/types.js';
+import type { HarnessAdapter, ResolvedProfile } from './harnesses/types.js';
 import type { SessionStore } from './store.js';
-import { safeError } from './harnesses/common.js';
+import { safeProfileError } from './harnesses/common.js';
 
 export const ENRICHMENT_PROMPT = '[ui4a-metadata] Return only JSON: {"suggestions":["next useful question","another useful next question"],"title":"short conversation title in the user’s language"}. Suggest at most three short follow-ups the user could send. Do not call tools or change files. Do not repeat answered questions.';
 export function parseRecap(text: string): { title?: string; suggestions: string[] } {
@@ -24,7 +24,7 @@ export class MetadataTasks {
   private tasks = new Map<string, MetadataTask>();
   private pending = new Set<Promise<void>>();
   constructor(private store: SessionStore) {}
-  start(session: Session, adapter: HarnessAdapter, instructions: string) {
+  start(session: Session, adapter: HarnessAdapter, instructions: string, profile?: ResolvedProfile, model = session.model) {
     this.cancel(session.id);
     const controller = new AbortController(), subscribers = new Set<Subscriber>();
     const nativeId = session.nativeId, task: MetadataTask = { controller, subscribers, done: Promise.resolve() };
@@ -34,7 +34,7 @@ export class MetadataTasks {
       const startedAt = Date.now();
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]);
       try {
-        for await (const chunk of adapter.run({ nativeId, cwd: session.cwd, prompt: ENRICHMENT_PROMPT, model: session.model, instructions, enrichment: true, signal, onNativeSession: () => {}, approve: async () => false })) {
+        for await (const chunk of adapter.run({ nativeId, cwd: session.cwd, prompt: ENRICHMENT_PROMPT, model, profile, instructions, enrichment: true, signal, onNativeSession: () => {}, approve: async () => false })) {
           if (signal.aborted || this.tasks.get(session.id) !== task) break;
           if (chunk.type !== 'text-delta') continue;
           text += chunk.delta;
@@ -56,7 +56,7 @@ export class MetadataTasks {
       } catch (error) {
         // Metadata remains optional, but a swallowed fork/transport error made production
         // failures indistinguishable from a model returning no suggestions. Never log its prompt or response.
-        if (!controller.signal.aborted) console.warn('[metadata]', { sessionId: session.id, harness: adapter.id, durationMs: Date.now() - startedAt, error: signal.aborted ? 'Metadata generation timed out' : safeError(error) });
+        if (!controller.signal.aborted) console.warn('[metadata]', { sessionId: session.id, harness: adapter.id, durationMs: Date.now() - startedAt, error: signal.aborted ? 'Metadata generation timed out' : safeProfileError(error, profile) });
       }
       finally {
         for (const subscriber of subscribers) { try { subscriber.close(); } catch { /* Browser detached. */ } }

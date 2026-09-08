@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import type { ResolvedProfile } from './types.js';
 
 /** A callback producer can fail while its consumer is awaiting the next native event. */
 export class EventQueue<T> implements AsyncIterable<T> {
@@ -39,4 +40,19 @@ export function executableVersion(binary: string): Promise<string | undefined> {
 // Native diagnostics occasionally include authorization headers; never expose those in the WebUI.
 export function safeError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]').replace(/\bsk-[A-Za-z0-9_-]+/g, '[redacted]');
+}
+
+/** Providers use arbitrary key formats. Mask the actual captured credentials before errors reach journals, clients or logs. */
+export function safeProfileError(error: unknown, profile?: ResolvedProfile): string {
+  const secrets = new Set([profile?.apiKey, profile?.authToken]);
+  const remember = (value: unknown) => { if (typeof value === 'string' && value) { secrets.add(value); if (/^(Bearer|Basic)\s+/i.test(value)) secrets.add(value.replace(/^\S+\s+/, '')); } };
+  for (const provider of Object.values(record(profile?.nativeConfig?.model_providers))) {
+    const config = record(provider);
+    remember(config.experimental_bearer_token); remember(process.env[string(config.env_key)]);
+    for (const [header, value] of Object.entries(record(config.http_headers))) if (/^(authorization|x-api-key|api-key)$/i.test(header)) remember(value);
+    for (const [header, key] of Object.entries(record(config.env_http_headers))) if (/^(authorization|x-api-key|api-key)$/i.test(header)) remember(process.env[string(key)]);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const redacted = [...secrets].filter((secret): secret is string => Boolean(secret)).sort((a, b) => b.length - a.length).reduce((text, secret) => text.split(secret).join('[redacted]'), message);
+  return safeError(redacted);
 }

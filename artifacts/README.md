@@ -37,6 +37,7 @@ For a custom Claude gateway, start the app with the same `ANTHROPIC_BASE_URL` an
 | `src/server/harnesses` | Native lifecycle, protocol conversion, permission callbacks, capability declarations |
 | `src/server/conversations.ts`, `store.ts` | One turn per session, persistence, complete increment journal, disconnect/reconnect and explicit cancellation |
 | `src/server/enrichment.ts` | Background title and suggestions on a disposable native fork |
+| `src/server/profiles.ts`, `src/shared/profiles.ts` | Private profile persistence, redacted public settings, revisions and per-turn resolution |
 | `src/server/artifacts.ts` | Full-file speculative previews from tool input; authoritative reads after writes and patches |
 | `src/shared/types.ts` | AI SDK UI messages and host data parts; no harness-owned UI types |
 | `src/web/chat` | Stable per-session AI SDK Chat instances, queueing, metadata subscription |
@@ -45,6 +46,25 @@ For a custom Claude gateway, start the app with the same `ANTHROPIC_BASE_URL` an
 | `src/web/theme` | Shiki palette → semantic CSS variables shared by the UI and generated components |
 
 New harnesses implement `HarnessAdapter` and register their capabilities. They do not add another SPA, sidebar, message store or Canvas. Native event boundaries pass through unchanged. Rendering can coalesce work already waiting on a compile; there is no fixed transport debounce.
+
+## Profiles
+
+Open **Profiles** in the sidebar to create or edit a configuration. Select it in **New conversation** or **Conversation settings**; an optional conversation model overrides only its main model. Empty fields inherit native settings. Existing sessions without Profiles continue to work.
+
+| Harness | Profile settings |
+| --- | --- |
+| Claude Code | Main/subagent models, optional forced subagent model, effort, Base URL, API key or Bearer token; model aliases and fine-grained tool streaming |
+| Codex | Native Profile files, main/subagent models and effort, provider/Base URL, API key; searchable native features with inherit/on/off states and managed restrictions |
+| OpenCode | Main model, provider/Base URL, API key, model variant, main agent and per-subagent model overrides |
+| pi | Model, provider/Base URL, API key and the model's supported thinking levels; pi has no built-in subagents |
+
+Edits affect the next turn of every conversation using that Profile. The current turn and its title/suggestion fork retain one captured configuration. Switching a conversation's Profile is available when its current turn finishes and keeps native history. A Profile in use cannot be deleted until its conversations select another configuration.
+
+Codex uses the current native `<name>.config.toml` format under `CODEX_HOME` (default `~/.codex`), shared with the CLI. Editing preserves unknown fields and comments; stale edits are rejected. The app-server does not accept `--profile`, so the adapter resolves the file and trusted project layers into per-thread overrides. It preserves Codex's configuration precedence and login/session directory. Legacy `[profiles.name]` tables are not used.
+
+Other harnesses receive per-process or per-session overrides without rewriting their native configuration. Credentials for all four live only in `profiles/profiles.json` under `MACARON_DATA_DIR`, with owner-only directory/file permissions (`0700`/`0600`); this is a local plaintext secret store, not an OS keychain. The API returns only whether a private credential is configured. Leaving a saved credential blank keeps it; **Remove credential** clears it when saved. Inherit authentication uses the harness's existing local login or environment.
+
+Model and feature choices come from the native SDK/CLI. Custom model IDs remain editable when discovery is unavailable. pi custom models still need an appropriate native `models.json` definition; the app does not invent provider capabilities. No credentials are stored in browser preferences, conversation files or stream journals.
 
 ## Why native adapters with AI SDK UI
 

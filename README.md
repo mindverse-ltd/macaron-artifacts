@@ -35,6 +35,7 @@ The previous WebUI, plugin launchers, and replay tools are archived on the [`v0`
 - Native text, reasoning, tool arguments, and command output stream at the granularity each harness exposes.
 - Switching conversations keeps background turns running. Refreshing reconnects to an active turn; explicit Stop cancels it.
 - Harness approval requests and pi tool approvals appear in the conversation.
+- Save multiple Profiles per harness, select them for new or existing conversations, and override the main model for one conversation. Profile edits apply from the next turn.
 - Titles and follow-up suggestions run on disposable native forks after the main response, preserving its prompt prefix without blocking the composer.
 - Inline `ui4a/tsx` fences render as their source arrives. Files at `.artifacts/canvases/<name>.ui4a.tsx` render in Canvas, including relative TSX, TypeScript, and JSON imports.
 - Generated components use a small `$ui4a/ui` library and scoped chat, state, and file capabilities. Shiki themes drive both syntax highlighting and interface colors.
@@ -52,7 +53,9 @@ Claude Code, Codex, OpenCode, and pi are supported. Kimi Code, Hermes, and dsh a
 | `MACARON_OPENCODE_PATH` | OpenCode executable |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
 
-For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Variables injected only by a shell alias do not reach a separately launched app.
+Open **Profiles** in the sidebar to configure models, reasoning effort, service endpoints and credentials. Codex Profiles use its native `$CODEX_HOME/<name>.config.toml` files (current Codex CLI); Claude Code, OpenCode and pi use app-managed overrides. API keys and tokens are stored in a private local file under the data directory and are never returned to the browser. See [Profiles](artifacts/README.md#profiles) for supported settings and inheritance.
+
+You can also inherit your CLI's configuration. For Claude gateways, that includes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`. Variables injected only by a shell alias do not reach a separately launched app.
 
 Workspace files remain in each conversation's selected directory. Deleting an app conversation does not delete those files. The API binds to loopback and accepts same-origin browser requests. Generated React runs in the host page; use it with trusted local code.
 

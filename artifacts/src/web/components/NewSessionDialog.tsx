@@ -2,6 +2,7 @@ import { Description, Dialog, DialogPanel, DialogTitle, Field as HeadlessField, 
 import { useState } from 'react';
 import type { HarnessId, HarnessInfo } from '../../shared/types';
 import { Button, Field } from './ui4a-ui';
+import { HarnessIcon } from './HarnessIcon';
 
 export function NewSessionDialog({ harnesses, initialHarness, initialCwd, onClose, onCreate }: { harnesses: HarnessInfo[]; initialHarness?: HarnessId; initialCwd: string; onClose: () => void; onCreate: (input: { harness: HarnessId; cwd: string; model?: string }) => Promise<void> }) {
   const [harness, setHarness] = useState<HarnessId>(harnesses.find(item => item.id === initialHarness && item.available)?.id ?? harnesses.find(item => item.available)?.id ?? 'claude-code');
@@ -18,7 +19,8 @@ export function NewSessionDialog({ harnesses, initialHarness, initialCwd, onClos
         <Label className="text-xs font-medium text-muted">Harness</Label>
         <div className="grid grid-cols-[1.2fr_1fr_1.2fr_.8fr] gap-1.5 sm:grid-cols-4">
           {harnesses.map(item => <HeadlessField key={item.id} disabled={busy || !item.available} className="min-w-0">
-            <Radio as="button" type="button" value={item.id} title={item.available ? item.name : `${item.name} · 未安装`} className="interactive flex h-14 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-border px-1 text-xs leading-4 text-fg hover:bg-surface-3 data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <Radio as="button" type="button" value={item.id} title={item.available ? item.name : `${item.name} · 未安装`} className="interactive flex h-16 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-border px-1 text-xs leading-4 text-fg hover:bg-surface-3 data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              <HarnessIcon harness={item.id} />
               <Label as="span" passive>{item.name}</Label>
               {!item.available ? <Description className="text-[10px] leading-3">未安装</Description> : null}
             </Radio>

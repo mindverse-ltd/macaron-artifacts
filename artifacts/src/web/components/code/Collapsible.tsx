@@ -77,7 +77,7 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
     <div className={className}>
       {/* 模糊层和展开开关都贴着**窗口**的边，所以定位基准要在这一层。
           两个渐隐强度在这里落地并补间，底下的蒙版和模糊层都是从它们算出来的（继承），因此永远同步 */}
-      <div className="relative" style={{ "--fade-top": edges.top, "--fade-bottom": edges.bottom, transition: `--fade-top ${EASE}, --fade-bottom ${EASE}` } as React.CSSProperties}>
+      <div className="relative" style={{ "--fade-top": collapsed ? edges.top : 0, "--fade-bottom": collapsed ? edges.bottom : 0, transition: `--fade-top ${EASE}, --fade-bottom ${EASE}` } as React.CSSProperties}>
         {/* 高度给到具体像素而不是 max-height：收起态是常量，展开态跟着测量值走。
             `overflow-y-auto` 而不是 hidden —— 跟随尾部靠的就是真的滚动，用户也能自己滚回去看。
             滚动条一律藏起来：蒙版是盖在整个窗口上的，会把滚动条一起糊掉，露着比藏着更难看 */}
@@ -85,14 +85,14 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
           ref={scroller}
           className="no-scrollbar overflow-y-auto"
           onTransitionEnd={(event) => event.propertyName === "height" && setToggling(false)}
-          style={{ height: collapsed ? CAP : height || undefined, transition: toggling ? "height 300ms cubic-bezier(0.32,0.72,0,1)" : undefined, maskImage: collapsed ? MASK : undefined, WebkitMaskImage: collapsed ? MASK : undefined }}
+          style={{ height: collapsed ? CAP : height || undefined, transition: toggling ? "height 300ms cubic-bezier(0.32,0.72,0,1)" : undefined, maskImage: MASK, WebkitMaskImage: MASK }}
         >
           <div ref={inner}>{children}</div>
         </div>
         {/* 强度为 0 时这两层是零高度的空盒子，所以常挂着也不额外合成 —— 但必须常挂着，
             卸掉重挂就没有过渡可言了 */}
-        {collapsed ? <ProgressiveFade side="top" size={FADE} step={BLUR_STEP} /> : null}
-        {collapsed ? <ProgressiveFade side="bottom" size={FADE} step={BLUR_STEP} /> : null}
+        <ProgressiveFade side="top" size={FADE} step={BLUR_STEP} />
+        <ProgressiveFade side="bottom" size={FADE} step={BLUR_STEP} />
         {/* 开关浮在被截断的那条边上，居中。哪条边藏了东西就出现在哪条边 —— 跟随尾部时藏的是上面，
             按钮也就只出现在顶上。一律自带底色：它压着的是代码，而渐隐带最多只糊掉一部分 */}
         {collapsed && edges.top > REVEAL ? <Toggle side="top" label="↑ 展开" fade onClick={() => toggle(true)} /> : null}

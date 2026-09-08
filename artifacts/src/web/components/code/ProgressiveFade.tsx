@@ -23,11 +23,12 @@ export type FadeSide = keyof typeof ANGLE;
 export const ProgressiveFade = memo(function ProgressiveFade({ side, size, step }: { side: FadeSide; size: number; step: number }) {
   const segment = 100 / (LAYERS + 1);
   return (
-    <div aria-hidden className={`pointer-events-none absolute ${BOX[side]}`} style={{ height: `calc(var(--fade-${side}) * ${size}px)`, opacity: `var(--fade-${side})` }}>
+    <div aria-hidden className={`pointer-events-none absolute max-h-full ${BOX[side]}`} style={{ height: `calc(var(--fade-${side}) * ${size}px)` }}>
       {Array.from({ length: LAYERS }, (_, index) => {
         const stops = [index, index + 1, index + 2, index + 3].map((stop, at) => `rgba(0,0,0,${at === 1 || at === 2 ? 1 : 0}) ${stop * segment}%`).join(",");
         const mask = `linear-gradient(${ANGLE[side]}deg,${stops})`;
-        return <div key={index} className="absolute inset-0" style={{ maskImage: mask, WebkitMaskImage: mask, backdropFilter: `blur(calc(var(--fade-${side}) * ${index * step}px))` }} />;
+        // 父层 opacity < 1 会建立 backdrop root，子层采样不到外部内容，直到 opacity = 1 才突然变糊。
+        return <div key={index} className="absolute inset-0" style={{ maskImage: mask, WebkitMaskImage: mask, backdropFilter: `blur(calc(var(--fade-${side}) * ${index * step}px))`, opacity: `var(--fade-${side})` }} />;
       })}
     </div>
   );

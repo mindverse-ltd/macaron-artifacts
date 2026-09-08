@@ -1,7 +1,8 @@
 import type { Options, Query } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
-import { abortable, abortError, executableVersion, record, safeError, string } from './common.js';
+import { abortable, abortError, executableVersion, record, safeError, safeProfileError, string } from './common.js';
+import { claudeProfileOptions, prepareClaudeProfile, type PreparedClaudeProfile } from './claude-profile.js';
 
 type Block = { id: string; kind: 'text' | 'reasoning' | 'tool'; name: string; json: string; input: unknown; ended: boolean };
 
@@ -13,6 +14,7 @@ export class ClaudeEventMapper {
   private tools = new Set<string>();
   private sequence = 0;
   private currentUsage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } = {};
+  constructor(private diagnostic: (error: unknown) => string = safeError) {}
 
   map(raw: unknown): ChatChunk[] {
     const message = record(raw), chunks: ChatChunk[] = [];
@@ -77,7 +79,7 @@ export class ClaudeEventMapper {
       for (const value of Array.isArray(source.content) ? source.content : []) {
         const block = record(value), toolCallId = string(block.tool_use_id);
         if (block.type !== 'tool_result' || !this.tools.has(toolCallId)) continue;
-        if (block.is_error) chunks.push({ type: 'tool-output-error', toolCallId, errorText: typeof block.content === 'string' ? safeError(block.content) : JSON.stringify(block.content), dynamic: true, providerExecuted: true });
+        if (block.is_error) chunks.push({ type: 'tool-output-error', toolCallId, errorText: this.diagnostic(typeof block.content === 'string' ? block.content : JSON.stringify(block.content)), dynamic: true, providerExecuted: true });
         else chunks.push({ type: 'tool-output-available', toolCallId, output: block.content ?? '', dynamic: true, providerExecuted: true });
       }
     } else if (message.type === 'result') this.usage(message.usage, chunks);
@@ -105,8 +107,9 @@ export class ClaudeEventMapper {
 }
 
 export function claudeOptions(turn: HarnessTurn, abortController: AbortController): Options {
+  const model = turn.model || turn.profile?.config.model || string(turn.profile?.nativeConfig?.model);
   return {
-    cwd: turn.cwd, ...(turn.nativeId && !turn.retry ? { resume: turn.nativeId } : {}), ...(turn.model ? { model: turn.model } : {}), abortController,
+    cwd: turn.cwd, ...(turn.nativeId && !turn.retry ? { resume: turn.nativeId } : {}), ...(model ? { model } : {}), abortController,
     ...(process.env.MACARON_CLAUDE_PATH ? { pathToClaudeCodeExecutable: process.env.MACARON_CLAUDE_PATH } : {}),
     systemPrompt: { type: 'preset', preset: 'claude_code', append: turn.instructions }, includePartialMessages: true, permissionMode: 'default',
     ...(turn.enrichment ? { forkSession: true, persistSession: false, maxTurns: 1 } : {}),
@@ -121,38 +124,47 @@ export function claudeOptions(turn: HarnessTurn, abortController: AbortControlle
   };
 }
 
+type CreateClaudeQuery = (prompt: string, options: Options) => Promise<Query>;
+const createClaudeQuery: CreateClaudeQuery = async (prompt, options) => (await import('@anthropic-ai/claude-agent-sdk')).query({ prompt, options });
+
+export async function* runClaudeTurn(turn: HarnessTurn, createQuery: CreateClaudeQuery = createClaudeQuery): AsyncGenerator<ChatChunk> {
+  if (turn.signal.aborted) throw abortError();
+  if (turn.enrichment && !turn.nativeId) throw new Error('Metadata generation requires a completed native Claude session');
+  const abortController = new AbortController(), abort = () => abortController.abort();
+  turn.signal.addEventListener('abort', abort, { once: true });
+  let stream: Query | undefined, profile: PreparedClaudeProfile | undefined;
+  try {
+    profile = await prepareClaudeProfile(turn.profile);
+    if (turn.signal.aborted) throw abortError();
+    stream = await createQuery(turn.prompt, { ...claudeOptions(turn, abortController), ...profile.options });
+    const mapper = new ClaudeEventMapper(error => safeProfileError(error, turn.profile));
+    let nativeId = turn.nativeId, settled = false;
+    for await (const message of stream) {
+      if (!turn.enrichment && 'session_id' in message && message.session_id && message.session_id !== nativeId) { nativeId = message.session_id; turn.onNativeSession(nativeId); }
+      for (const chunk of mapper.map(message)) yield chunk;
+      if (message.type === 'result') {
+        settled = true;
+        if (message.is_error) throw new Error('errors' in message ? message.errors.join('\n') : message.result || message.subtype);
+      }
+    }
+    if (turn.signal.aborted) throw abortError();
+    if (!settled) throw new Error('Claude ended without a result');
+    for (const chunk of mapper.finish()) yield chunk;
+  } catch (error) {
+    if (turn.signal.aborted) throw abortError();
+    throw new Error(safeProfileError(error, turn.profile));
+  } finally {
+    turn.signal.removeEventListener('abort', abort);
+    try { stream?.close(); } finally { await profile?.dispose(); }
+  }
+}
+
 export const claudeAdapter: HarnessAdapter = {
   id: 'claude-code',
+  profileOptions: claudeProfileOptions,
   async info() {
     const version = await executableVersion(process.env.MACARON_CLAUDE_PATH || 'claude');
     return { id: 'claude-code', name: 'Claude Code', available: Boolean(version), detail: version || 'Install Claude Code', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: false, approvals: true, fork: true } };
   },
-  async *run(turn) {
-    if (turn.signal.aborted) throw abortError();
-    if (turn.enrichment && !turn.nativeId) throw new Error('Metadata generation requires a completed native Claude session');
-    const abortController = new AbortController(), abort = () => abortController.abort();
-    turn.signal.addEventListener('abort', abort, { once: true });
-    let stream: Query | undefined;
-    try {
-      const { query } = await import('@anthropic-ai/claude-agent-sdk');
-      if (turn.signal.aborted) throw abortError();
-      stream = query({ prompt: turn.prompt, options: claudeOptions(turn, abortController) });
-      const mapper = new ClaudeEventMapper();
-      let nativeId = turn.nativeId, settled = false;
-      for await (const message of stream) {
-        if (!turn.enrichment && 'session_id' in message && message.session_id && message.session_id !== nativeId) { nativeId = message.session_id; turn.onNativeSession(nativeId); }
-        for (const chunk of mapper.map(message)) yield chunk;
-        if (message.type === 'result') {
-          settled = true;
-          if (message.is_error) throw new Error(safeError('errors' in message ? message.errors.join('\n') : message.result || message.subtype));
-        }
-      }
-      if (turn.signal.aborted) throw abortError();
-      if (!settled) throw new Error('Claude ended without a result');
-      for (const chunk of mapper.finish()) yield chunk;
-    } catch (error) {
-      if (turn.signal.aborted) throw abortError();
-      throw new Error(safeError(error));
-    } finally { turn.signal.removeEventListener('abort', abort); stream?.close(); }
-  },
+  run: runClaudeTurn,
 };

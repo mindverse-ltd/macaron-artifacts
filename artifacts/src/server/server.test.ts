@@ -76,12 +76,17 @@ test('retries a failed native turn in place without adding a continuation messag
     yield { type: 'text-end', id: 'answer' };
   });
   const original = message('retry-user', 'Keep this request');
-  expect((await post('/api/chat', { id: session.id, messages: [original] })).ok).toBe(true);
-  while (true) { const current = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session; if (!current.status || current.status === 'error') break; await new Promise(resolve => setTimeout(resolve, 0)); }
+  const first = await post('/api/chat', { id: session.id, messages: [original] });
+  expect(first.ok).toBe(true);
+  // Headers and the error snapshot can precede journal persistence and active-turn cleanup.
+  // Consume each stream as the real Chat client does before asserting its completed state.
+  await first.text();
   const failed = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session;
   expect(failed.status).toBe('error');
   expect(failed.messages.filter(message => message.role === 'user')).toHaveLength(1);
-  expect((await post('/api/chat', { id: session.id, messages: failed.messages })).ok).toBe(true);
+  const retry = await post('/api/chat', { id: session.id, messages: failed.messages });
+  expect(retry.ok).toBe(true);
+  await retry.text();
   const recovered = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session;
   expect(turns.map(turn => turn.retry)).toEqual([false, true]);
   expect(turns[1]?.messageId).toBe('retry-user');

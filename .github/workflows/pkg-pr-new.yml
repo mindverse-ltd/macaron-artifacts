@@ -26,7 +26,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:package
-      - run: pnpm --filter @macaron/server test
       # `pnpm exec`, not `pnpm dlx`/`bunx`: pkg.pr.new warns against dlx-style
       # runners in CI (they fetch an unpinned build each run). pkg-pr-new is a
       # devDependency, so this executes the lockfile-pinned binary from

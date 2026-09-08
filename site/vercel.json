@@ -4,5 +4,6 @@
   "outputDirectory": "build/client",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null,
-  "cleanUrls": true
+  "cleanUrls": true,
+  "redirects": [{ "source": "/app/:path*", "destination": "/connect", "permanent": true }]
 }

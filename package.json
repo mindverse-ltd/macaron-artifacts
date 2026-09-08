@@ -6,18 +6,9 @@
   "scripts": {
     "dev": "pnpm --filter @macaron/artifacts dev",
     "build": "pnpm --filter @macaron/artifacts build",
-    "build:web:legacy": "pnpm --filter @macaron/shared build && pnpm --filter @macaron/web build",
-    "build:server:legacy": "pnpm --filter @macaron/shared build && pnpm --filter @macaron/server build",
     "start": "pnpm --filter @macaron/artifacts start",
-    "bundle:legacy": "pnpm --filter @macaron/server bundle",
     "prepack": "pnpm build",
     "typecheck": "pnpm --filter @macaron/artifacts typecheck",
-    "replay:test": "node --test scripts/replay/*.test.mjs",
-    "replay:render": "pnpm build:web:legacy && node scripts/replay/render.mjs",
-    "dev:legacy": "concurrently -k -n server,web -c blue,magenta \"pnpm --filter @macaron/server dev\" \"pnpm --filter @macaron/web dev\"",
-    "build:legacy": "pnpm --filter @macaron/shared build && pnpm --filter @macaron/server build && pnpm --filter @macaron/web build",
-    "start:legacy": "node server/dist/index.js",
-    "typecheck:legacy": "pnpm --filter @macaron/shared typecheck && pnpm --filter @macaron/server typecheck && pnpm --filter @macaron/web typecheck",
     "test": "pnpm --filter @macaron/artifacts test",
     "test:package": "node --test scripts/package.test.mjs"
   },
@@ -48,10 +39,6 @@
     "partial-json": "0.1.7"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0",
-    "pkg-pr-new": "^0.0.75",
-    "playwright-core": "^1.61.1",
-    "typescript": "^5.7.0",
-    "unocss": "66.8.1"
+    "pkg-pr-new": "^0.0.75"
   }
 }

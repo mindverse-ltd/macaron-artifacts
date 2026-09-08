@@ -1,10 +1,5 @@
 packages:
   - 'artifacts'
-  - 'shared'
-  - 'server'
-  - 'web'
-  - 'mcx'
-  - 'mkx'
 # Let npm pack warn via devEngines while pnpm still selects the declared version.
 pmOnFail: download
 # Keep local resolutions aligned with pnpm's CI release-age policy.
@@ -15,5 +10,4 @@ blockExoticSubdeps: false
 allowBuilds:
   '@google/genai': false
   esbuild: true
-  node-pty: true
   protobufjs: false

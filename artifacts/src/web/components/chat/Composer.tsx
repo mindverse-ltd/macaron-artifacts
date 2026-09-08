@@ -1,9 +1,8 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { useInputHistory } from './useInputHistory';
 import { Icon } from '../Icon';
 
-export function Composer({ disabled, busy, onSend, onStop }: { disabled: boolean; busy: boolean; onSend: (text: string) => void; onStop: () => void }) {
-  const [text, setText] = useState('');
+export function Composer({ text, setText, disabled, busy, onSend, onStop }: { text: string; setText: (text: string) => void; disabled: boolean; busy: boolean; onSend: (text: string) => void; onStop: () => void }) {
   const helpId = useId();
   const area = useRef<HTMLTextAreaElement>(null);
   const history = useInputHistory(text, setText, area);

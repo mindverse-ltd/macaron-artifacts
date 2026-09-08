@@ -27,6 +27,8 @@ export class WorkspaceStore {
   private files = new Map<string, Map<string, Artifact>>();
   private liveRevisions = new Map<string, Map<string, number>>();
   private queues = new Map<string, QueueItem[]>();
+  private drafts = new Map<string, string>();
+  private draftListeners = new Map<string, Set<() => void>>();
   private inflight = new Set<string>();
   private metadata = new Map<string, AbortController>();
   private turns = new Map<string, number>();
@@ -43,6 +45,14 @@ export class WorkspaceStore {
   chat = (id: string) => this.chats.get(id);
   artifacts = (id: string) => [...(this.files.get(id)?.values() ?? [])];
   queue = (id: string) => this.queues.get(id) ?? [];
+  draft = (id: string) => this.drafts.get(id) ?? '';
+  subscribeDraft = (id: string, listener: () => void) => { let listeners = this.draftListeners.get(id); if (!listeners) this.draftListeners.set(id, listeners = new Set()); listeners.add(listener); return () => { listeners.delete(listener); if (!listeners.size) this.draftListeners.delete(id); }; };
+  setDraft = (id: string, text: string) => {
+    if (this.draft(id) === text) return;
+    text ? this.drafts.set(id, text) : this.drafts.delete(id);
+    // Keystrokes only notify this composer; streaming history and the application shell need not render again.
+    for (const listener of this.draftListeners.get(id) ?? []) listener();
+  };
   selectedArtifact = (id: string) => this.selectedArtifacts.get(id);
 
   initialize = () => this.initialization ??= this.loadInitial();
@@ -153,7 +163,7 @@ export class WorkspaceStore {
   };
   remove = async (id: string) => {
     await api(`/api/sessions/${id}`, { method: 'DELETE' });
-    this.cancelMetadata(id); this.turns.delete(id);
+    this.cancelMetadata(id); this.turns.delete(id); this.setDraft(id, '');
     this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.dismissed.delete(id);
     const sessions = this.snapshot.sessions.filter(session => session.id !== id);
     this.publish({ sessions, activeId: this.snapshot.activeId === id ? sessions[0]?.id ?? null : this.snapshot.activeId });

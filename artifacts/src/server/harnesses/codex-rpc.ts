@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { record, safeError } from './common.js';
+import { tomlLiteral } from './codex-profile-toml.js';
 
 export interface CodexConnection {
   notification?: (method: string, params: unknown) => void;
@@ -12,6 +13,7 @@ export interface CodexConnection {
 }
 
 type Pending = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
+export interface CodexRpcOptions { cwd?: string; env?: NodeJS.ProcessEnv; config?: Record<string, unknown>; secrets?: string[] }
 
 export class CodexRpc implements CodexConnection {
   notification?: CodexConnection['notification'];
@@ -23,8 +25,9 @@ export class CodexRpc implements CodexConnection {
   private closing = false;
   private exited: Promise<void>;
 
-  constructor(binary: string) {
-    this.process = spawn(binary, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+  constructor(binary: string, private options: CodexRpcOptions = {}) {
+    const overrides = Object.entries(options.config || {}).flatMap(([key, value]) => ['-c', `${key}=${tomlLiteral(value)}`]);
+    this.process = spawn(binary, ['app-server', ...overrides], { cwd: options.cwd, env: options.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const lines = createInterface({ input: this.process.stdout });
     lines.on('line', (line) => {
       try { this.receive(JSON.parse(line)); } catch { this.fail(new Error('Codex returned an invalid protocol frame')); }
@@ -63,7 +66,10 @@ export class CodexRpc implements CodexConnection {
       const pending = this.requests.get(frame.id);
       if (!pending) return;
       this.requests.delete(frame.id); clearTimeout(pending.timer);
-      if (frame.error) pending.reject(new Error(safeError(record(frame.error).message || 'Codex request failed')));
+      if (frame.error) {
+        const message = (this.options.secrets || []).filter(Boolean).reduce((text, secret) => text.split(secret).join('[redacted]'), safeError(record(frame.error).message || 'Codex request failed'));
+        pending.reject(new Error(message));
+      }
       else pending.resolve(record(frame.result));
     }
   }

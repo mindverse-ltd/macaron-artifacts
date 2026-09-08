@@ -14,6 +14,8 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
   const queue = new EventQueue<ChatChunk>(), mapper = new OpenCodeEventMapper(), controller = new AbortController();
   const signal = AbortSignal.any([turn.signal, controller.signal]);
   let nativeID = '', started = false, terminal = false, active = false, resolveReady!: () => void, resolveDone!: () => void, rejectDone!: (error: unknown) => void;
+  const assistantIDs = new Set<string>();
+  let overflow: { error: Error; precedingIDs: Set<string> } | undefined;
   let pump: Promise<void> | undefined;
   const ready = new Promise<void>(resolve => { resolveReady = resolve; });
   const done = new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
@@ -41,18 +43,29 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
         const eventSessionID = properties.sessionID ?? record(properties.info).sessionID ?? record(properties.part).sessionID;
         if (!started || eventSessionID !== nativeID) continue;
         if (event.type === 'session.status' && record(properties.status).type !== 'idle') active = true;
-        if (event.type === 'message.updated' && record(properties.info).role === 'assistant') active = true;
+        const info = record(properties.info), assistant = event.type === 'message.updated' && info.role === 'assistant';
+        if (assistant) { active = true; assistantIDs.add(string(info.id)); }
         if (event.type === 'permission.asked') {
           const approved = !turn.enrichment && await abortable(turn.approve({ id: string(properties.id), tool: string(properties.permission), input: properties }), signal);
           await connection.replyPermission(string(properties.id), approved, signal);
         } else if (event.type === 'question.asked') {
           // The shared approval surface cannot answer free-form native questionnaires.
           await connection.rejectQuestion(string(properties.id), signal);
-        } else if (event.type === 'session.error') throw new Error(safeError(record(record(properties.error).data).message || record(properties.error).name || 'OpenCode turn failed'));
-        for (const chunk of mapper.map(raw)) queue.push(chunk);
+        }
+        const nativeError = event.type === 'session.error' ? properties.error : assistant ? info.error : undefined;
+        if (nativeError || event.type === 'session.error') {
+          const error = new Error(safeError(record(record(nativeError).data).message || record(nativeError).name || 'OpenCode turn failed'));
+          if (record(nativeError).name !== 'ContextOverflowError') throw error;
+          // Overflow also announces automatic compaction. The failed message's final snapshot and a compaction summary are not recovery.
+          active = true;
+          if (!overflow || !assistant || !overflow.precedingIDs.has(string(info.id))) overflow = { error, precedingIDs: new Set(assistantIDs) };
+        } else if (overflow && assistant && !overflow.precedingIDs.has(string(info.id)) && !info.summary && record(info.time).completed !== undefined && info.finish && info.finish !== 'error') overflow = undefined;
+        const mapped = assistant && record(info.error).name === 'ContextOverflowError' ? { ...event, properties: { ...properties, info: { ...info, error: undefined } } } : raw;
+        for (const chunk of mapper.map(mapped)) queue.push(chunk);
         if (active && (event.type === 'session.idle' || (event.type === 'session.status' && record(properties.status).type === 'idle'))) {
           terminal = true;
           for (const chunk of mapper.finish()) queue.push(chunk);
+          if (overflow) throw overflow.error;
           resolveDone();
           return;
         }

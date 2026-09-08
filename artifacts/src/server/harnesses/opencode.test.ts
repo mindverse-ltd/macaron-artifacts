@@ -39,8 +39,12 @@ describe('OpenCode native events', () => {
   test('aggregates completed model calls without counting repeated snapshots twice', () => {
     const mapper = new OpenCodeEventMapper(), completed = (id: string, input: number, output: number) => message('assistant', id, { time: { completed: 1 }, tokens: { input, output, cache: { read: 3 } } });
     mapper.map(completed('one', 10, 2)); mapper.map(completed('one', 10, 2));
-    expect(mapper.map(completed('two', 20, 4))).toEqual([{ type: 'data-usage', id: 'usage', data: { inputTokens: 30, outputTokens: 6, cachedInputTokens: 6 } }]);
+    expect(mapper.map(completed('two', 20, 4))).toEqual([{ type: 'data-usage', id: 'usage', data: { inputTokens: 36, outputTokens: 6, cachedInputTokens: 6 } }]);
     expect(() => mapper.map(message('assistant', 'failed', { error: { data: { message: 'Bearer credential' } } }))).toThrow('Bearer [redacted]');
+  });
+  test('includes native cache and reasoning buckets in UI token totals', () => {
+    const mapper = new OpenCodeEventMapper();
+    expect(mapper.map(message('assistant', 'usage', { time: { completed: 1 }, tokens: { input: 10, output: 20, reasoning: 30, cache: { read: 100, write: 50 } } }))).toEqual([{ type: 'data-usage', id: 'usage', data: { inputTokens: 160, outputTokens: 50, cachedInputTokens: 100 } }]);
   });
 });
 
@@ -108,6 +112,41 @@ describe('OpenCode lifecycle', () => {
       connection.onPrompt = id => { if (mode === 'error') connection.emit(id, 'session.error', { error: { data: { message: 'failure' } } }); else connection.queue.end(); };
       await expect(collect(makeTurn(), connection)).rejects.toThrow(mode === 'error' ? 'failure' : 'event stream ended');
       expect(connection.calls.slice(-2)).toEqual([{ method: 'abort', value: 'native' }, { method: 'close' }]);
+    }
+  });
+  test('context overflow can recover through compaction and a new successful assistant response', async () => {
+    const connection = new FakeConnection();
+    connection.onPrompt = id => {
+      connection.emit(id, 'message.updated', { info: { id: 'failed', role: 'assistant' } });
+      connection.emit(id, 'session.error', { error: { name: 'ContextOverflowError', data: { message: 'Context window exceeded' } } });
+      connection.emit(id, 'message.updated', { info: { id: 'failed', role: 'assistant', time: { completed: 1 } } });
+      connection.emit(id, 'message.updated', { info: { id: 'summary', role: 'assistant', summary: true, finish: 'stop', time: { completed: 2 } } });
+      connection.emit(id, 'message.updated', { info: { id: 'answer', role: 'assistant' } });
+      connection.emit(id, 'message.updated', { info: { id: 'failed', role: 'assistant', finish: 'error', error: { name: 'ContextOverflowError', data: { message: 'Context window exceeded' } }, time: { completed: 1 } } });
+      connection.emit(id, 'message.part.updated', { part: { id: 'part', messageID: 'answer', type: 'text', text: '' } });
+      connection.emit(id, 'message.part.delta', { messageID: 'answer', partID: 'part', field: 'text', delta: 'Recovered answer' });
+      connection.emit(id, 'message.updated', { info: { id: 'answer', role: 'assistant', finish: 'stop', time: { completed: 3 } } });
+      connection.emit(id, 'session.idle');
+    };
+    const chunks = await collect(makeTurn(), connection);
+    expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['Recovered answer']);
+    expect(connection.calls.some(call => call.method === 'abort')).toBe(false);
+  });
+  test('overflow remains terminal at idle without a new completed non-summary answer', async () => {
+    for (const mode of ['idle', 'failed-final', 'failed-error', 'summary-only', 'new-incomplete', 'new-unfinished']) {
+      const connection = new FakeConnection();
+      connection.onPrompt = id => {
+        connection.emit(id, 'message.updated', { info: { id: 'failed', role: 'assistant' } });
+        connection.emit(id, 'session.error', { error: { name: 'ContextOverflowError', data: { message: 'Context window exceeded' } } });
+        if (mode === 'failed-final') connection.emit(id, 'message.updated', { info: { id: 'failed', role: 'assistant', finish: 'stop', time: { completed: 1 } } });
+        if (mode === 'failed-error') connection.emit(id, 'message.updated', { info: { id: 'failed', role: 'assistant', finish: 'error', error: { name: 'ContextOverflowError', data: { message: 'Context window exceeded' } }, time: { completed: 1 } } });
+        if (mode === 'summary-only') connection.emit(id, 'message.updated', { info: { id: 'summary', role: 'assistant', summary: true, finish: 'stop', time: { completed: 2 } } });
+        if (mode === 'new-incomplete') connection.emit(id, 'message.updated', { info: { id: 'answer', role: 'assistant' } });
+        if (mode === 'new-unfinished') connection.emit(id, 'message.updated', { info: { id: 'answer', role: 'assistant', time: { completed: 2 } } });
+        connection.emit(id, 'session.status', { status: { type: 'idle' } });
+      };
+      await expect(collect(makeTurn(), connection)).rejects.toThrow('Context window exceeded');
+      expect(connection.calls.at(-1)?.method).toBe('close');
     }
   });
   test('an early consumer return interrupts native generation before closing', async () => {

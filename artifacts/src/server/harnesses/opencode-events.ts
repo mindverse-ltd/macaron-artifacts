@@ -24,8 +24,9 @@ export class OpenCodeEventMapper {
       for (const queued of pending) chunks.push(...this.map(queued));
       if (info.error) throw new Error(safeError(record(record(info.error).data).message || record(info.error).name || 'OpenCode turn failed'));
       if (record(info.time).completed !== undefined) {
-        const tokens = record(info.tokens);
-        this.usage.set(id, { inputTokens: Number(tokens.input ?? 0), outputTokens: Number(tokens.output ?? 0), cachedInputTokens: Number(record(tokens.cache).read ?? 0) });
+        const tokens = record(info.tokens), cache = record(tokens.cache);
+        // OpenCode separates billable cache and reasoning buckets from input/output; the UI uses inclusive totals.
+        this.usage.set(id, { inputTokens: Number(tokens.input ?? 0) + Number(cache.read ?? 0) + Number(cache.write ?? 0), outputTokens: Number(tokens.output ?? 0) + Number(tokens.reasoning ?? 0), cachedInputTokens: Number(cache.read ?? 0) });
         const total = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
         for (const usage of this.usage.values()) { total.inputTokens += usage.inputTokens; total.outputTokens += usage.outputTokens; total.cachedInputTokens += usage.cachedInputTokens; }
         chunks.push({ type: 'data-usage', id: 'usage', data: total });

@@ -1,13 +1,13 @@
 ---
 title: Usage
-description: Install one macaron-artifacts package and choose Claude Code or Codex inside the unified WebUI.
+description: Install one macaron-artifacts package and choose Claude Code, Codex, OpenCode, or pi inside the unified WebUI.
 ---
 
-Macaron Artifacts runs Claude Code and Codex in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
+Macaron Artifacts runs Claude Code, Codex, OpenCode, and pi in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
 
 ## Install
 
-Install and authenticate the native Claude Code or Codex CLI first. Macaron Artifacts requires Node.js 22 or newer and inherits the harness's local configuration.
+Macaron Artifacts requires Node.js 22.19 or newer. For Claude Code, Codex, or OpenCode, install and authenticate the native CLI first; the app inherits its local configuration. The pi SDK is included and reads your `~/.pi/agent` configuration, so it needs no separate pi executable.
 
 Run this commit's preview package:
 
@@ -25,17 +25,21 @@ macaron-artifacts
 Open [http://127.0.0.1:43860](http://127.0.0.1:43860). The commands are pinned to this documentation build's commit; use a commit with a successful package preview build.
 
 <Callout title="One package, one launcher">
-  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code and Codex are selected inside the app; Kimi Code and other harnesses are planned adapters.
+  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, and pi are selected inside the app. Kimi Code, Hermes, and dsh are not supported in this release.
 </Callout>
 
 ## Start a conversation
 
 1. Select **New conversation** and enter your workspace directory.
-2. Choose **Claude Code** or **Codex**. Leave the model field empty to use that harness's default.
+2. Choose **Claude Code**, **Codex**, **OpenCode**, or **pi**. Leave the model field empty to use that harness's default. OpenCode and pi accept an optional `provider/model` override.
 3. Send a message. Text, reasoning, and supported tool events stream into the conversation.
-4. Respond to native approval requests in the chat when they appear.
+4. Respond to approval requests in the chat when they appear. For pi, the host gates tool execution through its SDK hook.
 
 Switching conversations keeps background turns running. Refreshing reconnects to an active turn; **Stop** explicitly cancels it. Titles and follow-up suggestions arrive independently after the main response, so they do not hold the composer open.
+
+Streaming follows each harness's native events. OpenCode exposes text/reasoning deltas and tool input snapshots. pi also exposes raw tool argument deltas; its command output arrives as cumulative updates.
+
+OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported here. Tool execution approvals appear in the conversation.
 
 ## Generated UI
 
@@ -59,6 +63,8 @@ macaron-artifacts --help
 | `MACARON_DATA_DIR` | Conversation storage, default `~/.macaron-artifacts/sessions` |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |
+| `MACARON_OPENCODE_PATH` | OpenCode executable |
+| `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
 
 For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Environment variables set only inside a shell alias do not reach a separately launched app.
 

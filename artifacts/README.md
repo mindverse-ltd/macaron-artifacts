@@ -1,10 +1,10 @@
 # Macaron Artifacts
 
-A single React WebUI for native coding harnesses. Claude Code and Codex share the same conversation, approvals, UI4A rendering, session storage, and themes. The default layout and palette come from `ui4a-playground`.
+A single React WebUI for native coding harnesses. Claude Code, Codex, OpenCode, and pi share the same conversation, approvals, UI4A rendering, session storage, and themes. The default layout and palette come from `ui4a-playground`.
 
 ## Install and run
 
-The only published package and CLI is `macaron-artifacts`. Choose Claude Code or Codex inside the application; installing another package is not required to switch harnesses.
+The only published package and CLI is `macaron-artifacts`. Choose Claude Code, Codex, OpenCode, or pi inside the application; installing another WebUI package is not required to switch harnesses. Node.js 22.19 or newer is required.
 
 ```sh
 bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>
@@ -24,7 +24,9 @@ pnpm start
 
 Run these commands from the repository root. `MACARON_PORT` and `WEB_PORT` override the ports. Production serves the UI and API together.
 
-Install and authenticate the native Claude Code or Codex CLI first. The app inherits their local configuration; an empty model field uses the harness default. `MACARON_CLAUDE_PATH` and `MACARON_CODEX_PATH` can select an executable. App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` overrides that directory. Workspace files remain in the directory selected for each session. Deleting an app conversation does not delete workspace files.
+Install and authenticate the native CLI for Claude Code, Codex, or OpenCode. `MACARON_CLAUDE_PATH`, `MACARON_CODEX_PATH`, and `MACARON_OPENCODE_PATH` can select each executable. The bundled pi SDK uses local `~/.pi/agent` configuration; `PI_CODING_AGENT_DIR` overrides that directory, and no pi executable is required. An empty model field uses the harness default. OpenCode and pi accept an optional `provider/model` override.
+
+App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` overrides that directory. Workspace files remain in the directory selected for each session. Deleting an app conversation does not delete workspace files.
 
 For a custom Claude gateway, start the app with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as the CLI. Environment injected only by a shell alias is not inherited by a separately launched app.
 
@@ -46,17 +48,19 @@ New harnesses implement `HarnessAdapter` and register their capabilities. They d
 
 ## Why native adapters with AI SDK UI
 
-AI SDK 7's experimental [HarnessAgent](https://ai-sdk.dev/docs/ai-sdk-harnesses/overview) is real and compatible with `useChat`. Its [Codex adapter](https://ai-sdk.dev/providers/ai-sdk-harnesses/codex) currently uses the Codex SDK in a network sandbox and does not support native tool approvals. This local app needs the [Codex app-server](https://developers.openai.com/codex/app-server) event stream and native approvals, so adapters normalize directly into AI SDK 7.0.93 UI message chunks. The client uses the version-matched `@ai-sdk/react` Chat and `useChat` APIs.
+AI SDK 7's experimental [HarnessAgent](https://ai-sdk.dev/docs/ai-sdk-harnesses/overview) and harness packages were assessed; the official `harness-pi` package supports a host process, so sandboxing is not a universal constraint. Direct native integration keeps control over session persistence, metadata branches, local configuration, and approval callbacks. We use the Claude SDK, [Codex app-server](https://developers.openai.com/codex/app-server), OpenCode SDK connected to its local CLI server, and pi SDK, normalizing their events into the existing AI SDK UI message stream. The client keeps its shared `@ai-sdk/react` Chat and `useChat` APIs.
 
-| Native capability | Claude Code | Codex app-server |
-| --- | --- | --- |
-| Text and reasoning deltas | Yes | Yes |
-| Tool argument deltas | Yes | Not exposed by the current protocol |
-| Command stdout/stderr deltas | Not exposed by the Agent SDK | Yes |
-| Native approval | Yes | Yes |
-| Disposable metadata fork | `resume` + `forkSession`, no persistence | Ephemeral `thread/fork` |
+| Native capability | Claude Code | Codex app-server | OpenCode | pi |
+| --- | --- | --- | --- | --- |
+| Text and reasoning deltas | Yes | Yes | Yes | Yes |
+| Tool input | Raw argument deltas | Completed input | Input snapshots, not argument deltas | Raw argument deltas |
+| Command output | No live output exposed by the Agent SDK | Raw stdout/stderr deltas | Tool output snapshots | Cumulative native output updates |
+| Approval | Native callback | Native request | Native permission request | Host gate using the SDK tool execution hook |
+| Disposable metadata fork | `resume` + `forkSession`, no persistence | Ephemeral `thread/fork` | Native session fork, deleted after use | Native branch held in memory |
 
-Metadata retains the same instructions, model and tool catalog, appending only its final metadata request. It runs outside the main turn and is cancelled when a new turn arrives. This is prefix-friendly; cache hits still depend on the upstream provider. Usage parts preserve the native cached-input count. Metadata failure leaves the main response intact.
+Metadata retains the same instructions, model and tool catalog, appending only its final metadata request. OpenCode's fork blocks execution through a tool hook; pi uses an in-memory native branch that retains session affinity and blocks tools at execution. It runs outside the main turn and is cancelled when a new turn arrives. This is prefix-friendly; cache hits still depend on the upstream provider. Usage parts preserve the native cached-input count. Metadata failure leaves the main response intact.
+
+OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported in the WebUI. Tool execution approvals use the shared conversation controls.
 
 ## UI4A contract
 
@@ -78,8 +82,12 @@ pnpm test:package
 MACARON_PACKAGE_SOURCE=https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha> pnpm test:package
 ```
 
-Tests exercise raw Claude/Codex event conversion, real JSONL RPC framing, approval/cancellation, >4,000-event replay, crash recovery, metadata isolation, scoped capabilities and incremental rendering. Browser acceptance uses the real built application for inline and file previews, state retention, relative imports, theme switching and narrow layouts.
+Tests exercise harness event conversion, real JSONL RPC framing, approval/cancellation, >4,000-event replay, crash recovery, metadata isolation, scoped capabilities and incremental rendering. Browser acceptance uses the real built application for inline and file previews, state retention, relative imports, theme switching and narrow layouts.
 
-`test:package` builds and installs the package into an empty consumer directory, then starts its CLI and checks both harnesses and all client assets. `MACARON_PACKAGE_SOURCE` runs the same acceptance checks against a published preview URL or an existing tarball.
+`test:package` builds and installs the package into an empty consumer directory, then starts its CLI and checks the harness catalog and all client assets. `MACARON_PACKAGE_SOURCE` runs the same acceptance checks against a published preview URL or an existing tarball.
 
-The root package publishes only the unified application. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. OpenCode, dsh, pi and Kimi Code adapters, native session-history migration, attachments, and the old administrative panels are outside this first adapter slice.
+The root package publishes only the unified application. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Native session-history migration, attachments, and the old administrative panels are outside this adapter slice.
+
+## Deferred adapters
+
+Kimi Code still needs instruction-plugin integration, an execution gate covering every tool for metadata branches, and a compatible mapping for native question options. Hermes ACP forks do not preserve the selected provider and cached system prompt, and ACP exposes no session deletion for disposable metadata forks. Neither harness is selectable in this release. A dsh adapter is also deferred.

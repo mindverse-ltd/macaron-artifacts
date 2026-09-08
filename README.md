@@ -1,10 +1,10 @@
 # Macaron Artifacts
 
-One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code or Codex when creating a conversation. Both use the same chat, approvals, Canvas, and Shiki themes.
+One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code, Codex, OpenCode, or pi when creating a conversation. All four use the same chat, approvals, Canvas, and Shiki themes.
 
 ## Install and run
 
-Requires Node.js 22 or newer and an installed, authenticated Claude Code or Codex CLI. The app uses each harness's existing local configuration.
+Requires Node.js 22.19 or newer. Claude Code, Codex, and OpenCode use their installed, authenticated native CLI and local configuration. The pi SDK is included in the package and reads your local `~/.pi/agent` configuration; a separate pi executable is not required.
 
 Run a commit's preview package directly:
 
@@ -19,7 +19,7 @@ npm install -g https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifa
 macaron-artifacts
 ```
 
-Replace `<sha>` with the commit from a successful [package preview build](https://github.com/mindverse-ltd/macaron-artifacts/actions/workflows/pkg-pr-new.yml). Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default.
+Replace `<sha>` with the commit from a successful [package preview build](https://github.com/mindverse-ltd/macaron-artifacts/actions/workflows/pkg-pr-new.yml). Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default; for OpenCode and pi, enter an optional override as `provider/model`.
 
 ```sh
 macaron-artifacts --port 43860 --data-dir /path/to/session-data
@@ -32,12 +32,12 @@ There is one published package and one launcher. The old `mcc`, `mcx`, and `mkx`
 
 - Native text, reasoning, tool arguments, and command output stream at the granularity each harness exposes.
 - Switching conversations keeps background turns running. Refreshing reconnects to an active turn; explicit Stop cancels it.
-- Native approval requests appear in the conversation.
+- Harness approval requests and pi tool approvals appear in the conversation.
 - Titles and follow-up suggestions run on disposable native forks after the main response, preserving its prompt prefix without blocking the composer.
 - Inline `ui4a/tsx` fences render as their source arrives. Files at `.artifacts/canvases/<name>.ui4a.tsx` render in Canvas, including relative TSX, TypeScript, and JSON imports.
 - Generated components use a small `$ui4a/ui` library and scoped chat, state, and file capabilities. Shiki themes drive both syntax highlighting and interface colors.
 
-Claude Code and Codex are the first supported harnesses. OpenCode, dsh, pi, and Kimi Code are planned adapters. Native session-history migration and attachments are not included yet.
+Claude Code, Codex, OpenCode, and pi are supported. Kimi Code, Hermes, and dsh are deferred; see [the application guide](artifacts/README.md#deferred-adapters) for the current integration gaps. Native session-history migration and attachments are not included yet.
 
 ## Configuration
 
@@ -47,6 +47,8 @@ Claude Code and Codex are the first supported harnesses. OpenCode, dsh, pi, and 
 | `MACARON_DATA_DIR` | App conversation storage, default `~/.macaron-artifacts/sessions` |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |
+| `MACARON_OPENCODE_PATH` | OpenCode executable |
+| `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
 
 For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Variables injected only by a shell alias do not reach a separately launched app.
 

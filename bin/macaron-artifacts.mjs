@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const flag = args[i];
-  if (flag === '--help' || flag === '-h') { console.log('Usage: macaron-artifacts [--port 43860] [--data-dir PATH]\n\nOne local WebUI for Claude Code, Codex and UI4A. Harnesses use their native local configuration.'); process.exit(0); }
+  if (flag === '--help' || flag === '-h') { console.log('Usage: macaron-artifacts [--port 43860] [--data-dir PATH]\n\nOne local WebUI for Claude Code, Codex, OpenCode and pi, with UI4A. Requires Node.js 22.19 or newer.\nClaude Code, Codex and OpenCode use installed CLIs. The bundled pi SDK uses ~/.pi/agent.\nOverride executables with MACARON_CLAUDE_PATH, MACARON_CODEX_PATH or MACARON_OPENCODE_PATH; override pi configuration with PI_CODING_AGENT_DIR.'); process.exit(0); }
   const value = args[++i];
   if (!value || value.startsWith('--') || !['--port', '--data-dir'].includes(flag)) { console.error(`Invalid option: ${flag}`); process.exit(1); }
   if (flag === '--port' && (!/^\d+$/.test(value) || +value < 1 || +value > 65535)) { console.error('Port must be between 1 and 65535.'); process.exit(1); }

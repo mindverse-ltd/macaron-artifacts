@@ -15,6 +15,7 @@ const ICON_PATHS = {
   menu: "M4 12h16M4 6h16M4 18h16",
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   moon: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z",
+  monitor: "M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM12 17v4M8 21h8",
   chevronDown: "m6 9 6 6 6-6",
   chevronRight: "m9 18 6-6-6-6",
   chevronLeft: "m15 18-6-6 6-6",

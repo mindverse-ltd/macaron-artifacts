@@ -1,22 +1,39 @@
-import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { applyTheme, loadTheme, oppositeTheme, THEME_OPTIONS, themeAppearance, type Appearance, type ThemeId } from './themes';
+import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { applyTheme, loadTheme, themeAppearance, type Appearance, type ThemeId } from './themes';
+import { DEFAULT_PREFERENCES, readPreferences, themeSlot, type ThemeMode, type ThemePreferences, type ThemeSlot } from './preferences';
 
 const STORAGE = 'macaron-artifacts:appearance';
-function initialAppearance(): Appearance {
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  try { const saved = JSON.parse(localStorage.getItem(STORAGE) ?? 'null'); if (saved && THEME_OPTIONS.some(theme => theme.id === saved.id)) return themeAppearance(saved.id, typeof saved.dark === 'boolean' ? saved.dark : dark, 0); } catch { /* Preferences must never stop the application from opening. */ }
-  return themeAppearance('playground', dark, 0);
+function initialPreferences(): ThemePreferences {
+  try { return readPreferences(localStorage.getItem(STORAGE), matchMedia('(prefers-color-scheme: dark)').matches); } catch { return DEFAULT_PREFERENCES; }
 }
-type ThemeContextValue = { appearance: Appearance; selectedId: ThemeId; select: (id: ThemeId) => void; preview: (id: ThemeId | null) => void; toggle: () => void; error?: string };
+type ThemeContextValue = {
+  appearance: Appearance; preferences: ThemePreferences; activeSlot: ThemeSlot;
+  setMode: (mode: ThemeMode) => void; select: (slot: ThemeSlot, id: ThemeId) => void;
+  pair: (light: ThemeId, dark: ThemeId) => void; preview: (slot: ThemeSlot, id: ThemeId | null) => void; error?: string;
+};
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [selection, setSelection] = useState(initialAppearance);
-  const [previewId, setPreviewId] = useState<ThemeId | null>(null);
-  const [appearance, setAppearance] = useState(selection);
+  const [preferences, setPreferences] = useState(initialPreferences);
+  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);
+  const [previewState, setPreviewState] = useState<{ slot: ThemeSlot; id: ThemeId } | null>(null);
+  const [revision, setRevision] = useState(0);
+  const activeSlot = themeSlot(preferences, systemDark);
+  const previewId = previewState?.slot === activeSlot ? previewState.id : null;
+  const selectedId = preferences[activeSlot];
+  const next = useMemo(() => themeAppearance(previewId ?? selectedId, activeSlot === 'dark', revision), [previewId, selectedId, activeSlot, revision]);
+  const [appearance, setAppearance] = useState(next);
   const [error, setError] = useState<string>();
-  const last = useRef<{ light: ThemeId; dark: ThemeId }>({ light: 'vitesse-light', dark: 'vitesse-dark' });
-  const next = useMemo(() => previewId ? themeAppearance(previewId, selection.dark, selection.revision) : selection, [previewId, selection]);
+  useEffect(() => {
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    const change = () => { setSystemDark(media.matches); setPreviewState(null); };
+    media.addEventListener('change', change); change();
+    return () => media.removeEventListener('change', change);
+  }, []);
+  useEffect(() => {
+    // Save both slots even when only the inactive one changed. Hover state is never persisted.
+    try { localStorage.setItem(STORAGE, JSON.stringify(preferences)); } catch { /* Nonessential preference storage. */ }
+  }, [preferences]);
   useEffect(() => {
     let current = true;
     void loadTheme(next.syntax).then(theme => {
@@ -26,24 +43,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       document.documentElement.dataset.palette = next.id;
       document.documentElement.dataset.themePreview = String(previewId !== null);
       setAppearance(next); setError(undefined);
-      if (previewId === null) {
-        if (next.id !== 'playground') last.current[next.dark ? 'dark' : 'light'] = next.id;
-        try { localStorage.setItem(STORAGE, JSON.stringify({ id: next.id, dark: next.dark })); } catch { /* Nonessential preference storage. */ }
-      }
     }, reason => { if (current) setError(reason instanceof Error ? reason.message : '主题加载失败'); });
     return () => { current = false; };
   }, [next, previewId]);
-  const preview = useCallback((id: ThemeId | null) => setPreviewId(id), []);
-  const select = useCallback((id: ThemeId) => { setPreviewId(null); setSelection(previous => themeAppearance(id, previous.dark, previous.revision + 1)); }, []);
-  const toggle = useCallback(() => {
-    setPreviewId(null);
-    setSelection(previous => {
-      const dark = !previous.dark;
-      const remembered = last.current[dark ? 'dark' : 'light'];
-      const counterpart = oppositeTheme(remembered, previous.dark) === previous.id ? remembered : oppositeTheme(previous.id, dark);
-      return themeAppearance(previous.id === 'playground' ? 'playground' : counterpart ?? remembered, dark, previous.revision + 1);
-    });
+  const preview = useCallback((slot: ThemeSlot, id: ThemeId | null) => {
+    // A closing picker may only clear its own preview, never the other slot's newer preview.
+    setPreviewState(previous => id ? { slot, id } : previous?.slot === slot ? null : previous);
   }, []);
-  return <ThemeContext value={{ appearance, selectedId: selection.id, select, preview, toggle, error }}>{children}</ThemeContext>;
+  const commit = useCallback((update: (previous: ThemePreferences) => ThemePreferences) => { setPreviewState(null); setPreferences(update); setRevision(value => value + 1); }, []);
+  const setMode = useCallback((mode: ThemeMode) => commit(previous => ({ ...previous, mode })), [commit]);
+  const select = useCallback((slot: ThemeSlot, id: ThemeId) => commit(previous => ({ ...previous, [slot]: id })), [commit]);
+  const pair = useCallback((light: ThemeId, dark: ThemeId) => commit(previous => ({ ...previous, light, dark })), [commit]);
+  return <ThemeContext value={{ appearance, preferences, activeSlot, setMode, select, pair, preview, error }}>{children}</ThemeContext>;
 }
 export function useTheme() { const context = use(ThemeContext); if (!context) throw new Error('ThemeProvider is missing'); return context; }

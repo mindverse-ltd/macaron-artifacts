@@ -1,6 +1,7 @@
 /* 语义 token 的唯一定义处（见 CLAUDE.md §8）。单独一个文件是因为导出的单文件 HTML 也要用同一份
    —— 它不加载 globals.css 的其余部分，而 token 少一个就是「页面能开但没有底色和主色」。 */
-:root {
+:root,
+.theme-sample[data-palette="playground"] {
   --surface: #ffffff;
   --surface-2: #f7f7f8;
   --surface-3: #ececef;
@@ -64,7 +65,8 @@
   }
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+.theme-sample[data-palette="playground"][data-theme="dark"] {
   --surface: #0e0e11;
   --surface-2: #16161a;
   --surface-3: #212127;

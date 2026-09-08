@@ -10,10 +10,12 @@ import { Icon } from './components/Icon';
 import { Select } from './components/Select';
 import { Button } from './components/ui4a-ui';
 import { SplitHandle, useSplit } from './components/useSplit';
+import { AppearanceDialog } from './components/ThemePicker';
 
 export default function App() {
   const { state, actions } = useWorkspace();
-  const { appearance, toggle, error: themeError } = useTheme();
+  const { appearance, preferences, error: themeError } = useTheme();
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [newSession, setNewSession] = useState<{ harness?: HarnessId } | null>(null);
   const [emptyCanvasOpen, setEmptyCanvasOpen] = useState(false);
@@ -31,7 +33,7 @@ export default function App() {
     if ('requestIdleCallback' in window) { const handle = requestIdleCallback(warm); return () => cancelIdleCallback(handle); }
     const timer = setTimeout(warm, 0); return () => clearTimeout(timer);
   }, []);
-  const sidebar = { sessions: state.sessions, activeId: state.activeId, cwd: session?.cwd ?? actions.defaultCwd(), onSelect: (id: string) => { void actions.select(id); }, onCreate: create, onDelete: (id: string) => { void actions.remove(id).catch(actions.fail); } };
+  const sidebar = { sessions: state.sessions, activeId: state.activeId, cwd: session?.cwd ?? actions.defaultCwd(), onSelect: (id: string) => { void actions.select(id); }, onCreate: create, onDelete: (id: string) => { void actions.remove(id).catch(actions.fail); }, onAppearance: () => setAppearanceOpen(true) };
   const closeCanvas = () => { if (session) actions.closeArtifact(session.id); setEmptyCanvasOpen(false); };
   const toggleCanvas = () => { if (canvasOpen) closeCanvas(); else if (session && artifacts.length) actions.openArtifact(session.id, artifacts[0].path); else setEmptyCanvasOpen(true); };
 
@@ -39,7 +41,7 @@ export default function App() {
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3"><button type="button" onClick={() => setSidebarOpen(true)} title="会话" aria-label="打开会话列表" className="interactive grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg @md:hidden"><Icon name="menu" /></button><span className="min-w-0 flex-1 truncate text-sm font-medium">{session?.title ?? 'Macaron Artifacts'}</span>
       {state.harnesses.length ? <div className="ml-auto w-28 shrink-0 @md:w-36"><Select label="选择 Harness" value={session?.harness ?? state.harnesses.find(item => item.available)?.id ?? state.harnesses[0].id} options={state.harnesses.map(item => ({ value: item.id, label: item.name, disabled: !item.available }))} onChange={harness => setNewSession({ harness })} /></div> : null}
       {session ? <button type="button" title="新会话中选择模型" onClick={create} className="interactive hidden max-w-48 truncate rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-3 @xl:block">{session.model ?? '默认模型'}</button> : null}
-      <button type="button" onClick={toggle} title={appearance.dark ? '切换浅色主题' : '切换深色主题'} aria-label={appearance.dark ? '切换浅色主题' : '切换深色主题'} className="interactive grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg"><Icon name={appearance.dark ? 'moon' : 'sun'} /></button><button type="button" onClick={toggleCanvas} aria-pressed={canvasOpen} className={`interactive shrink-0 rounded-lg px-2 py-1 text-xs ${canvasOpen ? 'bg-surface-3 text-fg' : 'text-muted hover:bg-surface-3'}`}>Canvas</button>
+      <button type="button" onClick={() => setAppearanceOpen(true)} title="外观设置" aria-label="外观设置" aria-haspopup="dialog" className="interactive grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg"><Icon name={preferences.mode === 'system' ? 'monitor' : appearance.dark ? 'moon' : 'sun'} /></button><button type="button" onClick={toggleCanvas} aria-pressed={canvasOpen} className={`interactive shrink-0 rounded-lg px-2 py-1 text-xs ${canvasOpen ? 'bg-surface-3 text-fg' : 'text-muted hover:bg-surface-3'}`}>Canvas</button>
     </header>
     {state.error || themeError ? <div role="alert" className="flex items-center gap-3 border-b border-danger/30 px-4 py-2 text-xs text-danger"><span className="min-w-0 flex-1 break-words">{state.error ?? themeError}</span><button type="button" onClick={actions.clearError} aria-label="关闭错误提示" className="grid size-7 place-items-center"><Icon name="x" /></button></div> : null}
     <div className="flex min-h-0 flex-1"><Sidebar {...sidebar} /><SidebarDrawer {...sidebar} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -52,5 +54,6 @@ export default function App() {
       </div>
     </div>
     {newSession ? <NewSessionDialog key={newSession.harness ?? 'default'} harnesses={state.harnesses} initialHarness={newSession.harness} initialCwd={actions.defaultCwd()} onClose={() => setNewSession(null)} onCreate={actions.create} /> : null}
+    {appearanceOpen ? <AppearanceDialog onClose={() => setAppearanceOpen(false)} /> : null}
   </main>;
 }

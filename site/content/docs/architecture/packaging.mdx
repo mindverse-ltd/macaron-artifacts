@@ -3,15 +3,15 @@ title: Packaging
 description: One macaron-artifacts package, one CLI, and a prebuilt unified WebUI published per commit.
 ---
 
-The repository root publishes one package: **`macaron-artifacts`**. Its only CLI is **`macaron-artifacts`**, implemented by `bin/macaron-artifacts.mjs`. Claude Code and Codex are adapters selected inside the same application.
+The repository root publishes one package: **`macaron-artifacts`**. Its only CLI is **`macaron-artifacts`**, implemented by `bin/macaron-artifacts.mjs`. Claude Code, Codex, OpenCode, and pi are adapters selected inside the same application.
 
 ## Package contents
 
 The package ships the launcher, `artifacts/dist`, the UI4A skill, and the README. Its server and web assets are built before packaging, so starting the installed app does not invoke Vite or compile the application.
 
-The launcher starts the bundled server, which serves both the UI and API on `http://127.0.0.1:43860`. It accepts `--port` and `--data-dir`; native harness executables and their authenticated configuration remain on the user's machine.
+The launcher starts the bundled server, which serves both the UI and API on `http://127.0.0.1:43860`. It accepts `--port` and `--data-dir`. Claude Code, Codex, and OpenCode use installed native executables and local authentication; `MACARON_CLAUDE_PATH`, `MACARON_CODEX_PATH`, and `MACARON_OPENCODE_PATH` select the executables. The package includes the pi SDK, which reads `~/.pi/agent` or `PI_CODING_AGENT_DIR` without a separate pi executable.
 
-The package requires Node.js 22 or newer. Its runtime dependencies are declared by the published package; development-only tools stay out of the installation path.
+The package requires Node.js 22.19 or newer. Its runtime dependencies, including the OpenCode and pi SDKs, are declared by the published package; development-only tools stay out of the installation path.
 
 ## Per-commit releases
 
@@ -21,7 +21,7 @@ The package requires Node.js 22 or newer. Its runtime dependencies are declared 
 pnpm exec pkg-pr-new publish --no-compact --bin .
 ```
 
-The preview URL uses the same package name for either harness:
+The preview URL uses the same package name for every harness:
 
 ```sh
 bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>

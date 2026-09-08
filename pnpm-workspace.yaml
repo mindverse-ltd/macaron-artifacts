@@ -13,5 +13,7 @@ minimumReleaseAge: 1440
 # pnpm 10.26+ defaults blockExoticSubdeps=true, which blocks URL subdeps; allow it explicitly here.
 blockExoticSubdeps: false
 allowBuilds:
+  '@google/genai': false
   esbuild: true
   node-pty: true
+  protobufjs: false

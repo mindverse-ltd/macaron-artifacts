@@ -1,34 +1,35 @@
 ---
 title: Web
-description: The React SPA — two entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
+description: The retained React SPA entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
 ---
 
 <Callout type="warn" title="Legacy implementation">
   This page describes the previous application and its discontinued launchers. For the unified `macaron-artifacts` package, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
 </Callout>
 
-The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server just hands the browser one of two prebuilt HTML documents and the app takes over from there with a hash router.
+The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server hands the browser the selected prebuilt HTML document and the app takes over from there with a hash router.
 
-## Two Entries, One Build
+## Harness Entries, One Build
 
-`web/vite.config.ts` declares **two Rollup inputs**, so a single `vite build` emits two SPA bundles that share their asset chunks:
+`web/vite.config.ts` declares the Claude, Codex, and Kimi entries in one build, so their SPA bundles share asset chunks:
 
 ```ts
 input: {
   main: path.resolve(__dirname, 'index.html'),   // Claude UI
   codex: path.resolve(__dirname, 'codex.html'),  // Codex UI
+  kimi: path.resolve(__dirname, 'kimi.html'),    // Kimi UI
 }
 ```
 
 The server picks which one is `/` at boot (see [Overview](/docs/architecture/overview)). In dev, Vite serves on `:5273` (`strictPort`) and proxies `/api` to the server on `:7878`.
 
-<Callout title="The @ alias points at vendored source">
-  The retained web application imports `@genui/ui` and `@genui/ui/charts` from the upstream package. Its former `@` alias and copied component sources have been removed; React and `partial-react` are deduplicated by Vite.
+<Callout title="One lightweight component contract">
+  The retained web application shares the unified app's six `$ui4a/ui` components: Button, Field, Card, Badge, Tabs, and Disclosure. Native HTML and UnoCSS Wind4 utilities handle layout; additional controls and charts use `@headlessui/react` and `recharts` directly. `$macaron/ui` remains a compatibility alias for these same six exports. React and `partial-react` are deduplicated by Vite.
 </Callout>
 
 ## Runtime Bootstrap
 
-The three entries bootstrap GenUI differently. The **Claude** entry (`web/src/main.tsx`) stands up the whole GenUI runtime *before* the app renders — model-authored TSX previews are core to that UI, so the globals must exist up front. The **Codex** and **Kimi** entries (`web/src/codex/main.tsx`, `web/src/kimi/main.tsx`) deliberately do not: they stay small chat-focused bundles and **lazy-load** the GenUI runtime (`React.lazy` + `Suspense` in their chat views, ~500 KB gzip) only when a `render_ui` card actually needs to render.
+The three entries bootstrap GenUI differently. The **Claude** entry (`web/src/main.tsx`) stands up the whole GenUI runtime *before* the app renders — model-authored TSX previews are core to that UI, so the globals must exist up front. The **Codex** and **Kimi** entries (`web/src/codex/main.tsx`, `web/src/kimi/main.tsx`) stay chat-focused and **lazy-load** the GenUI runtime (`React.lazy` + `Suspense` in their chat views) only when a `render_ui` card needs to render.
 
 The steps below describe the Claude bootstrap:
 
@@ -36,7 +37,7 @@ The steps below describe the Claude bootstrap:
 <Step>
 ### Expose React + Macaron globals
 
-React, the JSX runtimes, ReactDOM, the vendored Macaron UI (`MacaronUI`, `MacaronCharts`, `MacaronLucide`) and `motion/react` are imported as namespaces and published to the page so streamed GenUI modules can resolve them without a bundler.
+React, the JSX runtimes, ReactDOM, the six UI4A components, Headless UI, Recharts, Lucide, and `motion/react` are imported as namespaces and published to the page so streamed GenUI modules can resolve them without a bundler. Chat actions use the retained `$macaron/chat` bridge.
 </Step>
 <Step>
 ### Boot the UnoCSS runtime

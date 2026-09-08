@@ -9,23 +9,19 @@ Use this skill to produce streaming GenUI `App.tsx`/HTML artifacts. Default to s
 
 ## Preferred path: `render_ui` MCP tool
 
-If the `mcp__macaron.render_ui` tool is exposed to you, call it directly with the complete TSX module in its `code` field — the host mounts the component inline in the conversation. The tool's own description already carries the authoring rules for `$macaron/ui`, streaming write order, and quality constraints. Do NOT curl anything or emit markdown TSX fences when this tool is available.
+If the `mcp__macaron.render_ui` tool is exposed to you, call it directly with the complete TSX module in its `code` field — the host mounts the component inline in the conversation. Use the host's `$ui4a/ui` contract: `Button`, `Field`, `Card`, `Badge`, `Tabs`, and `Disclosure`. `$macaron/ui` is a compatibility alias for the same six exports. Do NOT curl anything or emit markdown TSX fences when this tool is available.
+
+Compose layouts with native HTML and UnoCSS `presetWind4` utilities. Use `@headlessui/react` directly for additional accessible controls and `recharts` directly for charts. The retained `render_ui` host exposes chat actions as `$macaron/chat` (`sendUserMessage`, `useAutoSend`); do not assume it exposes the unified application's file or state bridges. Read `references/tsx-output.md` for component props.
 
 ## Local authoring rules (fallback)
 
 If `render_ui` is not exposed (older host or a bare CLI), fall back to writing a self-contained TSX module and use the CLI below to validate or render it. Detailed constraints and common fixes are in `references/tsx-output.md`.
 
-Optionally, if the runtime allows network egress, you MAY fetch the canonical live authoring prompt for cross-check — but only if you already have a specific ambiguity to resolve. Do NOT fetch it prophylactically before every render:
-
-```bash
-curl -fsSL https://genui.macaron.im/api/system-prompt
-```
-
-If that command errors (DNS blocked, no network, non-2xx), silently proceed with the local rules — do not surface the failure to the user.
+The current host tool description and local component reference define the available APIs. An external GenUI prompt or component catalog may target a different runtime and must not replace this contract.
 
 ## CLI
 
-The CLI is optional. Prefer direct streaming runtimes when the user wants an HTML harness or GenUI capability inside a page. Use the CLI for validation, standalone one-shot export, or when the user explicitly asks for the CLI.
+The CLI is optional. Prefer direct streaming runtimes when the user wants an HTML harness or GenUI capability inside a page. Use the CLI for standalone one-shot export or when the user explicitly asks for it. Its module registry is separate from this host: CLI checks do not validate the host's `$ui4a/*` or `$macaron/chat` capabilities, and a standalone export must provide its own compatible modules or use standalone React code.
 
 Use this exact pinned command unless the user provides a newer one:
 
@@ -70,13 +66,13 @@ Non-streaming is acceptable only for static file export, offline examples, or ex
 ## Workflow
 
 1. Clarify the target artifact: `App.tsx` only, standalone `index.html`, or a small project folder containing both.
-2. Fetch the live GenUI system prompt and scan for current constraints.
+2. Read the current host tool description and `references/tsx-output.md` for the supported imports and props.
 3. For model-backed generation, implement streaming first: SSE request, incremental code buffer, partial TSX completion, preview refresh, final render.
 4. Write a single self-contained `App.tsx` with `default export function App` when creating a TSX artifact.
-5. Keep imports GenUI-compatible; prefer local primitives from `$macaron/ui` and chart primitives from `$macaron/ui/charts`.
+5. Use the six `$ui4a/ui` primitives, native HTML, `@headlessui/react`, and `recharts`. Keep the interface palette-driven with semantic utilities rather than a separate component theme.
 6. Validate:
-   - Run `lint App.tsx`.
-   - Run `check App.tsx` when available.
+   - In the WebUI, use `render_ui` diagnostics and verify the mounted result.
+   - For a standalone CLI target, run `lint App.tsx` and `check App.tsx` against that target's supported imports.
    - Run `build App.tsx -o index.html` when the user asked for HTML.
 7. If validation fails, fix the TSX and rerun the failed command.
 8. For interactive review, start a local server and give the local URL.

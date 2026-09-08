@@ -15,8 +15,8 @@ const MIN_CANVAS_PX = 300;
 
 /** 把一个目标比例夹进"两侧都还能用"的区间；容器本身就窄到装不下两边时，退回等分。 */
 function clampFraction(fraction: number, width: number) {
-  if (width < MIN_CHAT_PX + MIN_CANVAS_PX) return 0.5;
-  return Math.min(1 - MIN_CHAT_PX / width, Math.max(MIN_CANVAS_PX / width, fraction));
+  if (width < MIN_CHAT_PX + MIN_CANVAS_PX + 1) return fraction;
+  return Math.min(1 - (MIN_CHAT_PX + 1) / width, Math.max(MIN_CANVAS_PX / width, fraction));
 }
 
 /**
@@ -31,10 +31,13 @@ export function useSplit() {
   // 初值只能在这儿读：`useState` 的初始化跑在服务端，那里没有 localStorage。
   // lint 会建议「直接初始化 state」，照做就是 hydration 不匹配
   useEffect(() => {
-    const stored = Number(localStorage.getItem(STORAGE_KEY));
+    let stored = 0;
+    try { stored = Number(localStorage.getItem(STORAGE_KEY)); } catch { /* Resizing remains usable when preference storage is unavailable. */ }
     // oxlint-disable-next-line react/set-state-in-effect
     if (stored > 0 && stored < 1) setFraction(stored);
   }, []);
+
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY, String(fraction)); } catch { /* Optional preference, never fail a render or interaction. */ } }, [fraction]);
 
   // 窗口变窄时旧比例可能已经把某一侧压到下限以下，重新夹一次
   useEffect(() => {
@@ -42,9 +45,10 @@ export function useSplit() {
       const width = container.current?.getBoundingClientRect().width;
       if (width) setFraction((current) => clampFraction(current, width));
     };
-    window.addEventListener("resize", onResize);
+    const observer = new ResizeObserver(onResize);
+    if (container.current) observer.observe(container.current);
     onResize();
-    return () => window.removeEventListener("resize", onResize);
+    return () => observer.disconnect();
   }, []);
 
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
@@ -71,9 +75,8 @@ export function useSplit() {
       if (!dragging) return;
       event.currentTarget.releasePointerCapture(event.pointerId);
       setDragging(false);
-      localStorage.setItem(STORAGE_KEY, String(fraction));
     },
-    [dragging, fraction],
+    [dragging],
   );
 
   /** 键盘也能调：分隔条是可聚焦的 separator，方向键每次挪 2%。 */
@@ -83,18 +86,18 @@ export function useSplit() {
     event.preventDefault();
     setFraction((current) => {
       const next = clampFraction(current + step, container.current?.getBoundingClientRect().width ?? 0);
-      localStorage.setItem(STORAGE_KEY, String(next));
       return next;
     });
   }, []);
 
-  return { container, fraction, dragging, handlers: { onPointerDown, onPointerMove, onPointerUp, onKeyDown } };
+  return { container, fraction, dragging, handlers: { onPointerDown, onPointerMove, onPointerUp, onKeyDown, onPointerCancel: () => setDragging(false), onLostPointerCapture: () => setDragging(false) } };
 }
 
 export function SplitHandle({ dragging, fraction = 50, handlers }: { dragging: boolean; fraction?: number; handlers: ReturnType<typeof useSplit>["handlers"] }) {
   return (
     <div
       role="separator"
+      aria-label="调整聊天和 Canvas 宽度"
       aria-orientation="vertical"
       aria-valuemin={0}
       aria-valuemax={100}
@@ -102,7 +105,7 @@ export function SplitHandle({ dragging, fraction = 50, handlers }: { dragging: b
       tabIndex={0}
       {...handlers}
       // 视觉上只有 1px 的线，但热区有 9px —— 光标能落在上面，才谈得上"可拖动"
-      className={`group relative hidden w-px shrink-0 cursor-col-resize touch-none bg-border outline-none @md:block ${dragging ? "bg-accent" : ""}`}
+      className={`group relative hidden w-px shrink-0 cursor-col-resize touch-none bg-border outline-none @[681px]/panes:block ${dragging ? "bg-accent" : ""}`}
     >
       <span className="absolute inset-y-0 -right-1 -left-1 z-10" />
       <span className={`interactive absolute inset-y-0 left-0 w-px bg-accent ${dragging ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus:opacity-100"}`} />

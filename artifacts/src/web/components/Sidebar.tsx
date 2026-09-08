@@ -4,7 +4,7 @@ import { Icon } from './Icon';
 import { useTheme } from '../theme/ThemeProvider';
 
 interface Props { sessions: SessionSummary[]; activeId: string | null; cwd: string; onSelect: (id: string) => void; onCreate: () => void; onDelete: (id: string) => void; onAppearance: () => void }
-export function Sidebar(props: Props) { return <aside className="hidden w-60 shrink-0 flex-col border-r border-border @md:flex"><SessionList {...props} /></aside>; }
+export function Sidebar(props: Props) { return <aside className="hidden w-60 shrink-0 flex-col border-r border-border @[960px]/shell:flex"><SessionList {...props} /></aside>; }
 export function SidebarDrawer({ open, onClose, ...props }: Props & { open: boolean; onClose: () => void }) {
   return <Dialog open={open} onClose={onClose} className="relative z-50"><div className="fixed inset-0 bg-black/40" /><DialogPanel className="fixed inset-y-0 left-0 flex w-64 flex-col bg-surface"><DialogTitle className="sr-only">会话</DialogTitle><SessionList {...props} onSelect={id => { props.onSelect(id); onClose(); }} onCreate={() => { props.onCreate(); onClose(); }} onAppearance={() => { props.onAppearance(); onClose(); }} /></DialogPanel></Dialog>;
 }

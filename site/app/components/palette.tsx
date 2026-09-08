@@ -35,13 +35,14 @@ export function PaletteSwitch({ className = '' }: { className?: string }) {
   const palette = use(PaletteContext);
   const { resolvedTheme, setTheme } = useTheme();
   if (!palette) return null;
-  const dark = resolvedTheme === 'dark';
   const toggle = () => {
+    const dark = resolvedTheme === 'dark';
     if (palette.selected === 'neutral') setTheme(dark ? 'light' : 'dark');
     else palette.select(palette.selected.startsWith('github') ? dark ? 'github-light' : 'github-dark' : dark ? 'vitesse-light' : 'vitesse-dark');
   };
   return <div className={`site:inline-flex site:shrink-0 site:items-center site:gap-1 ${className}`}>
-    <button type="button" aria-label={dark ? 'Use light appearance' : 'Use dark appearance'} title={dark ? 'Use light appearance' : 'Use dark appearance'} onClick={toggle} className="site:grid site:size-8 site:place-items-center site:rounded-full site:text-fd-muted-foreground site:hover:bg-fd-accent site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring">{dark ? <Moon className="site:size-4" /> : <Sun className="site:size-4" />}</button>
+    {/* Keep both icons and labels in the prerendered HTML; next-themes sets the root class before hydration. */}
+    <button type="button" title="Toggle appearance" onClick={toggle} className="site:grid site:size-8 site:place-items-center site:rounded-full site:text-fd-muted-foreground site:hover:bg-fd-accent site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring"><Sun aria-hidden="true" className="site:size-4 site:dark:hidden" /><Moon aria-hidden="true" className="site:hidden site:size-4 site:dark:block" /><span className="site:sr-only site:dark:hidden">Use dark appearance</span><span className="site:sr-only site:hidden site:dark:block">Use light appearance</span></button>
     <Popover><PopoverTrigger aria-label="Choose color theme" title="Choose color theme" className="site:grid site:size-8 site:place-items-center site:rounded-full site:text-fd-muted-foreground site:hover:bg-fd-accent site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring"><Palette className="site:size-4" /></PopoverTrigger><PopoverContent className="site:min-w-44 site:p-1" align="end"><div role="group" aria-label="Color theme" className="site:flex site:flex-col site:gap-0.5">{palettes.map(item => <button type="button" key={item.id} aria-pressed={palette.selected === item.id} onClick={() => palette.select(item.id)} className="site:flex site:items-center site:gap-2 site:rounded-lg site:px-2 site:py-1.5 site:text-left site:text-sm site:hover:bg-fd-accent site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring"><Check className={`site:size-3.5 ${palette.selected === item.id ? '' : 'site:invisible'}`} />{item.label}</button>)}</div>{palette.error ? <p role="alert" className="site:p-2 site:text-xs site:text-fd-error">{palette.error}</p> : null}</PopoverContent></Popover>
   </div>;
 }

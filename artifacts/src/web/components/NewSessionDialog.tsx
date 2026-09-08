@@ -19,7 +19,7 @@ export function NewSessionDialog({ harnesses, initialHarness, initialCwd, onClos
         <Label className="text-xs font-medium text-muted">Harness</Label>
         <div className="grid grid-cols-[1.2fr_1fr_1.2fr_.8fr] gap-1.5 sm:grid-cols-4">
           {harnesses.map(item => <HeadlessField key={item.id} disabled={busy || !item.available} className="min-w-0">
-            <Radio as="button" type="button" value={item.id} title={item.available ? item.name : `${item.name} · 未安装`} className="interactive flex h-16 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-border px-1 text-xs leading-4 text-fg hover:bg-surface-3 data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <Radio as="button" type="button" value={item.id} title={item.available ? item.name : `${item.name} · 未安装`} className="interactive flex h-16 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-control-border px-1 text-xs leading-4 text-fg [&:not([data-checked]):not([data-disabled]):hover]:bg-surface-3 data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[checked]:hover:bg-accent-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
               <HarnessIcon harness={item.id} />
               <Label as="span" passive>{item.name}</Label>
               {!item.available ? <Description className="text-[10px] leading-3">未安装</Description> : null}

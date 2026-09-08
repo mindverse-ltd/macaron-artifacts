@@ -25,11 +25,20 @@ test('late streaming utilities include their Wind4 theme and ring dependencies',
 
 test('Headless UI form states compile into Wind4 utilities', async () => {
   const generator = await createGenerator(unoConfig());
-  for (const file of ['NewSessionDialog.tsx', 'Select.tsx', 'Sidebar.tsx', 'ui4a-ui.tsx']) {
+  for (const file of ['NewSessionDialog.tsx', 'Select.tsx', 'Sidebar.tsx', 'ThemePicker.tsx', 'ui4a-ui.tsx']) {
     const source = await readFile(new URL(`../components/${file}`, import.meta.url), 'utf8');
-    const tokens = [...source.matchAll(/\bdata-(?:\[[\w-]+\]|[\w-]+):[\w-]+/g)].map(match => match[0]);
+    const tokens = [...source.matchAll(/\bdata-(?:\[[\w-]+\]|[\w-]+):(?:[\w-]+:)*[\w-]+/g)].map(match => match[0]);
     expect(tokens.length).toBeGreaterThan(0);
     const { matched } = await generator.generate(tokens.join(' '));
     for (const token of tokens) expect(matched.has(token)).toBe(true);
   }
+});
+
+test('selected hover preserves the accent pair and compiles its higher-specificity selector', async () => {
+  const generator = await createGenerator(unoConfig());
+  const token = 'data-[checked]:hover:bg-accent-hover';
+  const output = await generator.generate(token, { preflights: false });
+  expect(output.matched.has(token)).toBe(true);
+  expect(output.css).toContain(':hover[data-checked]');
+  expect(output.css).toContain('var(--accent-hover, var(--accent))');
 });

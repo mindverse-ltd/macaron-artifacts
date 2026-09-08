@@ -4,7 +4,7 @@
 // Keep the storage key and resolution rule in lockstep with index.html.
 
 import { useSyncExternalStore } from 'react';
-import { loadTheme, themePalette, THEME_OPTIONS as SHIKI_OPTIONS, type ThemeId } from '../../../artifacts/src/web/theme/themes';
+import { loadTheme, oppositeTheme, themeAppearance, themePalette, THEME_OPTIONS as SHIKI_OPTIONS, type ThemeId } from '../../../artifacts/src/web/theme/themes';
 export const PALETTE_OPTIONS = SHIKI_OPTIONS.map(option => ({ ...option, label: option.id === 'playground' ? 'Original' : option.label }));
 
 export type Theme = 'light' | 'dark' | 'system';
@@ -40,8 +40,7 @@ const listeners = new Set<() => void>();
 
 function apply() {
   const resolved = resolveTheme(current);
-  if (paletteId.startsWith('github-')) paletteId = resolved === 'dark' ? 'github-dark' : 'github-light';
-  else if (paletteId.startsWith('vitesse-') || (paletteId === 'nord' && resolved === 'light')) paletteId = resolved === 'dark' ? 'vitesse-dark' : 'vitesse-light';
+  if (paletteId !== 'playground' && themeAppearance(paletteId, false, 0).dark !== (resolved === 'dark')) paletteId = oppositeTheme(paletteId, resolved === 'dark') ?? (resolved === 'dark' ? 'vitesse-dark' : 'vitesse-light');
   document.documentElement.setAttribute('data-theme', resolved);
   const sequence = ++paletteSequence;
   const root = document.documentElement;
@@ -62,7 +61,7 @@ function apply() {
 export function setShikiTheme(id: ThemeId) {
   paletteId = id;
   try { localStorage.setItem(PALETTE_KEY, id); } catch { /* The in-memory selection still works. */ }
-  setTheme(id === 'playground' ? current : id === 'nord' || id.endsWith('dark') ? 'dark' : 'light');
+  setTheme(id === 'playground' ? current : themeAppearance(id, false, 0).dark ? 'dark' : 'light');
 }
 
 export function setTheme(theme: Theme) {

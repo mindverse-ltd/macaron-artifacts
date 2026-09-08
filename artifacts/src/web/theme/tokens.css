@@ -9,6 +9,13 @@
   --muted: #6b6b76;
   --accent: #1a1a1f;
   --accent-fg: #ffffff;
+  --accent-hover: #35353b;
+  --focus: #1a1a1f;
+  --link: #1a1a1f;
+  --control-border: #85858f;
+  --danger-bg: #b52643;
+  --danger-fg: #ffffff;
+  --danger-hover: #9e203a;
   --danger: #d9435f;
   /* 分类色。语义 token 只够表达「主/危险/次要」三种意思，而占比条、多系列图表需要
      一组彼此可区分、又不各自表意的颜色 —— 没有它，生成代码画到第四个分类就只能写死 hex。 */
@@ -32,6 +39,13 @@
     --muted: #9a9aa6;
     --accent: #f2f2f5;
     --accent-fg: #0e0e11;
+    --accent-hover: #d9d9e0;
+    --focus: #f2f2f5;
+    --link: #f2f2f5;
+    --control-border: #676773;
+    --danger-bg: #ff6b83;
+    --danger-fg: #0e0e11;
+    --danger-hover: #ff879a;
     --danger: #ff6b83;
     --series-1: #60a5fa;
     --series-2: #fbbf24;
@@ -52,6 +66,13 @@
   --muted: #9a9aa6;
   --accent: #f2f2f5;
   --accent-fg: #0e0e11;
+  --accent-hover: #d9d9e0;
+  --focus: #f2f2f5;
+  --link: #f2f2f5;
+  --control-border: #676773;
+  --danger-bg: #ff6b83;
+  --danger-fg: #0e0e11;
+  --danger-hover: #ff879a;
   --danger: #ff6b83;
   --series-1: #60a5fa;
   --series-2: #fbbf24;

@@ -69,6 +69,7 @@ OpenCode's native question dialogs and pi prompts that require a terminal UI are
 - Both use `partial-react@0.0.6`, `pushCode`/`finish`, last-good-frame preservation and a shared React instance.
 - This application's small `$ui4a/ui` library contains Button, Field, Card, Badge, Tabs and Disclosure, following `ui4a-playground`'s lightweight Headless UI and Wind4 approach. Compose layouts with native HTML and UnoCSS Wind4 utilities; use `@headlessui/react` and `recharts` directly for additional controls and charts. `$ui4a/chat`, `$ui4a/state` and `$ui4a/fs` are separate host capabilities.
 - The module manifest generates `skills/ui4a/SKILL.md`; a test checks that the guidance matches the runtime. No theme name is added to the model prompt.
+- All bundled Shiki themes are searchable in the sidebar. Hover or use arrow keys to preview; click or press Enter to save. Closing the picker restores the saved palette. UI colors normalize missing and transparent editor tokens and validate text, button, hover, and focus contrast.
 
 Generated code runs as trusted local React code in the host page, as in the reference playground; this is not an isolation sandbox for untrusted third-party code. File bridge access is restricted to the selected workspace's `.artifacts` tree, including symlink checks. The local API accepts loopback hosts and same-origin browser requests.
 

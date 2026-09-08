@@ -2,16 +2,16 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Button as HeadlessButton, Field as HeadlessField, Input, Label, Description, Disclosure as HeadlessDisclosure, DisclosureButton, DisclosurePanel, Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/react';
 import { Icon } from './Icon';
 
-const variants = { primary: 'bg-accent text-accent-fg hover:opacity-90', secondary: 'bg-surface-3 text-fg hover:bg-surface-2', ghost: 'text-muted hover:bg-surface-3 hover:text-fg', danger: 'bg-danger text-white hover:opacity-90' };
+const variants = { primary: 'bg-accent text-accent-fg hover:bg-accent-hover', secondary: 'bg-surface-3 text-fg hover:bg-surface-2', ghost: 'text-muted hover:bg-surface-3 hover:text-fg', danger: 'bg-danger-bg text-danger-fg hover:bg-danger-hover' };
 const sizes = { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4 text-sm' };
-const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 
 export function Button({ variant = 'primary', size = 'md', className = '', type = 'button', ...props }: ComponentProps<'button'> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; size?: 'sm' | 'md' }) {
   return <HeadlessButton type={type} className={`interactive inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap active:scale-[0.98] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 ${focus} ${variants[variant]} ${sizes[size]} ${className}`} {...props} />;
 }
 
 export function Field({ label, hint, className = '', ...props }: ComponentProps<'input'> & { label: string; hint?: string }) {
-  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-border px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
+  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-control-border px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-focus focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
 }
 
 export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl border border-border p-4 ${className}`} {...props} />; }

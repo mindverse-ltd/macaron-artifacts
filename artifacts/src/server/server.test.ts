@@ -66,6 +66,17 @@ test('enrichment keeps bootstrap and native session but does not overwrite its i
   expect(saved.messages[1].parts.find(part => part.type === 'text')?.text).toBe('Answer');
 });
 
+test('a missing adapter rejects a restored session before changing its durable history', async () => {
+  const { app, post, session } = await setup(async function* () { throw new Error('Unavailable adapter must not run'); });
+  session.harness = 'pi'; await app.store.save(session);
+  const before = await readFile(app.store.path(session.id), 'utf8');
+  const response = await post('/api/chat', { id: session.id, messages: [message('missing-adapter', 'Run')] });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: 'This harness is unavailable.' });
+  expect(await readFile(app.store.path(session.id), 'utf8')).toBe(before);
+  expect(app.active.size).toBe(0);
+});
+
 test('command output stays as raw deltas through detached replay and durable recovery', async () => {
   const reached = deferred(), release = deferred();
   const deltas = ['first\n', 'second\n', 'third\n'];

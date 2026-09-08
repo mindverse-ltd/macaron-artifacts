@@ -12,7 +12,7 @@ import { ActiveConversation } from './conversations.js';
 import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
 
-export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Record<HarnessId, HarnessAdapter>; webRoot?: string }) {
+export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; webRoot?: string }) {
   const store = new SessionStore(options.directory), active = new Map<string, ActiveConversation>(), claims = new Set<string>();
   const metadata = new MetadataTasks(store);
   const harnesses = options.harnesses ?? adapters;
@@ -88,6 +88,8 @@ export async function createArtifactsServer(options: { directory: string; instru
         const input = await body(req), session = store.sessions.get(String(input.id));
         if (!session) return json(res, { error: 'Session not found.' }, 404);
         if (active.has(session.id) || claims.has(session.id)) return json(res, { error: 'This session already has a running turn.' }, 409);
+        const adapter = harnesses[session.harness];
+        if (!adapter) return json(res, { error: 'This harness is unavailable.' }, 400);
         const messages = Array.isArray(input.messages) ? input.messages as ChatMessage[] : [];
         const user = messages.findLast(message => message.role === 'user');
         const prompt = user?.parts?.filter(part => part.type === 'text').map(part => part.text).join('\n').trim();
@@ -103,7 +105,7 @@ export async function createArtifactsServer(options: { directory: string; instru
           if (session.messages.length === 1) session.title = prompt.slice(0, 60);
           session.status = 'running'; session.error = undefined; session.suggestions = []; session.updatedAt = Date.now();
           await store.save(session);
-          run = new ActiveConversation(store, session, harnesses[session.harness], options.instructions, prompt, metadata); active.set(session.id, run);
+          run = new ActiveConversation(store, session, adapter, options.instructions, prompt, metadata); active.set(session.id, run);
         } catch (error) { Object.assign(session, previous); throw error; }
         finally { claims.delete(session.id); }
         void run.done.finally(() => { if (active.get(session.id) === run) active.delete(session.id); }).catch(error => { console.error('Session persistence failed:', error); });

@@ -11,12 +11,23 @@ import { SessionStore } from './store.js';
 import { ActiveConversation } from './conversations.js';
 import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
+import { ProfileStore, validateProfileInput } from './profiles.js';
+import { safeError } from './harnesses/common.js';
 
-export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; webRoot?: string }) {
+export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string }) {
   const store = new SessionStore(options.directory), active = new Map<string, ActiveConversation>(), claims = new Set<string>();
+  const profiles = options.profiles ?? new ProfileStore(join(options.directory, 'profiles'));
+  const deletingProfiles = new Set<string>(), bindingProfiles = new Map<string, number>();
+  // Reserve bindings before resolving async native config, so deletion cannot race a new session or a profile switch.
+  const bindProfile = (id: string | null | undefined) => {
+    if (id && deletingProfiles.has(id)) throw Object.assign(new Error('Profile 正在删除，请重新选择'), { status: 409 });
+    if (id) bindingProfiles.set(id, (bindingProfiles.get(id) ?? 0) + 1);
+    return () => { if (id) { const count = (bindingProfiles.get(id) ?? 1) - 1; if (count) bindingProfiles.set(id, count); else bindingProfiles.delete(id); } };
+  };
+  const optionalText = (value: unknown, name: string) => { if (value == null || value === '') return undefined; if (typeof value !== 'string' || value.length > 500 || /[\0\r\n]/.test(value)) throw new Error(`${name} 格式无效`); return value.trim() || undefined; };
   const metadata = new MetadataTasks(store);
   const harnesses = options.harnesses ?? adapters;
-  await store.load();
+  await Promise.all([store.load(), profiles.load()]);
   const json = (res: ServerResponse, body: unknown, status = 200) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
   async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = []; let size = 0;
@@ -34,14 +45,38 @@ export async function createArtifactsServer(options: { directory: string; instru
     }
       if (url.pathname === '/api/health') return json(res, { ok: true });
       if (url.pathname === '/api/harnesses' && req.method === 'GET') return json(res, await Promise.all(Object.values(harnesses).map(adapter => adapter.info())));
+      if (segments[0] === 'api' && segments[1] === 'harnesses' && segments[3] === 'profile-options' && req.method === 'GET') {
+        const harness = segments[2] as HarnessId, adapter = Object.hasOwn(harnesses, harness) ? harnesses[harness] : undefined;
+        if (!adapter) return json(res, { error: 'Unsupported harness.' }, 400);
+        const cwd = await realpath(url.searchParams.get('cwd') || process.cwd());
+        const profile = await profiles.resolve(url.searchParams.get('profileId') || undefined, harness, cwd);
+        try { return json(res, await adapter.profileOptions?.(cwd, profile) ?? { models: [], efforts: [] }); }
+        catch { return json(res, { models: [], efforts: [], error: '暂时无法读取本机选项，可以继续填写自定义模型，或稍后重试。' }); }
+      }
+      if (segments[0] === 'api' && segments[1] === 'profiles') {
+        const id = segments[2] ? decodeURIComponent(segments[2]) : undefined;
+        if (!id && req.method === 'GET') return json(res, await profiles.list());
+        if ((!id && req.method === 'POST') || (id && req.method === 'PUT')) return json(res, await profiles.save(validateProfileInput(await body(req)), id), id ? 200 : 201);
+        if (id && req.method === 'DELETE') {
+          const input = await body(req);
+          if (deletingProfiles.has(id) || bindingProfiles.has(id) || [...store.sessions.values()].some(session => session.profileId === id)) return json(res, { error: '这个 Profile 仍被会话使用，请先切换这些会话的 Profile。' }, 409);
+          deletingProfiles.add(id);
+          try { await profiles.remove(id, optionalText(input.revision, 'revision')); return json(res, { ok: true }); }
+          finally { deletingProfiles.delete(id); }
+        }
+      }
       if (url.pathname === '/api/sessions' && req.method === 'GET') return json(res, store.list());
       if (url.pathname === '/api/sessions' && req.method === 'POST') {
         const input = await body(req), harness = input.harness as HarnessId;
-        if (!harnesses[harness]) return json(res, { error: 'Unsupported harness.' }, 400);
-        const cwd = await realpath(typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd : process.cwd());
-        if (!(await stat(cwd)).isDirectory()) return json(res, { error: 'Workspace must be a directory.' }, 400);
-        const session: Session = { id: crypto.randomUUID(), harness, cwd, model: typeof input.model === 'string' && input.model ? input.model : undefined, title: '新会话', messages: [], suggestions: [], createdAt: Date.now(), updatedAt: Date.now(), status: 'idle' };
-        await store.save(session); return json(res, session, 201);
+        if (!Object.hasOwn(harnesses, harness) || !harnesses[harness]) return json(res, { error: 'Unsupported harness.' }, 400);
+        const profileId = optionalText(input.profileId, 'Profile'), release = bindProfile(profileId);
+        try {
+          const cwd = await realpath(typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd : process.cwd());
+          if (!(await stat(cwd)).isDirectory()) return json(res, { error: 'Workspace must be a directory.' }, 400);
+          await profiles.resolve(input.profileId === null ? null : profileId, harness, cwd);
+          const session: Session = { id: crypto.randomUUID(), harness, cwd, profileId: input.profileId === null ? null : profileId, model: optionalText(input.model, '模型'), title: '新会话', messages: [], suggestions: [], createdAt: Date.now(), updatedAt: Date.now(), status: 'idle' };
+          await store.save(session); return json(res, session, 201);
+        } finally { release(); }
       }
       if (segments[0] === 'api' && segments[1] === 'sessions' && segments[2]) {
         const session = store.sessions.get(segments[2]);
@@ -53,7 +88,25 @@ export async function createArtifactsServer(options: { directory: string; instru
           try { const run = active.get(session.id); run?.stop(); await Promise.allSettled([run?.done, metadata.cancel(session.id)]); await store.delete(session.id); return json(res, { ok: true }); }
           finally { claims.delete(session.id); }
         }
-        if (segments.length === 3 && req.method === 'PATCH') { const input = await body(req); if (store.sessions.get(session.id) !== session) return json(res, { error: 'Session not found.' }, 404); if (claims.has(session.id)) return json(res, { error: 'This session is being updated.' }, 409); void metadata.cancel(session.id); if (typeof input.title === 'string' && input.title.trim()) session.title = input.title.trim().slice(0, 100); await store.save(session); return json(res, session); }
+        if (segments.length === 3 && req.method === 'PATCH') {
+          const input = await body(req), configuration = 'profileId' in input || 'model' in input;
+          if (store.sessions.get(session.id) !== session) return json(res, { error: 'Session not found.' }, 404);
+          if (claims.has(session.id) || configuration && (active.has(session.id) || session.status === 'running')) return json(res, { error: '请在当前一轮结束后切换会话配置。' }, 409);
+          const profileId = 'profileId' in input ? optionalText(input.profileId, 'Profile') ?? null : session.profileId, release = bindProfile(profileId);
+          claims.add(session.id);
+          try {
+            if (configuration) await profiles.resolve(profileId, session.harness, session.cwd);
+            void metadata.cancel(session.id);
+            const previous = { title: session.title, profileId: session.profileId, model: session.model };
+            try {
+              if (typeof input.title === 'string' && input.title.trim()) session.title = input.title.trim().slice(0, 100);
+              if (configuration) session.profileId = profileId;
+              if ('model' in input) session.model = optionalText(input.model, '模型');
+              await store.save(session); return json(res, session);
+            } catch (error) { Object.assign(session, previous); throw error; }
+          }
+          finally { claims.delete(session.id); release(); }
+        }
         if (segments[3] === 'stop' && req.method === 'POST') {
           const run = active.get(session.id);
           if (run) { run.stop(); await run.done.catch(() => {}); if (active.get(session.id) === run) active.delete(session.id); }
@@ -88,7 +141,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         const input = await body(req), session = store.sessions.get(String(input.id));
         if (!session) return json(res, { error: 'Session not found.' }, 404);
         if (active.has(session.id) || claims.has(session.id)) return json(res, { error: 'This session already has a running turn.' }, 409);
-        const adapter = harnesses[session.harness];
+        const adapter = Object.hasOwn(harnesses, session.harness) ? harnesses[session.harness] : undefined;
         if (!adapter) return json(res, { error: 'This harness is unavailable.' }, 400);
         const messages = Array.isArray(input.messages) ? input.messages as ChatMessage[] : [];
         const user = messages.findLast(message => message.role === 'user');
@@ -102,13 +155,15 @@ export async function createArtifactsServer(options: { directory: string; instru
         const previous = { ...session, messages: [...session.messages], suggestions: [...session.suggestions] };
         let run: ActiveConversation;
         try {
+          // null records an explicit switch back to native defaults; absent IDs preserve legacy session behavior.
+          const profile = await profiles.resolve(session.profileId, session.harness, session.cwd);
           if (!retry) {
             session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: prompt }] });
             if (session.messages.length === 1) session.title = prompt.slice(0, 60);
           }
           session.status = 'running'; session.error = undefined; session.suggestions = []; session.updatedAt = Date.now();
           await store.save(session);
-          run = new ActiveConversation(store, session, adapter, options.instructions, prompt, metadata, retry); active.set(session.id, run);
+          run = new ActiveConversation(store, session, adapter, options.instructions, prompt, metadata, retry, profile); active.set(session.id, run);
         } catch (error) { Object.assign(session, previous); throw error; }
         finally { claims.delete(session.id); }
         void run.done.finally(() => { if (active.get(session.id) === run) active.delete(session.id); }).catch(error => { console.error('Session persistence failed:', error); });
@@ -122,9 +177,9 @@ export async function createArtifactsServer(options: { directory: string; instru
       const file = extname(path) ? path : join(options.webRoot, 'index.html');
       const mime: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.json': 'application/json' };
       res.writeHead(200, { 'content-type': mime[extname(file)] ?? 'application/octet-stream' }); res.end(await readFile(file));
-    } catch (error) { if (!res.headersSent) json(res, { error: error instanceof Error ? error.message : 'Request failed.' }, (error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400); else res.end(); }
+    } catch (error) { if (!res.headersSent) json(res, { error: safeError(error) }, (error as { status?: number }).status ?? (error as { statusCode?: number }).statusCode ?? ((error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400)); else res.end(); }
   });
-  return { server, store, active, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { server, store, profiles, active, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

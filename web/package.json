@@ -17,8 +17,6 @@
     "@esm.sh/tsx": "^1.5.3",
     "@headlessui/react": "2.2.10",
     "@shikijs/stream": "^4.3.1",
-    "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0",
     "@unocss/core": "66.8.1",
     "@unocss/preset-wind4": "66.8.1",
     "@unocss/runtime": "66.8.1",
@@ -45,6 +43,8 @@
   "devDependencies": {
     "@macaron/shared": "workspace:*",
     "@types/jsdom": "^28.0.3",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^29.1.1",
     "tsx": "^4.19.0",

@@ -426,12 +426,6 @@ importers:
       '@shikijs/stream':
         specifier: ^4.3.1
         version: 4.3.1(react@19.2.7)
-      '@types/react':
-        specifier: ^19.1.0
-        version: 19.2.17
-      '@types/react-dom':
-        specifier: ^19.1.0
-        version: 19.2.3(@types/react@19.2.17)
       '@unocss/core':
         specifier: 66.8.1
         version: 66.8.1
@@ -505,6 +499,12 @@ importers:
       '@types/jsdom':
         specifier: ^28.0.3
         version: 28.0.3
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.1.0
+        version: 19.2.3(@types/react@19.2.17)
       '@vitejs/plugin-react':
         specifier: ^4.3.4
         version: 4.7.0(supports-color@8.1.1)(vite@7.3.6(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.0)(yaml@2.9.0))

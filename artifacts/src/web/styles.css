@@ -51,7 +51,7 @@ button:disabled { cursor: not-allowed; }
 
 /*
  * streamdown 的默认外观是一整套 Tailwind 类：代码块带标题栏和两个按钮、外框套内框再加底色，
- * 表格每格都有边框。跟本项目的取向（少层级、有边框就不要底色）是冲突的，所以这里按它暴露的
+ * 表格每格都有边框。跟本项目的取向（按区域底色分层、减少重复外框）是冲突的，所以这里按它暴露的
  * `[data-streamdown]` 钩子整体接管 —— 组件留这些属性就是给外部改样式用的。
  */
 .md {
@@ -92,7 +92,8 @@ button:disabled { cursor: not-allowed; }
 }
 .md [data-streamdown="inline-code"] {
   border-radius: 0.25rem;
-  background: var(--surface-3);
+  background: var(--inline-code);
+  color: var(--inline-code-fg);
   padding: 0.1em 0.3em;
   font-size: 0.9em;
 }
@@ -107,7 +108,8 @@ button:disabled { cursor: not-allowed; }
 .md [data-streamdown="code-block"] {
   border: 0;
   border-radius: 0.6rem;
-  background: var(--surface-2);
+  background: var(--code-block);
+  color: var(--code-block-fg);
   overflow: hidden;
 }
 .md [data-streamdown="code-block-header"] {

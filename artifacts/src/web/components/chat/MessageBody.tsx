@@ -21,6 +21,6 @@ export const MessageBody = memo(function MessageBody({ text, messageId, streamin
 
 function InlineUi4a({ source, ...props }: { source: string; streaming: boolean; scope: string; sessionId: string; onSend: (text: string) => void }) {
   const [showSource, setShowSource] = useState(false);
-  const fallback = <div className="overflow-clip rounded-xl bg-surface-2"><Collapsible><CodeBlock code={source} /></Collapsible></div>;
-  return <div className="group relative"><button type="button" onClick={() => setShowSource(value => !value)} className="interactive absolute top-2 right-2 z-10 rounded-lg bg-surface/80 px-2 py-1 text-xs text-muted opacity-0 backdrop-blur-md group-hover:opacity-100 hover:text-fg focus-visible:opacity-100">{showSource ? '预览' : '源码'}</button>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div>;
+  const fallback = <div className="theme-code overflow-clip rounded-xl"><Collapsible><CodeBlock code={source} /></Collapsible></div>;
+  return <div className="group relative"><button type="button" onClick={() => setShowSource(value => !value)} className="theme-widget interactive absolute top-2 right-2 z-10 rounded-lg px-2 py-1 text-xs text-muted opacity-0 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100">{showSource ? '预览' : '源码'}</button>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div>;
 }

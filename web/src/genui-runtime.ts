@@ -13,10 +13,7 @@ import * as ReactNamespace from 'react';
 import * as JSXRuntime from 'react/jsx-runtime';
 import * as JSXDevRuntime from 'react/jsx-dev-runtime';
 import * as ReactDOMNamespace from 'react-dom';
-import * as MacaronUI from '@genui/ui';
-import * as MacaronCharts from '@genui/ui/charts';
-import * as MacaronLucide from '@genui/ui/icons';
-import '@genui/ui/style.css';
+import * as MacaronUI from '../../artifacts/src/web/components/ui4a-ui';
 import * as Motion from 'motion/react';
 
 import './lib/uno-runtime';
@@ -29,8 +26,6 @@ if (!g.__macaron_React) {
   g.__macaron_JSXDevRuntime = JSXDevRuntime;
   g.__macaron_ReactDOM = ReactDOMNamespace;
   g.__macaron_UI = MacaronUI;
-  g.__macaron_Charts = MacaronCharts;
-  g.__macaron_Lucide = MacaronLucide;
   g.__macaron_Motion = Motion;
 
 }

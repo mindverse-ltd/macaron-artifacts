@@ -6,10 +6,7 @@ import * as ReactDOMNamespace from 'react-dom';
 import ReactDOM from 'react-dom/client';
 import { createHashRouter, RouterProvider } from 'react-router-dom';
 
-import * as MacaronUI from '@genui/ui';
-import * as MacaronCharts from '@genui/ui/charts';
-import * as MacaronLucide from '@genui/ui/icons';
-import '@genui/ui/style.css';
+import * as MacaronUI from '../../artifacts/src/web/components/ui4a-ui';
 import * as Motion from 'motion/react';
 
 import './lib/uno-runtime';
@@ -73,14 +70,11 @@ if (!window.location.hash && rel !== '/' && rel !== '/index.html') {
 (globalThis as any).__macaron_JSXDevRuntime = JSXDevRuntime;
 (globalThis as any).__macaron_ReactDOM = ReactDOMNamespace;
 (globalThis as any).__macaron_UI = MacaronUI;
-(globalThis as any).__macaron_Charts = MacaronCharts;
-(globalThis as any).__macaron_Lucide = MacaronLucide;
 (globalThis as any).__macaron_Motion = Motion;
 
 // eslint-disable-next-line no-console
 console.log('[macaron] globals ready', {
   UI: Object.keys(MacaronUI).filter((k) => /^[A-Z]/.test(k)).length + ' components',
-  Charts: Object.keys(MacaronCharts).filter((k) => /^[A-Z]/.test(k)).length + ' chart parts',
   Motion: Object.keys(Motion).length + ' motion exports',
   React: 'v' + (React as any).version,
 });

@@ -1,48 +1,5 @@
-// The host and generated modules share the same published @genui/ui instance.
-const M = globalThis.__macaron_UI;
-if (!M) throw new Error('[genui-shim/ui] @genui/ui must be registered before mounting GenuiPreview');
-
-export const {
-  Accordion, AccordionContent, AccordionItem, AccordionTrigger,
-  AnimatePresence,
-  Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage,
-  Badge,
-  Button,
-  Calendar, CalendarDayButton,
-  Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
-  Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious,
-  Checkbox,
-  Disclosure, DisclosureContent, DisclosureTrigger,
-  FeatureCard, Field, FileUpload,
-  GlowEffect, Grid,
-  Input, InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot,
-  Label,
-  MorphingDialog, MorphingDialogClose, MorphingDialogContainer, MorphingDialogContent,
-  MorphingDialogDescription, MorphingDialogImage, MorphingDialogSubtitle,
-  MorphingDialogTitle, MorphingDialogTrigger,
-  NumberFlow,
-  PillRow,
-  Popover, PopoverAnchor, PopoverContent, PopoverDescription, PopoverHeader,
-  PopoverTitle, PopoverTrigger,
-  ProgressiveBlur,
-  REGEXP_ONLY_CHARS, REGEXP_ONLY_DIGITS, REGEXP_ONLY_DIGITS_AND_CHARS,
-  RadioGroup, RadioGroupItem,
-  Row,
-  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
-  SelectSeparator, SelectTrigger, SelectValue,
-  SelectionGrid,
-  Separator, Slider,
-  Sortable, SortableItem, SortableItemHandle, SortableOverlay,
-  SpinningText, Stack, Stat, StatGrid, Surface, Switch,
-  Table, TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow,
-  Tabs, TabsContent, TabsList, TabsTrigger,
-  Text, TextLoop, TextMorph, TextShimmer, Textarea,
-  TickSlider, Tilt,
-  Timeline, TimelineContent, TimelineDate, TimelineHeader, TimelineIndicator,
-  TimelineItem, TimelineSeparator, TimelineTitle,
-  ToolbarDynamic, TwoColumnGrid,
-  motion,
-  numberFlowContinuous,
-} = M;
-
-export default M;
+// The same small Wind4 component namespace is used by both application hosts.
+const UI = globalThis.__macaron_UI;
+if (!UI) throw new Error('UI4A components must be registered before rendering');
+export const { Button, Field, Card, Badge, Tabs, Disclosure } = UI;
+export default UI;

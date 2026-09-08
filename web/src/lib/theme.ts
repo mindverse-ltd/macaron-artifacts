@@ -56,10 +56,6 @@ function apply() {
       'cx-bg': p.surface, 'cx-surface': p['surface-2'], 'cx-sidebar': p['surface-2'], 'cx-hover': p['surface-3'], 'cx-active': mix(14), 'cx-code': p['surface-2'], 'cx-code-strong': p.fg, 'cx-border': p.border, 'cx-border-strong': mix(24), 'cx-text': p.fg, 'cx-text-2': p.muted, 'cx-muted': p.muted, 'cx-muted-2': mix(40), 'cx-good': p.success, 'cx-warn': p.warn, 'cx-bad': p.danger };
     for (const [key, value] of Object.entries(values)) { root.style.setProperty(`--${key}`, value); paletteProperties.add(`--${key}`); }
     for (const [key, value] of Object.entries(values)) if (key.startsWith('cx-')) { const property = `--kx-${key.slice(3)}`; root.style.setProperty(property, value); paletteProperties.add(property); }
-    const generated = { background: p.surface, foreground: p.fg, card: p['surface-2'], 'card-foreground': p.fg, popover: p['surface-2'], 'popover-foreground': p.fg, primary: p.accent, 'primary-foreground': p['accent-fg'], secondary: p['surface-3'], 'secondary-foreground': p.fg, muted: p['surface-3'], 'muted-foreground': p.muted, accent: p['surface-3'], 'accent-foreground': p.fg, destructive: p.danger, 'destructive-foreground': '#fff', border: p.border, input: p.border, ring: p.accent };
-    // Legacy components expect HSL channels. Relative colors preserve that contract
-    // for Shiki's hex colors and the derived color-mix values without parsing strings.
-    for (const [key, value] of Object.entries(generated)) { const property = `--macaron-${key}`; root.style.setProperty(property, `from ${value} h s l`); paletteProperties.add(property); }
   }).catch(error => console.error('[theme] Shiki palette failed to load', error));
 }
 

@@ -5,7 +5,7 @@ export const ui4aModules = {
     Card: "Native div props. A restrained bordered surface; use only when content needs a boundary.",
     Badge: "Native span props. Compact secondary status or metadata.",
     Tabs: "{ items: { id: string, label: ReactNode, children: ReactNode }[], value?: string, onChange?: (id: string) => void }.",
-    Disclosure: "{ title: ReactNode, children: ReactNode, defaultOpen?: boolean }. Native expandable details.",
+    Disclosure: "{ title: ReactNode, children: ReactNode, defaultOpen?: boolean }. Accessible expandable content; child state survives collapsing.",
   },
   "$ui4a/chat": { sendMessage: "(text: string) => void. Starts a visible user turn in this session. Call only from an explicit user action." },
   "$ui4a/state": { usePersistedState: "<T>(key: string, initial: T | (() => T)) => [T, Dispatch<SetStateAction<T>>]. JSON state isolated by session and surface, restored after remount/reload. Functional updates work." },

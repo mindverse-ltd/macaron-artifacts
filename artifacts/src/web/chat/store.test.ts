@@ -8,6 +8,17 @@ const session = (id: string): Session => ({ id, harness: 'claude-code', cwd: '/w
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('persistent session chat connections', () => {
+  test('drafts belong to sessions and keystrokes do not publish the workspace snapshot', () => {
+    const store = new WorkspaceStore(), snapshot = store.getSnapshot();
+    let firstUpdates = 0, secondUpdates = 0;
+    const unsubscribe = store.subscribeDraft('first', () => firstUpdates++);
+    store.subscribeDraft('second', () => secondUpdates++);
+    store.setDraft('first', 'Unsent in A'); store.setDraft('second', 'Unsent in B');
+    expect(store.draft('first')).toBe('Unsent in A'); expect(store.draft('second')).toBe('Unsent in B');
+    expect(firstUpdates).toBe(1); expect(secondUpdates).toBe(1); expect(store.getSnapshot()).toBe(snapshot);
+    store.setDraft('first', ''); expect(store.draft('second')).toBe('Unsent in B');
+    unsubscribe(); store.setDraft('first', 'New draft'); expect(firstUpdates).toBe(2);
+  });
   for (const failure of ['network', 400, 409] as const) test(`a rejected ${failure} submission preserves its prompt and retries the same message only on demand`, async () => {
     const first = session('first');
     const requests: { id: string; messages: Session['messages'] }[] = [];

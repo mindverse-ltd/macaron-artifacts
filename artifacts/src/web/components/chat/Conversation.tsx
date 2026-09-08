@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useSyncExternalStore } from 'react';
 import { useChat, type Chat } from '@ai-sdk/react';
 import type { ChatMessage, SessionSummary } from '../../../shared/types';
 import type { WorkspaceStore } from '../../chat/store';
@@ -32,8 +32,14 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
       {queued.length ? <div className="mb-2 flex flex-col gap-1 rounded-xl border border-border p-2">{queued.map(item => <div key={item.id} className="flex items-center gap-2 text-xs text-muted"><span className="shrink-0">排队中</span><span className="min-w-0 flex-1 truncate">{item.text}</span><button type="button" title="移除排队消息" aria-label="移除排队消息" onClick={() => store.dropQueued(session.id, item.id)} className="interactive grid size-7 place-items-center rounded-md hover:bg-surface-3"><Icon name="x" className="size-3.5" /></button></div>)}</div> : null}
       {suggestions.length ? <div className="mb-2 flex flex-wrap gap-2">{suggestions.map(item => <Button key={item} variant="ghost" size="sm" onClick={() => send(item)} className="suggestion h-auto max-w-full rounded-full border border-border py-1.5 text-left font-normal whitespace-normal break-words">{item}</Button>)}</div> : null}
     </div></div>
-    <Composer disabled={false} busy={streaming} onSend={send} onStop={() => void store.stop(session.id).catch(store.fail)} />
+    <SessionComposer store={store} sessionId={session.id} busy={streaming} onSend={send} />
   </div>;
+}
+
+function SessionComposer({ store, sessionId, busy, onSend }: { store: WorkspaceStore; sessionId: string; busy: boolean; onSend: (text: string) => void }) {
+  const subscribe = useCallback((listener: () => void) => store.subscribeDraft(sessionId, listener), [store, sessionId]);
+  const text = useSyncExternalStore(subscribe, () => store.draft(sessionId));
+  return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={false} busy={busy} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} />;
 }
 
 const Message = memo(function Message({ message, streaming, sessionId, cwd, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {

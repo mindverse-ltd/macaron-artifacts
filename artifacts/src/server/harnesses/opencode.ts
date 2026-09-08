@@ -77,7 +77,7 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
     const selectedModel = turn.model ? openCodeModel(turn.model) : original?.model ? { providerID: original.model.providerID, modelID: original.model.id } : undefined;
     const prompt: OpenCodePrompt = { system: turn.instructions, parts: [{ type: 'text', text: turn.prompt }], ...(selectedModel ? { model: selectedModel } : {}), ...(original?.agent ? { agent: original.agent } : {}), ...(original?.model?.variant ? { variant: original.model.variant } : {}) };
     started = true;
-    await connection.prompt(nativeID, prompt, signal);
+    if (turn.retry) await connection.retry(nativeID, turn.messageId, turn.prompt, signal); else await connection.prompt(nativeID, prompt, signal);
     await abortable(done, signal);
   })();
   void producer.then(() => queue.end(), fail);

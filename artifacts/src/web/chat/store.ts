@@ -215,7 +215,7 @@ export class WorkspaceStore {
         chat.clearError(); await chat.resumeStream(); await this.refresh(id, turn, true);
       } else {
         chat.messages = remote.messages; chat.clearError();
-        if (remote.status === 'error') { this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage({ text: '继续。' }); }
+        if (remote.status === 'error') { this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage(); }
         else { const { messages: _messages, ...summary } = remote; this.update(id, summary); void this.subscribeMetadata(id); }
       }
     } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }

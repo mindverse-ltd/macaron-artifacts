@@ -66,6 +66,29 @@ test('enrichment keeps bootstrap and native session but does not overwrite its i
   expect(saved.messages[1].parts.find(part => part.type === 'text')?.text).toBe('Answer');
 });
 
+test('retries a failed native turn in place without adding a continuation message', async () => {
+  const turns: HarnessTurn[] = []; let attempts = 0;
+  const { post, session, base } = await setup(async function* (turn) {
+    turns.push(turn);
+    yield { type: 'text-start', id: 'answer' };
+    yield { type: 'text-delta', id: 'answer', delta: attempts === 0 ? 'partial' : 'resumed' };
+    if (attempts++ === 0) throw new Error('temporary failure');
+    yield { type: 'text-end', id: 'answer' };
+  });
+  const original = message('retry-user', 'Keep this request');
+  expect((await post('/api/chat', { id: session.id, messages: [original] })).ok).toBe(true);
+  while (true) { const current = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session; if (!current.status || current.status === 'error') break; await new Promise(resolve => setTimeout(resolve, 0)); }
+  const failed = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session;
+  expect(failed.status).toBe('error');
+  expect(failed.messages.filter(message => message.role === 'user')).toHaveLength(1);
+  expect((await post('/api/chat', { id: session.id, messages: failed.messages })).ok).toBe(true);
+  const recovered = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session;
+  expect(turns.map(turn => turn.retry)).toEqual([false, true]);
+  expect(turns[1]?.messageId).toBe('retry-user');
+  expect(recovered.messages.filter(message => message.role === 'user')).toHaveLength(1);
+  expect(recovered.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
+});
+
 test('a missing adapter rejects a restored session before changing its durable history', async () => {
   const { app, post, session } = await setup(async function* () { throw new Error('Unavailable adapter must not run'); });
   session.harness = 'pi'; await app.store.save(session);

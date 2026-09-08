@@ -94,18 +94,21 @@ export async function createArtifactsServer(options: { directory: string; instru
         const user = messages.findLast(message => message.role === 'user');
         const prompt = user?.parts?.filter(part => part.type === 'text').map(part => part.text).join('\n').trim();
         if (!user || !prompt) return json(res, { error: 'A user message is required.' }, 400);
-        if (session.messages.some(message => message.id === user.id)) return json(res, { error: 'This message was already submitted.' }, 409);
+        const retry = session.status === 'error' && session.messages.some(message => message.id === user.id);
+        if (session.messages.some(message => message.id === user.id) && !retry) return json(res, { error: 'This message was already submitted.' }, 409);
         // Claim before the first await. Two simultaneous POSTs must never both
         // append a user message and start native turns for the same session.
         claims.add(session.id); void metadata.cancel(session.id);
         const previous = { ...session, messages: [...session.messages], suggestions: [...session.suggestions] };
         let run: ActiveConversation;
         try {
-          session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: prompt }] });
-          if (session.messages.length === 1) session.title = prompt.slice(0, 60);
+          if (!retry) {
+            session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: prompt }] });
+            if (session.messages.length === 1) session.title = prompt.slice(0, 60);
+          }
           session.status = 'running'; session.error = undefined; session.suggestions = []; session.updatedAt = Date.now();
           await store.save(session);
-          run = new ActiveConversation(store, session, adapter, options.instructions, prompt, metadata); active.set(session.id, run);
+          run = new ActiveConversation(store, session, adapter, options.instructions, prompt, metadata, retry); active.set(session.id, run);
         } catch (error) { Object.assign(session, previous); throw error; }
         finally { claims.delete(session.id); }
         void run.done.finally(() => { if (active.get(session.id) === run) active.delete(session.id); }).catch(error => { console.error('Session persistence failed:', error); });

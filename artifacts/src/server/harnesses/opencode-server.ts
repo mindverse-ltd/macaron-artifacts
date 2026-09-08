@@ -16,6 +16,7 @@ export interface OpenCodeConnection {
   blockTools(id: string): Promise<void>;
   events(signal: AbortSignal): AsyncIterable<unknown>;
   prompt(id: string, prompt: OpenCodePrompt, signal: AbortSignal): Promise<void>;
+  retry(id: string, messageID: string | undefined, text: string, signal: AbortSignal): Promise<void>;
   replyPermission(id: string, approved: boolean, signal: AbortSignal): Promise<void>;
   rejectQuestion(id: string, signal: AbortSignal): Promise<void>;
   abort(id: string, signal: AbortSignal): Promise<void>;
@@ -114,6 +115,7 @@ export async function startOpenCode(cwd: string, signal: AbortSignal): Promise<O
         yield* result.stream;
       },
       async prompt(sessionID, prompt, signal) { await client.session.promptAsync({ sessionID, ...prompt }, options(signal)); },
+      async retry(sessionID, messageID, text, signal) { await client.v2.session.prompt({ sessionID, id: messageID, prompt: { text }, resume: true }, options(signal)); },
       async replyPermission(requestID, approved, signal) { await client.permission.reply({ requestID, reply: approved ? 'once' : 'reject' }, options(signal)); },
       async rejectQuestion(requestID, signal) { await client.question.reject({ requestID }, options(signal)); },
       async abort(sessionID, signal) { await client.session.abort({ sessionID }, options(signal)); },

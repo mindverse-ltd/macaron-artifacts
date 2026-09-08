@@ -11,7 +11,7 @@ export function Button({ variant = 'primary', size = 'md', className = '', type 
 }
 
 export function Field({ label, hint, className = '', ...props }: ComponentProps<'input'> & { label: string; hint?: string }) {
-  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-control-border px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-focus focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
+  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-input-border bg-input-bg px-3 py-2 text-sm text-input-fg placeholder:text-input-placeholder focus:border-focus focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
 }
 
 export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl border border-border p-4 ${className}`} {...props} />; }

@@ -83,6 +83,10 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
   const fg = readable(baseFg, surfaces, 4.5, ink);
   const foreground = (value: unknown, minimum = 4.5) => readable(composite(value, surface), surfaces, minimum, fg);
   const muted = foreground(pick(colors.descriptionForeground, colors['input.placeholderForeground'], mix(surface, fg, .62)));
+  const inputBg = readableSurface(composite(pick(colors['input.background'], surface2), surface));
+  const inputFg = readable(composite(pick(colors['input.foreground'], fg), inputBg), [inputBg]);
+  const dropdownBg = readableSurface(composite(pick(colors['dropdown.background'], inputBg), surface));
+  const dropdownFg = readable(composite(pick(colors['dropdown.foreground'], fg), dropdownBg), [dropdownBg]);
   let accent = composite(pick(colors['button.background'], colors['textLink.foreground'], fg), surface);
   const defaultLabel = contrastRatio(accent, fg) > contrastRatio(accent, surface) ? fg : surface;
   const accentFg = composite(pick(colors['button.foreground'], defaultLabel), accent);
@@ -94,10 +98,17 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
   const palette: Record<string, string> = {
     surface, 'surface-2': surface2, 'surface-3': surface3, fg, muted,
     border: composite(pick(colors['panel.border'], colors['widget.border'], mix(surface, fg, .14)), surface),
-    'control-border': foreground(pick(colors['input.border'], colors.contrastBorder, colors['panel.border'], mix(surface, fg, .4)), 3),
+    // VS Code uses optional input borders, component-specific dropdown borders and low-alpha radio borders.
+    // Resting decoration must not inherit focus/contrastBorder or the text contrast correction.
+    'control-border': composite(pick(colors['radio.inactiveBorder'], colors['button.secondaryBorder'], mix(surface, fg, .15)), surface),
+    'input-bg': inputBg, 'input-fg': inputFg,
+    'input-border': composite(pick(colors['input.border']), inputBg),
+    'input-placeholder': readable(composite(pick(colors['input.placeholderForeground'], muted), inputBg), [inputBg]),
+    'dropdown-bg': dropdownBg, 'dropdown-fg': dropdownFg,
+    'dropdown-border': composite(pick(colors['dropdown.border'], dark ? dropdownBg : mix(dropdownBg, dropdownFg, .15)), dropdownBg),
     accent, 'accent-fg': accentFg, 'accent-hover': accentHover,
     link: foreground(pick(colors['textLink.foreground'], colors['textLink.activeForeground'], accent)),
-    focus: foreground(pick(colors.focusBorder, colors['textLink.foreground'], accent), 3),
+    focus: readable(composite(pick(colors.focusBorder, colors['textLink.foreground'], accent), surface), [...surfaces, inputBg, dropdownBg], 3, fg),
     danger, 'danger-bg': dangerBg, 'danger-fg': WHITE, 'danger-hover': buttonHover(dangerBg, WHITE),
     success: foreground(pick(colors['gitDecoration.addedResourceForeground'], colors['terminal.ansiGreen'], dark ? '#34d399' : '#15803d')),
     warn: foreground(pick(colors['editorWarning.foreground'], colors['terminal.ansiYellow'], dark ? '#fbbf24' : '#a16207')),

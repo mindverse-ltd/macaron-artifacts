@@ -12,7 +12,14 @@
   --accent-hover: #35353b;
   --focus: #1a1a1f;
   --link: #1a1a1f;
-  --control-border: #85858f;
+  --control-border: var(--border);
+  --input-bg: var(--surface-2);
+  --input-fg: var(--fg);
+  --input-border: var(--border);
+  --input-placeholder: var(--muted);
+  --dropdown-bg: var(--surface);
+  --dropdown-fg: var(--fg);
+  --dropdown-border: var(--border);
   --danger-bg: #b52643;
   --danger-fg: #ffffff;
   --danger-hover: #9e203a;
@@ -42,7 +49,7 @@
     --accent-hover: #d9d9e0;
     --focus: #f2f2f5;
     --link: #f2f2f5;
-    --control-border: #676773;
+    --control-border: var(--border);
     --danger-bg: #ff6b83;
     --danger-fg: #0e0e11;
     --danger-hover: #ff879a;
@@ -69,7 +76,7 @@
   --accent-hover: #d9d9e0;
   --focus: #f2f2f5;
   --link: #f2f2f5;
-  --control-border: #676773;
+  --control-border: var(--border);
   --danger-bg: #ff6b83;
   --danger-fg: #0e0e11;
   --danger-hover: #ff879a;

@@ -21,7 +21,7 @@ export function ThemePicker() {
   return <Combobox value={selectedId} onChange={id => { if (id && !tabbing.current) select(id); }} onClose={() => { setQuery(''); setHoveredId(null); preview(null); tabbing.current = false; }} immediate>
     {({ open, activeOption }) => <>
       <div className="relative">
-        <ComboboxInput aria-label="主题" aria-describedby={help} displayValue={(id: ThemeId) => THEME_OPTIONS.find(theme => theme.id === id)?.label ?? ''} onChange={event => { setQuery(event.target.value); setHoveredId(null); }} onKeyDownCapture={event => { tabbing.current = event.key === 'Tab'; setHoveredId(null); }} placeholder="搜索配色…" className="interactive w-full rounded-lg border border-control-border bg-surface py-2 pr-9 pl-3 text-sm text-fg placeholder:text-muted focus:border-focus focus:outline-none" />
+        <ComboboxInput aria-label="主题" aria-describedby={help} displayValue={(id: ThemeId) => THEME_OPTIONS.find(theme => theme.id === id)?.label ?? ''} onChange={event => { setQuery(event.target.value); setHoveredId(null); }} onKeyDownCapture={event => { tabbing.current = event.key === 'Tab'; setHoveredId(null); }} placeholder="搜索配色…" className="interactive w-full rounded-lg border border-input-border bg-input-bg py-2 pr-9 pl-3 text-sm text-input-fg placeholder:text-input-placeholder focus:border-focus focus:outline-none" />
         <ComboboxButton aria-label="浏览所有主题" className="interactive absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-lg text-muted hover:text-fg"><Icon name="chevronDown" /></ComboboxButton>
       </div>
       <span id={help} className="sr-only">搜索主题，用方向键或悬停预览，Enter 确认，Esc 取消</span>

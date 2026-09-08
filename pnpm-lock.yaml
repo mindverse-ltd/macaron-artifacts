@@ -125,39 +125,9 @@ importers:
         specifier: 0.1.7
         version: 0.1.7
     devDependencies:
-      '@fastify/static':
-        specifier: ^8.0.0
-        version: 8.3.0
-      '@genui/diagnostics':
-        specifier: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@251c59f
-        version: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@251c59f(@unocss/autocomplete@66.8.1)(@unocss/core@66.8.1)(typescript@5.9.3)
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.29.0
-        version: 1.29.0(supports-color@8.1.1)(zod@4.4.3)
-      '@unocss/autocomplete':
-        specifier: 66.8.1
-        version: 66.8.1
-      '@unocss/core':
-        specifier: 66.8.1
-        version: 66.8.1
-      '@unocss/preset-wind4':
-        specifier: 66.8.1
-        version: 66.8.1
       concurrently:
         specifier: ^9.1.0
         version: 9.2.3
-      croner:
-        specifier: ^10.0.1
-        version: 10.0.1
-      fastify:
-        specifier: ^5.2.0
-        version: 5.10.0
-      ignore:
-        specifier: ^7.0.5
-        version: 7.0.5
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
       pkg-pr-new:
         specifier: ^0.0.75
         version: 0.0.75
@@ -170,15 +140,6 @@ importers:
       unocss:
         specifier: 66.8.1
         version: 66.8.1(vite@8.2.2(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-      unocss-preset-animations:
-        specifier: ^1.3.0
-        version: 1.3.0(@unocss/preset-wind3@66.7.5)(unocss@66.8.1(vite@8.2.2(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)))
-      web-push:
-        specifier: ^3.6.7
-        version: 3.6.7(supports-color@8.1.1)
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   artifacts:
     dependencies:

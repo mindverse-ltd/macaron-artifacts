@@ -1,6 +1,8 @@
 # Public releases
 
-Use **Actions → Release to Public → Run workflow**, select `main`, and enter an existing source version tag, such as `v1.0.0`. The workflow publishes that tag from `mindverse-ltd/macaron-artifacts` to `MindLab-Research/macaron-artifacts` through the existing `mindlab-bot` release skill. It runs only when dispatched and does not force-push existing releases.
+Use **Actions → Release to Public → Run workflow**, select `main`, and enter an existing source version tag, such as `v1.0.0`. Leave **dry_run** checked to verify the runner tools, source tag, repository mapping, bot identity, and API-reported write permissions without invoking the release agent. This checks GitHub access; it does not test model-provider authentication or actual push acceptance under branch rules.
+
+Uncheck **dry_run** only when ready to publish that tag from `mindverse-ltd/macaron-artifacts` to `MindLab-Research/macaron-artifacts` through the existing `mindlab-bot` release skill. It runs only when dispatched and does not force-push existing releases.
 
 The release skill exports a snapshot without `.github/`, commits as `mindlab-bot <contact@mindlab.ltd>`, pushes public `main` and the tag, and records the source/public commit mapping in `MindLab-Research/mindlab-bot`.
 

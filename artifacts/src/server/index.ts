@@ -196,7 +196,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (session.messages.some(message => message.id === user.id) && !retry) return json(res, { error: 'This message was already submitted.' }, 409);
         // Claim before the first await. Two simultaneous POSTs must never both
         // append a user message and start native turns for the same session.
-        claims.add(session.id); void metadata.cancel(session.id);
+        claims.add(session.id); await metadata.cancel(session.id);
         const previous = { ...session, messages: [...session.messages], suggestions: [...session.suggestions] };
         let run: ActiveConversation;
         try {

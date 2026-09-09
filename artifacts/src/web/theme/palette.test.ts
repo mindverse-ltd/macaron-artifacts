@@ -11,7 +11,7 @@ const PAIRS = [
 ];
 const opaque = /^#[\da-f]{6}$/i;
 const decoration = /^(?:transparent|#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8}))$/i;
-const isDecoration = (key: string) => /(?:^|-)(?:border|divider|shadow)$/.test(key) || key === 'contrast' || key === 'contrast-active';
+const isDecoration = (key: string) => /(?:^|-)(?:border|divider|shadow)(?:-rest)?$/.test(key) || key === 'contrast' || key === 'contrast-active';
 
 function readablePair(palette: Record<string, string>, background: string, foreground: string, minimum = 4.5) {
   expect(palette[background], background).toMatch(opaque);
@@ -130,6 +130,11 @@ test('component borders preserve explicit values and use contrast borders only a
   expect(custom['input-border']).toBe('#ffffff20'); expect(custom['dropdown-border']).toBe('#334455');
   const widget = themePalette({ colors: { 'editorWidget.border': '#ffffff20', 'widget.border': '#ff00ff' } }, true);
   expect(widget['widget-border']).toBe('#ffffff20');
+  const catppuccin = themePalette((await bundledThemes['catppuccin-mocha']()).default, true);
+  expect(catppuccin['secondary-border-rest']).not.toBe(catppuccin['secondary-border']);
+  expect(catppuccin['dropdown-border-rest']).not.toBe(catppuccin['dropdown-border']);
+  expect(contrastRatio(catppuccin['secondary-border-rest'], catppuccin.secondary)).toBeLessThan(contrastRatio(catppuccin['secondary-border'], catppuccin.secondary));
+  expect(contrastRatio(catppuccin['dropdown-border-rest'], catppuccin['dropdown-bg'])).toBeLessThan(contrastRatio(catppuccin['dropdown-border'], catppuccin['dropdown-bg']));
   const contrast = themePalette({ colors: { contrastBorder: '#ffffff', contrastActiveBorder: '#ffff00' } }, true);
   expect(contrast.contrast).toBe('#ffffff'); expect(contrast['contrast-active']).toBe('#ffff00');
   expect(contrast['input-border']).toBe('#ffffff'); expect(contrast['dropdown-border']).toBe('#ffffff');

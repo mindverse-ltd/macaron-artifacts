@@ -2,7 +2,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Button as HeadlessButton, Field as HeadlessField, Input, Label, Description, Disclosure as HeadlessDisclosure, DisclosureButton, DisclosurePanel, Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/react';
 import { Icon } from './Icon';
 
-const variants = { primary: 'bg-accent text-accent-fg hover:bg-accent-hover', secondary: 'border border-secondary-border bg-secondary text-secondary-fg hover:bg-secondary-hover hover:text-secondary-fg', ghost: 'text-muted hover:bg-surface-3 hover:text-hover-fg', danger: 'bg-danger-bg text-danger-fg hover:bg-danger-hover' };
+const variants = { primary: 'bg-accent text-accent-fg hover:bg-accent-hover', secondary: 'border border-secondary-border-rest bg-secondary text-secondary-fg hover:bg-secondary-hover hover:text-secondary-fg', ghost: 'text-muted hover:bg-surface-3 hover:text-hover-fg', danger: 'bg-danger-bg text-danger-fg hover:bg-danger-hover' };
 const sizes = { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4 text-sm' };
 const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 

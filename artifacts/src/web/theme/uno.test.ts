@@ -25,7 +25,7 @@ test('late streaming utilities include their Wind4 theme and ring dependencies',
 
 test('workbench color contexts and their interactive states stay scoped in generated UI', async () => {
   const generator = await createGenerator(unoConfig('.ui4a-surface'));
-  const tokens = ['theme-sidebar', 'theme-titlebar', 'theme-widget', 'theme-menu', 'theme-panel', 'theme-code', 'bg-sidebar-selection', 'text-sidebar-selection-fg', 'data-[focus]:text-hover-fg', 'focus:border-input-focus'];
+  const tokens = ['theme-sidebar', 'theme-titlebar', 'theme-widget', 'theme-menu', 'theme-panel', 'theme-code', 'bg-sidebar-selection', 'text-sidebar-selection-fg', 'border-secondary-border-rest', 'border-dropdown-border-rest', 'data-[focus]:text-hover-fg', 'focus:border-input-focus'];
   const { css, matched } = await generator.generate(tokens.join(' '), { preflights: false });
   for (const token of tokens) expect(matched.has(token)).toBe(true);
   for (const role of ['sidebar', 'titlebar', 'widget', 'menu', 'panel', 'code']) expect(css).toContain(`.ui4a-surface :is(.theme-${role})`);

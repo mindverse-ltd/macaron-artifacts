@@ -7,7 +7,7 @@ Macaron Artifacts runs Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw in
 
 ## Install
 
-Macaron Artifacts requires Node.js 22.19 or newer. For Claude Code, Codex, or OpenCode, install and authenticate the native CLI first; the app inherits its local configuration. The pi SDK is included and reads your `~/.pi/agent` configuration, so it needs no separate pi executable.
+Macaron Artifacts requires Node.js 22.19 or newer. Install and authenticate Claude Code, Codex, or OpenCode before starting the app; it inherits their local configuration. The pi SDK is included and reads `~/.pi/agent`, while Hermes and OpenClaw connect through their configured gateways.
 
 Run this commit's preview package:
 
@@ -37,7 +37,7 @@ ssh -N -L 43860:127.0.0.1:43860 user@host
 Then use the forwarded `http://127.0.0.1:43860` address in the connect form. The website never needs direct network access to the remote machine.
 
 <Callout title="One package, one launcher">
-  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are selected inside the app. OpenClaw metadata enrichment requires the Macaron metadata-gate plugin and fails closed without it.
+  `macaron-artifacts` is the only package and CLI. Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are selected inside the app. OpenClaw metadata enrichment requires the Macaron metadata-gate plugin and fails closed without it.
 </Callout>
 
 ## Start a conversation
@@ -51,7 +51,7 @@ Switching conversations keeps background turns running. Refreshing reconnects to
 
 Streaming follows each harness's native events. OpenCode exposes text/reasoning deltas and tool input snapshots. pi also exposes raw tool argument deltas; its command output arrives as cumulative updates.
 
-OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported here. Tool execution approvals appear in the conversation.
+OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported here. Hermes and OpenClaw gateway prompts that require an external client are likewise outside the WebUI; tool execution approvals appear in the conversation.
 
 ## Generated UI
 
@@ -77,6 +77,10 @@ macaron-artifacts --help
 | `MACARON_CODEX_PATH` | Codex executable |
 | `MACARON_OPENCODE_PATH` | OpenCode executable |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
+| `MACARON_HERMES_PATH` | Hermes executable |
+| `MACARON_HERMES_URL` | Optional Hermes gateway URL |
+| `MACARON_OPENCLAW_PATH` | OpenClaw executable |
+| `OPENCLAW_GATEWAY_URL` | Optional OpenClaw gateway URL |
 | `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
 | `MACARON_ALLOWED_ORIGINS` | Comma-separated allowed website origins |
 

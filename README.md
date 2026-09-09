@@ -21,6 +21,8 @@ macaron-artifacts
 
 Replace `<sha>` with the commit from a successful [package preview build](https://github.com/mindverse-ltd/macaron-artifacts/actions/workflows/pkg-pr-new.yml). Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default; for OpenCode and pi, enter an optional override as `provider/model`.
 
+To connect the hosted WebUI, start the server with `macaron-artifacts --pair`. Open [artifacts.macaron.im/connect](https://artifacts.macaron.im/connect), enter the address and the one-time code printed in the terminal, and the browser will open the local WebUI. Pairing codes expire after ten minutes and are consumed once. For a server reached through SSH, forward its loopback port first: `ssh -N -L 43860:127.0.0.1:43860 user@host`, then use `http://127.0.0.1:43860` in the connect form.
+
 ```sh
 macaron-artifacts --port 43860 --data-dir /path/to/session-data
 macaron-artifacts --help
@@ -48,6 +50,8 @@ Claude Code, Codex, OpenCode, and pi are supported. Kimi Code, Hermes, and dsh a
 | --- | --- |
 | `MACARON_PORT` | UI and API port, default `43860` |
 | `MACARON_DATA_DIR` | App conversation storage, default `~/.macaron-artifacts/sessions` |
+| `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
+| `MACARON_ALLOWED_ORIGINS` | Comma-separated hosted WebUI origins, default `https://artifacts.macaron.im` when pairing is enabled |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |
 | `MACARON_OPENCODE_PATH` | OpenCode executable |
@@ -57,7 +61,7 @@ Open **Profiles** in the sidebar to configure models, reasoning effort, service 
 
 You can also inherit your CLI's configuration. For Claude gateways, that includes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`. Variables injected only by a shell alias do not reach a separately launched app.
 
-Workspace files remain in each conversation's selected directory. Deleting an app conversation does not delete those files. The API binds to loopback and accepts same-origin browser requests. Generated React runs in the host page; use it with trusted local code.
+Workspace files remain in each conversation's selected directory. Deleting an app conversation does not delete those files. The API always binds to loopback; normal local UI requests are same-origin, while `--pair` adds an origin-bound Bearer connection for the hosted WebUI. Generated React runs in the host page; use it with trusted local code.
 
 ## Development
 

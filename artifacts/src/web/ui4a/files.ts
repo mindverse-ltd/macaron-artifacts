@@ -14,8 +14,10 @@ export function relativeUi4aPath(specifier: string, filename: string): string {
   return ui4aPath(`${filename.slice(0, filename.lastIndexOf("/") + 1)}${specifier}`);
 }
 
+import { apiUrl, connectionHeaders } from '../chat/connection';
+
 export function createFileClient(sessionId: string, fetcher: typeof fetch = fetch) {
-  const url = (path: string) => `/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(ui4aPath(path))}`;
+  const url = (path: string) => apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(ui4aPath(path))}`);
   const checked = async (response: Response, path: string) => {
     if (!response.ok) {
       const text = await response.text();
@@ -25,10 +27,11 @@ export function createFileClient(sessionId: string, fetcher: typeof fetch = fetc
     }
     return response;
   };
+  const requestHeaders = () => { const headers = connectionHeaders(); return headers.has('authorization') ? { headers } : undefined; };
   return {
-    async readFile(path: string): Promise<string> { return (await checked(await fetcher(url(path)), path)).text(); },
+    async readFile(path: string): Promise<string> { return (await checked(await fetcher(url(path), requestHeaders()), path)).text(); },
     async writeFile(path: string, content: string): Promise<void> {
-      await checked(await fetcher(url(path), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) }), path);
+      await checked(await fetcher(url(path), { method: "PUT", headers: connectionHeaders({ "content-type": "application/json" }), body: JSON.stringify({ content }) }), path);
     },
   };
 }

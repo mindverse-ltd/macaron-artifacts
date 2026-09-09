@@ -1,26 +1,25 @@
 import type { Route } from './+types/connect';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, LoaderCircle, Terminal } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { baseOptions } from '@/lib/layout.shared';
 
-export function meta({}: Route.MetaArgs) {
-  return [{ title: 'Open WebUI · Macaron Artifacts' }, { name: 'description', content: 'Open the unified Macaron Artifacts WebUI running locally on your machine.' }];
-}
+export function meta({}: Route.MetaArgs) { return [{ title: 'Connect · Macaron Artifacts' }, { name: 'description', content: 'Pair the Macaron Artifacts WebUI with a local or SSH-forwarded coding agent.' }]; }
+function normalizeOrigin(value: string): string { const input = value.trim(); const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(input) ? input : `http://${input}`); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || (url.pathname !== '/' && url.pathname !== '')) throw new Error('请输入 http(s) 服务地址，不要带路径或账号信息。'); return url.origin; }
+function initialServer(): string { if (typeof window === 'undefined') return 'http://127.0.0.1:43860'; try { return new URLSearchParams(window.location.search).get('server') || 'http://127.0.0.1:43860'; } catch { return 'http://127.0.0.1:43860'; } }
 
 export default function Connect() {
-  return (
-    <HomeLayout {...baseOptions()}>
-      <div className="site:p-6 site:flex site:flex-col site:items-center site:justify-center site:flex-1">
-        <div className="site:w-full site:max-w-md">
-          <h1 className="site:text-xl site:font-bold site:mb-3">Open Macaron Artifacts</h1>
-          <p className="site:text-fd-muted-foreground site:text-sm site:leading-relaxed site:mb-6">Start <code>macaron-artifacts</code> on this device, then open its local WebUI. Choose Claude Code, Codex, OpenCode, or pi inside the app.</p>
-          <a href="http://127.0.0.1:43860" className="site:inline-flex site:items-center site:justify-center site:gap-2 site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-4 site:py-2.5 site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring">Open local WebUI <ArrowRight aria-hidden="true" className="site:size-4" /></a>
-          <p className="site:text-xs site:text-fd-muted-foreground site:mt-3">Default address: <code>http://127.0.0.1:43860</code>. For another port, use the address printed by the launcher.</p>
-          <p className="site:text-sm site:mt-6"><Link to="/docs/usage" className="site:underline site:underline-offset-4">Install and configure Macaron Artifacts</Link></p>
-          <p className="site:text-xs site:text-fd-muted-foreground site:mt-6">The hosted v0 interface has been retired. Its source remains on the <a href="https://github.com/mindverse-ltd/macaron-artifacts/tree/v0" className="site:underline site:underline-offset-4">v0 branch</a>.</p>
-        </div>
-      </div>
-    </HomeLayout>
-  );
+  const [server, setServer] = useState(initialServer), [code, setCode] = useState(''), [error, setError] = useState(''), [pending, setPending] = useState(false);
+  async function connect(event: FormEvent) {
+    event.preventDefault(); setError(''); setPending(true);
+    try {
+      const origin = normalizeOrigin(server), response = await fetch(`${origin}/api/pair`, { method: 'POST', mode: 'cors', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code.trim() }) });
+      const body = await response.json().catch(() => ({})) as { token?: string; expiresAt?: number; error?: string };
+      if (!response.ok || !body.token) throw new Error(body.error || `连接失败 (${response.status})`);
+      try { sessionStorage.setItem('macaron-artifacts:connection:pending', JSON.stringify({ origin, token: body.token, expiresAt: body.expiresAt })); } catch { throw new Error('浏览器无法保存本次连接，请检查隐私模式或存储权限。'); }
+      window.location.assign('/app');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setPending(false); }
+  }
+  return <HomeLayout {...baseOptions()}><main className="site:p-6 site:flex site:flex-col site:items-center site:justify-center site:flex-1"><div className="site:w-full site:max-w-md"><div className="site:flex site:items-center site:gap-2 site:text-sm site:text-fd-muted-foreground site:mb-3"><Terminal aria-hidden="true" className="site:size-4" /> Macaron Artifacts</div><h1 className="site:text-2xl site:font-bold site:mb-2">连接本机 Agent</h1><p className="site:text-fd-muted-foreground site:text-sm site:leading-relaxed site:mb-6">在运行 coding agent 的机器上执行 <code>macaron-artifacts --pair</code>，然后输入它显示的一次性配对码。</p><form onSubmit={connect} className="site:space-y-4" aria-describedby="connect-help connect-error"><div><label htmlFor="server" className="site:block site:text-sm site:font-medium site:mb-1">服务地址</label><input id="server" type="url" inputMode="url" autoComplete="url" value={server} onChange={event => setServer(event.target.value)} className="site:w-full site:rounded-md site:border site:border-fd-border site:bg-fd-background site:px-3 site:py-2 site:text-sm site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring" required /></div><div><label htmlFor="pair-code" className="site:block site:text-sm site:font-medium site:mb-1">一次性配对码</label><input id="pair-code" type="text" inputMode="text" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} className="site:w-full site:rounded-md site:border site:border-fd-border site:bg-fd-background site:px-3 site:py-2 site:tracking-[.18em] site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring" placeholder="例如 ABCD-EFGH-JKLM" required /></div><p id="connect-help" className="site:text-xs site:text-fd-muted-foreground">配对码只使用一次，短时间后自动失效。凭据不会写入地址栏或发送到 Macaron 云端。</p>{error && <p id="connect-error" role="alert" className="site:text-sm site:text-fd-destructive">{error}</p>}<button type="submit" disabled={pending} className="site:w-full site:inline-flex site:items-center site:justify-center site:gap-2 site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-md site:font-medium site:px-4 site:py-2.5 site:disabled:opacity-60 site:focus-visible:outline-none site:focus-visible:ring-2 site:focus-visible:ring-fd-ring">{pending ? <LoaderCircle aria-hidden="true" className="site:size-4 site:animate-spin" /> : <ArrowRight aria-hidden="true" className="site:size-4" />}连接 WebUI</button></form><section className="site:mt-8 site:border-t site:border-fd-border site:pt-5 site:text-xs site:text-fd-muted-foreground" aria-labelledby="ssh-help"><h2 id="ssh-help" className="site:text-sm site:font-medium site:text-fd-foreground site:mb-2">SSH 机器</h2><p className="site:mb-2">在本机建立端口转发后，把服务地址保持为 <code>http://127.0.0.1:43860</code>：</p><code className="site:block site:overflow-x-auto site:whitespace-nowrap site:rounded-md site:bg-fd-muted site:px-3 site:py-2">ssh -N -L 43860:127.0.0.1:43860 user@host</code></section><p className="site:text-sm site:mt-6"><Link to="/docs/usage" className="site:underline site:underline-offset-4">查看安装说明</Link></p></div></main></HomeLayout>;
 }

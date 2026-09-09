@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "react-router build",
+    "build": "react-router build && node host-webui.mjs",
     "dev": "react-router dev",
     "start": "serve ./build/client",
     "typecheck": "react-router typegen && fumadocs-mdx && tsc --noEmit",

@@ -2,10 +2,10 @@ name: docs site
 
 on:
   pull_request:
-    paths: ['site/**']
+    paths: ['site/**', 'artifacts/**', 'pnpm-lock.yaml', 'package.json']
   push:
     branches: [main]
-    paths: ['site/**']
+    paths: ['site/**', 'artifacts/**', 'pnpm-lock.yaml', 'package.json']
 
 permissions:
   contents: read
@@ -13,22 +13,21 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/setup@v1
         with:
-          package-json-file: site/package.json
+          package-json-file: package.json
           install: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: site
       - run: pnpm typecheck
-      # `verify` builds the site (emitting build/client/api/search) then runs the
-      # search-index tests with REQUIRE_BUILT_INDEX=1 — so the real Orama route-
-      # wiring test fails hard if the `/api/search` artifact ever stops emitting,
-      # instead of silently skipping.
+        working-directory: site
+      # `verify` builds the site (including the embedded artifacts WebUI) then runs
+      # the search-index tests with REQUIRE_BUILT_INDEX=1.
       - run: pnpm verify
+        working-directory: site

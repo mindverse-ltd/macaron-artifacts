@@ -13,9 +13,11 @@ import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
 import { ProfileStore, validateProfileInput } from './profiles.js';
 import { safeError } from './harnesses/common.js';
+import { PairingManager, bearerToken, isLoopbackHost, originHost, originProtocol, type PairingGrant, type PairingOptions } from './pairing.js';
 
-export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string }) {
+export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions }) {
   const store = new SessionStore(options.directory), active = new Map<string, ActiveConversation>(), claims = new Set<string>();
+  const pairing = new PairingManager(options.pairing);
   const profiles = options.profiles ?? new ProfileStore(join(options.directory, 'profiles'));
   const deletingProfiles = new Set<string>(), bindingProfiles = new Map<string, number>();
   // Reserve bindings before resolving async native config, so deletion cannot race a new session or a profile switch.
@@ -37,13 +39,53 @@ export async function createArtifactsServer(options: { directory: string; instru
   const server = createServer(async (req, res) => {
     try {
     const url = new URL(req.url || '/', 'http://localhost'), segments = url.pathname.split('/').filter(Boolean);
+    let grant: PairingGrant | undefined, localRequest = false;
     // Native harnesses can mutate files. A local browser must not let an unrelated origin trigger them.
     if (url.pathname.startsWith('/api/')) {
-      const host = new URL(`http://${req.headers.host || 'invalid'}`).hostname;
-      if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) return json(res, { error: 'A loopback host is required.' }, 403);
-      if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return json(res, { error: 'Cross-origin requests are not accepted.' }, 403);
+      const requestHost = req.headers.host;
+      if (!isLoopbackHost(requestHost)) return json(res, { error: 'A loopback host is required.' }, 403);
+      const origin = req.headers.origin;
+      const originHostValue = originHost(origin);
+      if (origin && !originHostValue) return json(res, { error: 'Invalid Origin.' }, 400);
+      const crossOrigin = Boolean(origin && (originHostValue !== requestHost || originProtocol(origin) !== 'http:'));
+      localRequest = !crossOrigin;
+      if (crossOrigin && !pairing.enabled) return json(res, { error: 'Cross-origin requests are not accepted.' }, 403);
+      if (crossOrigin && !pairing.originAllowed(origin)) return json(res, { error: 'This WebUI origin is not allowed.' }, 403);
+      if (crossOrigin) {
+        res.setHeader('access-control-allow-origin', origin!); res.setHeader('access-control-expose-headers', 'x-vercel-ai-ui-message-stream'); res.setHeader('vary', 'Origin');
+        const pairingRoute = url.pathname === '/api/pair';
+        const localOnlyRoute = url.pathname === '/api/pair/code' || url.pathname.startsWith('/api/pair/connections');
+        if (localOnlyRoute) return json(res, { error: 'This endpoint is local-only.' }, 403);
+        if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS', 'access-control-allow-headers': 'authorization, content-type, accept', 'access-control-expose-headers': 'x-vercel-ai-ui-message-stream', 'access-control-max-age': '600', ...(req.headers['access-control-request-private-network'] === 'true' ? { 'access-control-allow-private-network': 'true' } : {}) }); return res.end(); }
+        if (url.pathname !== '/api/health' && !pairingRoute && !(grant = pairing.authenticate(bearerToken(req.headers.authorization), origin))) return json(res, { error: 'Pairing authentication required.', authRequired: true }, 401);
+      }
     }
       if (url.pathname === '/api/health') return json(res, { ok: true });
+      if (url.pathname === '/api/pair' && req.method === 'POST') {
+        if (localRequest || !req.headers.origin) return json(res, { error: 'Pairing must be claimed from the hosted WebUI.' }, 403);
+        const input = await body(req), result = pairing.claim(typeof input.code === 'string' ? input.code : '', req.headers.origin);
+        return json(res, result);
+      }
+      if (url.pathname === '/api/pair/code' && req.method === 'POST') {
+        if (!localRequest) return json(res, { error: 'This endpoint is local-only.' }, 403);
+        return json(res, pairing.generateCode());
+      }
+      if (url.pathname === '/api/connection' && req.method === 'GET') {
+        if (!localRequest && !grant) return json(res, { error: 'Pairing authentication required.', authRequired: true }, 401);
+        return json(res, grant ? pairing.context(grant) : { id: null, name: 'Local', expiresAt: null, protocolVersion: 1 });
+      }
+      if (url.pathname === '/api/connection' && req.method === 'DELETE') {
+        if (!grant) return json(res, { error: 'Pairing authentication required.', authRequired: true }, 401);
+        pairing.revokeCurrent(grant); return json(res, { ok: true });
+      }
+      if (url.pathname === '/api/pair/connections' && req.method === 'GET') {
+        if (!localRequest) return json(res, { error: 'This endpoint is local-only.' }, 403);
+        return json(res, pairing.list());
+      }
+      if (segments[0] === 'api' && segments[1] === 'pair' && segments[2] === 'connections' && segments[3] && req.method === 'DELETE') {
+        if (!localRequest) return json(res, { error: 'This endpoint is local-only.' }, 403);
+        return json(res, { ok: pairing.revoke(decodeURIComponent(segments[3])) });
+      }
       if (url.pathname === '/api/harnesses' && req.method === 'GET') return json(res, await Promise.all(Object.values(harnesses).map(adapter => adapter.info())));
       if (segments[0] === 'api' && segments[1] === 'harnesses' && segments[3] === 'profile-options' && req.method === 'GET') {
         const harness = segments[2] as HarnessId, adapter = Object.hasOwn(harnesses, harness) ? harnesses[harness] : undefined;
@@ -115,6 +157,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         }
         if (segments[3] === 'metadata' && req.method === 'GET') {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' }); req.socket.setNoDelay(true);
+          if (grant) pairing.track(grant, res);
           const unsubscribe = metadata.subscribe(session, { update: recap => res.write(`data: ${JSON.stringify(recap)}\n\n`), close: () => res.end() });
           res.on('close', unsubscribe); return;
         }
@@ -134,6 +177,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       if (segments[0] === 'api' && segments[1] === 'chat' && segments[3] === 'stream' && req.method === 'GET') {
         const run = active.get(segments[2]);
         if (!run) { res.writeHead(204); return res.end(); }
+        if (grant) pairing.track(grant, res);
         req.socket.setNoDelay(true);
         return await pipeUIMessageStreamToResponse({ response: res, stream: run.stream(), headers: { 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' } });
       }
@@ -167,6 +211,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         } catch (error) { Object.assign(session, previous); throw error; }
         finally { claims.delete(session.id); }
         void run.done.finally(() => { if (active.get(session.id) === run) active.delete(session.id); }).catch(error => { console.error('Session persistence failed:', error); });
+        if (grant) pairing.track(grant, res);
         req.socket.setNoDelay(true);
         return await pipeUIMessageStreamToResponse({ response: res, stream: run.stream(), headers: { 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' } });
       }
@@ -179,14 +224,23 @@ export async function createArtifactsServer(options: { directory: string; instru
       res.writeHead(200, { 'content-type': mime[extname(file)] ?? 'application/octet-stream' }); res.end(await readFile(file));
     } catch (error) { if (!res.headersSent) json(res, { error: safeError(error) }, (error as { status?: number }).status ?? (error as { statusCode?: number }).statusCode ?? ((error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400)); else res.end(); }
   });
-  return { server, store, profiles, active, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { server, store, profiles, active, pairing, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), import.meta.url.endsWith('/src/server/index.ts') ? '../..' : '..');
   const instructions = await readFile(join(root, 'skills/ui4a/SKILL.md'), 'utf8');
-  const app = await createArtifactsServer({ directory: process.env.MACARON_DATA_DIR || join(homedir(), '.macaron-artifacts/sessions'), instructions, webRoot: join(root, 'dist/web') });
+  const pairing = /^(1|true|yes)$/i.test(process.env.MACARON_PAIR || '') ? { enabled: true, allowedOrigins: (process.env.MACARON_ALLOWED_ORIGINS || 'https://artifacts.macaron.im').split(',').map(value => value.trim()).filter(Boolean) } : undefined;
+  const app = await createArtifactsServer({ directory: process.env.MACARON_DATA_DIR || join(homedir(), '.macaron-artifacts/sessions'), instructions, webRoot: join(root, 'dist/web'), pairing });
   const port = Number(process.env.MACARON_PORT || 43860);
-  app.server.listen(port, '127.0.0.1', () => console.log(`Macaron Artifacts: http://127.0.0.1:${port}`));
+  app.server.listen(port, '127.0.0.1', () => {
+    console.log(`Macaron Artifacts: http://127.0.0.1:${port}`);
+    if (app.pairing.enabled) {
+      console.log(`Connect: https://artifacts.macaron.im/connect?server=${encodeURIComponent(`http://127.0.0.1:${port}`)}`);
+      console.log(`Pairing code: ${app.pairing.code} (expires ${new Date(app.pairing.codeExpiry).toISOString()})`);
+      if (process.env.SSH_CONNECTION) console.log(`SSH port forward: ssh -N -L ${port}:127.0.0.1:${port} <user>@<host>`);
+      console.log(`To generate a new code locally: curl -X POST http://127.0.0.1:${port}/api/pair/code`);
+    }
+  });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { void app.close().then(() => process.exit()); });
 }

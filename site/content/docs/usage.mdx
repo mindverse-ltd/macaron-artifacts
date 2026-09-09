@@ -24,6 +24,18 @@ macaron-artifacts
 
 Open [http://127.0.0.1:43860](http://127.0.0.1:43860). The commands are pinned to this documentation build's commit; use a commit with a successful package preview build.
 
+### Connect from the website
+
+Run `macaron-artifacts --pair` on the machine that has your coding agents installed. On [the connect page](/connect), enter `http://127.0.0.1:43860` and the one-time code printed by the command. The code expires after ten minutes and is consumed once; credentials stay in the browser tab and the agent machine.
+
+For an SSH machine, keep the server bound to loopback and forward it to your computer:
+
+```sh
+ssh -N -L 43860:127.0.0.1:43860 user@host
+```
+
+Then use the forwarded `http://127.0.0.1:43860` address in the connect form. The website never needs direct network access to the remote machine.
+
 <Callout title="One package, one launcher">
   `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, and pi are selected inside the app. Kimi Code, Hermes, and dsh are not supported in this release.
 </Callout>
@@ -65,6 +77,8 @@ macaron-artifacts --help
 | `MACARON_CODEX_PATH` | Codex executable |
 | `MACARON_OPENCODE_PATH` | OpenCode executable |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
+| `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
+| `MACARON_ALLOWED_ORIGINS` | Comma-separated allowed website origins |
 
 For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Environment variables set only inside a shell alias do not reach a separately launched app.
 

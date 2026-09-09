@@ -3,9 +3,10 @@ import { DefaultChatTransport, type DataUIPart } from 'ai';
 import type { Artifact, ChatMessage, HarnessId, HarnessInfo, MessageData, Session, SessionSummary } from '../../shared/types';
 import { consumeMetadata } from './metadata';
 import { artifactEntryPath } from '../../shared/artifact-path';
+import { apiUrl, connectionHeaders } from './connection';
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } });
+  const response = await fetch(apiUrl(path), { ...init, headers: connectionHeaders({ 'content-type': 'application/json', ...init?.headers }) });
   if (!response.ok) { const body = await response.text(); let detail = body; try { detail = JSON.parse(body).error ?? body; } catch { /* Some failures are plain text. */ } throw new Error(detail || `请求失败 (${response.status})`); }
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
@@ -84,7 +85,7 @@ export class WorkspaceStore {
       this.files.set(id, new Map(artifacts.map(artifact => [artifact.path, artifact])));
       const chat = new Chat<ChatMessage>({
         id, messages: session.messages,
-        transport: new DefaultChatTransport<ChatMessage>({ api: '/api/chat', prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, messages } }) }),
+        transport: new DefaultChatTransport<ChatMessage>({ api: apiUrl('/api/chat'), headers: connectionHeaders(), prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, messages }, headers: connectionHeaders() }) }),
         onData: part => this.onData(id, part),
         onError: error => this.update(id, { status: 'error', error: error.message }),
         onFinish: ({ isError, isDisconnect }) => {
@@ -148,7 +149,7 @@ export class WorkspaceStore {
     const controller = new AbortController();
     this.metadata.set(id, controller);
     try {
-      const response = await fetch(`/api/sessions/${id}/metadata`, { signal: controller.signal, headers: { accept: 'text/event-stream' } });
+      const response = await fetch(apiUrl(`/api/sessions/${id}/metadata`), { signal: controller.signal, headers: connectionHeaders({ accept: 'text/event-stream' }) });
       if (!response.ok || !response.body) return;
       await consumeMetadata(response.body, recap => {
         // Cancellation can race with a decoded frame; the ownership check prevents an old turn from renaming the new one.

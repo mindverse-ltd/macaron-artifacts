@@ -1,5 +1,6 @@
 # Adapted from MindLab-Research/mindlab-bot/workflows/release-on-tag.yml.
 name: Release to Public
+run-name: "${{ inputs.dry_run && 'Dry run' || 'Publish' }} ${{ inputs.tag_name }}"
 
 on:
   workflow_dispatch:
@@ -8,6 +9,11 @@ on:
         description: Existing source tag to publish (for example, v1.0.0)
         required: true
         type: string
+      dry_run:
+        description: Check release access without publishing
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -31,7 +37,7 @@ jobs:
         run: |
           # Keep free-form dispatch input out of shell code and the agent's instructions.
           [[ "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]] || { echo '::error::Enter a version tag such as v1.0.0'; exit 1; }
-          command -v pi
+          for tool in git gh jq rsync pi; do command -v "$tool"; done
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha'
 
       - name: Define action directory
@@ -64,7 +70,19 @@ jobs:
           # The bot still lists macaron-claude-code; GitHub resolves its rename to this repository.
           [[ "$(gh api "repos/$source_repo" --jq '.full_name')" == "$GITHUB_REPOSITORY" ]]
 
+      - name: Check release access without publishing
+        if: inputs.dry_run
+        run: |
+          # API permission checks cannot prove branch-rule acceptance or model-provider authentication.
+          [[ "$(gh api repos/MindLab-Research/mindlab-bot --jq '.permissions.push')" == 'true' ]] || { echo '::error::Runner credentials cannot write the commit mapping'; exit 1; }
+          bot_login="$(GH_TOKEN="$MINDLAB_BOT_GH_TOKEN" gh api user --jq '.login')"
+          [[ "$bot_login" == 'mindlab-bot' ]] || { echo '::error::Public repository token must belong to mindlab-bot'; exit 1; }
+          [[ "$(GH_TOKEN="$MINDLAB_BOT_GH_TOKEN" gh api repos/MindLab-Research/macaron-artifacts --jq '.permissions.push')" == 'true' ]] || { echo '::error::Bot token cannot write the public repository'; exit 1; }
+          printf '%s\n' 'Dry run passed: tools, source tag, repository mapping, bot identity, and API-reported write permissions checked.' 'No release agent was invoked, and no tags, public commits, or mappings were written. Model-provider authentication and actual push acceptance were not tested.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish source tag
+        # Require an explicit false input: missing input must never fall through to publishing.
+        if: github.event.inputs.dry_run == 'false'
         working-directory: ${{ env.MINDLAB_BOT_ACTION_DIR }}
         # The runner supplies pi configuration and separate gh access for source reads and mapping writes.
         run: pi --no-session -p "Use the release skill to publish repository macaron-artifacts at tag $RELEASE_TAG"

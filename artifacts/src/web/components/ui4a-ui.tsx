@@ -14,7 +14,7 @@ export function Field({ label, hint, className = '', ...props }: ComponentProps<
   return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-input-border bg-input-bg px-3 py-2 text-sm text-input-fg placeholder:text-input-placeholder focus:border-input-focus focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
 }
 
-export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl border border-contrast bg-surface-2 p-4 ${className}`} {...props} />; }
+export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl bg-surface-2 p-4 ${className}`} {...props} />; }
 export function Badge({ className = '', ...props }: ComponentProps<'span'>) { return <span className={`inline-flex items-center rounded-full bg-status px-2 py-0.5 text-xs text-status-fg ${className}`} {...props} />; }
 
 export function Tabs({ items, value, onChange }: { items: { id: string; label: ReactNode; children: ReactNode }[]; value?: string; onChange?: (id: string) => void }) {
@@ -23,5 +23,5 @@ export function Tabs({ items, value, onChange }: { items: { id: string; label: R
 }
 
 export function Disclosure({ title, children, defaultOpen }: { title: ReactNode; children: ReactNode; defaultOpen?: boolean }) {
-  return <HeadlessDisclosure defaultOpen={defaultOpen}>{({ open }) => <div className="rounded-lg border border-contrast"><DisclosureButton className={`interactive flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-3 hover:text-hover-fg ${focus}`}>{title}<Icon name="chevronRight" className={`interactive size-4 shrink-0 ${open ? 'rotate-90' : ''}`} /></DisclosureButton><div inert={!open} className={`grid transition-[grid-template-rows] duration-250 ease-[cubic-bezier(0.32,0.72,0,1)] ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="overflow-hidden"><DisclosurePanel static className="rounded-lg bg-surface-2 px-3 py-3 text-sm">{children}</DisclosurePanel></div></div></div>}</HeadlessDisclosure>;
+  return <HeadlessDisclosure defaultOpen={defaultOpen}>{({ open }) => <div className="overflow-clip rounded-lg bg-surface-2"><DisclosureButton className={`interactive flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-3 hover:text-hover-fg ${focus}`}>{title}<Icon name="chevronRight" className={`interactive size-4 shrink-0 ${open ? 'rotate-90' : ''}`} /></DisclosureButton><div inert={!open} className={`grid transition-[grid-template-rows] duration-250 ease-[cubic-bezier(0.32,0.72,0,1)] ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="overflow-hidden"><DisclosurePanel static className="px-3 py-3 text-sm">{children}</DisclosurePanel></div></div></div>}</HeadlessDisclosure>;
 }

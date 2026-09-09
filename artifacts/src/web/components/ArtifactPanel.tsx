@@ -10,7 +10,7 @@ const artifactName = (path: string) => path.split('/').at(-1)?.replace(/\.ui4a\.
 export function ArtifactPanel({ session, artifacts, selected, onSelect, onClose, onSend }: { session: SessionSummary; artifacts: Artifact[]; selected?: string; onSelect: (path: string) => void; onClose: () => void; onSend: (text: string) => void }) {
   const [source, setSource] = useState(false);
   const artifact = artifacts.find(item => item.path === selected);
-  return <section className="theme-panel @container flex h-full min-w-0 flex-col" aria-label="Canvas"><header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+  return <section className="theme-panel @container flex h-full min-w-0 flex-col" aria-label="Canvas"><header className="flex h-12 shrink-0 items-center gap-2 px-3">
     {artifacts.length > 1 ? <div className="min-w-0 flex-1"><Select label="选择 Canvas" value={selected ?? artifacts[0].path} options={artifacts.map(item => ({ value: item.path, label: artifactName(item.path) }))} onChange={onSelect} /></div> : <span className="min-w-0 flex-1 truncate text-sm font-medium">{artifact ? artifactName(artifact.path) : 'Canvas'}</span>}
     {artifact ? <button type="button" onClick={() => setSource(value => !value)} className="interactive shrink-0 rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-3 hover:text-hover-fg">{source ? '预览' : '源码'}</button> : null}
     <button type="button" onClick={onClose} title="关闭 Canvas" aria-label="关闭 Canvas" className="interactive grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-surface-3 hover:text-hover-fg"><Icon name="x" className="size-3.5" /></button>

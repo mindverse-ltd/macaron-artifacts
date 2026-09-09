@@ -128,6 +128,8 @@ test('component borders preserve explicit values and use contrast borders only a
   expect(vitesse['input-border']).toBe('#191919'); expect(vitesse['input-bg']).toBe('#181818'); expect(vitesse['dropdown-border']).toBe('#191919');
   const custom = themePalette({ colors: { 'input.background': '#202020', 'input.border': '#ffffff20', 'dropdown.border': '#334455', contrastBorder: '#ffffff' } }, true);
   expect(custom['input-border']).toBe('#ffffff20'); expect(custom['dropdown-border']).toBe('#334455');
+  const widget = themePalette({ colors: { 'editorWidget.border': '#ffffff20', 'widget.border': '#ff00ff' } }, true);
+  expect(widget['widget-border']).toBe('#ffffff20');
   const contrast = themePalette({ colors: { contrastBorder: '#ffffff', contrastActiveBorder: '#ffff00' } }, true);
   expect(contrast.contrast).toBe('#ffffff'); expect(contrast['contrast-active']).toBe('#ffff00');
   expect(contrast['input-border']).toBe('#ffffff'); expect(contrast['dropdown-border']).toBe('#ffffff');

@@ -149,7 +149,8 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
     sidebar: { background: pick(colors['sideBar.background'], surface2), foreground: pick(colors['sideBar.foreground'], colors.foreground, fg), border: colors['sideBar.border'] },
     titlebar: { background: pick(colors['titleBar.activeBackground'], surface), foreground: pick(colors['titleBar.activeForeground'], colors.foreground, fg), border: colors['titleBar.border'] },
     panel: { background: pick(colors['panel.background'], surface), foreground: pick(colors['panel.foreground'], fg), border: pick(colors['panel.border'], colors['editorGroup.border'], palette.border) },
-    widget: { background: pick(colors['editorWidget.background'], surface2), foreground: pick(colors['editorWidget.foreground'], colors.foreground, fg), border: colors['widget.border'] },
+    // Editor widgets (dialogs, command surfaces) use their dedicated 20% border token; widget.border is an explicit fallback for themes that define it.
+    widget: { background: pick(colors['editorWidget.background'], surface2), foreground: pick(colors['editorWidget.foreground'], colors.foreground, fg), border: pick(colors['editorWidget.border'], colors['widget.border']) },
     menu: { background: pick(colors['menu.background'], colors['dropdown.background'], colors['editorWidget.background'], surface2), foreground: pick(colors['menu.foreground'], colors['dropdown.foreground'], colors.foreground, fg), border: colors['menu.border'] },
   };
   for (const [name, values] of Object.entries(contexts)) {

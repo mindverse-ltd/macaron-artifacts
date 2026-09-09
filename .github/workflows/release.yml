@@ -1,0 +1,74 @@
+# Adapted from MindLab-Research/mindlab-bot/workflows/release-on-tag.yml.
+name: Release to Public
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing source tag to publish (for example, v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-to-public
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'mindverse-ltd/macaron-artifacts'
+    runs-on: self-hosted
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    env:
+      RELEASE_TAG: ${{ inputs.tag_name }}
+    steps:
+      - name: Check release prerequisites
+        run: |
+          # Keep free-form dispatch input out of shell code and the agent's instructions.
+          [[ "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]] || { echo '::error::Enter a version tag such as v1.0.0'; exit 1; }
+          command -v pi
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha'
+
+      - name: Define action directory
+        run: |
+          action_root="$HOME/.mindlab-bot-actions"
+          mkdir -p "$action_root"
+          action_dir="$(mktemp -d "$action_root/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.XXXXXX")"
+          echo "MINDLAB_BOT_ACTION_DIR=$action_dir" >> "$GITHUB_ENV"
+
+      - name: Clone mindlab-bot
+        run: gh repo clone MindLab-Research/mindlab-bot "$MINDLAB_BOT_ACTION_DIR"
+
+      - name: Load public repository credentials
+        env:
+          MINDLAB_BOT_GH_TOKEN: ${{ secrets.MINDLAB_BOT_GH_TOKEN }}
+        run: |
+          token_file="$HOME/.config/mindlab-bot/github-token"
+          if [[ -z "$MINDLAB_BOT_GH_TOKEN" && -r "$token_file" ]]; then
+            MINDLAB_BOT_GH_TOKEN="$(cat "$token_file")"
+          fi
+          [[ -n "$MINDLAB_BOT_GH_TOKEN" ]] || { echo '::error::Configure the mindlab-bot token on the runner or in MINDLAB_BOT_GH_TOKEN'; exit 1; }
+          echo "::add-mask::$MINDLAB_BOT_GH_TOKEN"
+          echo "MINDLAB_BOT_GH_TOKEN=$MINDLAB_BOT_GH_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Check repository mapping
+        working-directory: ${{ env.MINDLAB_BOT_ACTION_DIR }}
+        run: |
+          jq -e '.repositories[] | select(.name == "macaron-artifacts") | .public == "MindLab-Research/macaron-artifacts" and .public_token_env == "MINDLAB_BOT_GH_TOKEN" and .public_ssh_key_env == null' config/repositories.json
+          source_repo="$(jq -r '.repositories[] | select(.name == "macaron-artifacts") | .private' config/repositories.json)"
+          # The bot still lists macaron-claude-code; GitHub resolves its rename to this repository.
+          [[ "$(gh api "repos/$source_repo" --jq '.full_name')" == "$GITHUB_REPOSITORY" ]]
+
+      - name: Publish source tag
+        working-directory: ${{ env.MINDLAB_BOT_ACTION_DIR }}
+        # The runner supplies pi configuration and separate gh access for source reads and mapping writes.
+        run: pi --no-session -p "Use the release skill to publish repository macaron-artifacts at tag $RELEASE_TAG"
+
+      - name: Cleanup
+        if: always() && env.MINDLAB_BOT_ACTION_DIR != ''
+        run: rm -rf -- "$MINDLAB_BOT_ACTION_DIR"

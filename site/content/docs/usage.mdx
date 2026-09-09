@@ -1,9 +1,9 @@
 ---
 title: Usage
-description: Install one macaron-artifacts package and choose Claude Code, Codex, OpenCode, or pi inside the unified WebUI.
+description: Install one macaron-artifacts package and choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw inside the unified WebUI.
 ---
 
-Macaron Artifacts runs Claude Code, Codex, OpenCode, and pi in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
+Macaron Artifacts runs Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
 
 ## Install
 
@@ -37,13 +37,13 @@ ssh -N -L 43860:127.0.0.1:43860 user@host
 Then use the forwarded `http://127.0.0.1:43860` address in the connect form. The website never needs direct network access to the remote machine.
 
 <Callout title="One package, one launcher">
-  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, and pi are selected inside the app. Kimi Code, Hermes, and dsh are not supported in this release.
+  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are selected inside the app. OpenClaw metadata enrichment requires the Macaron metadata-gate plugin and fails closed without it.
 </Callout>
 
 ## Start a conversation
 
 1. Select **New conversation** and enter your workspace directory.
-2. Choose **Claude Code**, **Codex**, **OpenCode**, or **pi**. Leave the model field empty to use that harness's default. OpenCode and pi accept an optional `provider/model` override.
+2. Choose **Claude Code**, **Codex**, **OpenCode**, **pi**, **Hermes**, or **OpenClaw**. Leave the model field empty to use that harness's default. OpenCode and pi accept an optional `provider/model` override.
 3. Send a message. Text, reasoning, and supported tool events stream into the conversation.
 4. Respond to approval requests in the chat when they appear. For pi, the host gates tool execution through its SDK hook.
 

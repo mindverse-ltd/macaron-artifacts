@@ -1,6 +1,6 @@
 # Macaron Artifacts
 
-One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code, Codex, OpenCode, or pi when creating a conversation. All four use the same chat, approvals, Canvas, and Shiki themes.
+One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw when creating a conversation. All six use the same chat, approvals, Canvas, and Shiki themes.
 
 ## Install and run
 
@@ -42,7 +42,7 @@ The previous WebUI, plugin launchers, and replay tools are archived on the [`v0`
 - Inline `ui4a/tsx` fences render as their source arrives. Files at `.artifacts/canvases/<name>.ui4a.tsx` render in Canvas, including relative TSX, TypeScript, and JSON imports.
 - Generated components use a small `$ui4a/ui` library and scoped chat, state, and file capabilities. Shiki themes drive both syntax highlighting and interface colors.
 
-Claude Code, Codex, OpenCode, and pi are supported. Kimi Code, Hermes, and dsh are deferred; see [the application guide](artifacts/README.md#deferred-adapters) for the current integration gaps. Native session-history migration and attachments are not included yet.
+Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are supported. Hermes uses its headless JSON-RPC gateway. OpenClaw uses its pinned v4 Gateway client; its metadata enrichment requires the Macaron metadata-gate plugin and fails closed when that guard is unavailable. Native session-history migration and attachments are not included yet.
 
 ## Configuration
 

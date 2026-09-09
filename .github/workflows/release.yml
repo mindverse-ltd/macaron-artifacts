@@ -1,6 +1,5 @@
-# Adapted from MindLab-Research/mindlab-bot/workflows/release-on-tag.yml.
 name: Release to Public
-run-name: "${{ inputs.dry_run && 'Dry run' || 'Publish' }} ${{ inputs.tag_name }}"
+run-name: "${{ github.event.inputs.dry_run == 'false' && 'Publish' || 'Dry run' }} ${{ inputs.tag_name }}"
 
 on:
   workflow_dispatch:
@@ -10,10 +9,21 @@ on:
         required: true
         type: string
       dry_run:
-        description: Check release access without publishing
+        description: Preview the public snapshot without publishing
         required: true
         type: boolean
         default: true
+      force:
+        description: Allow replacing a conflicting public tag and mapping
+        required: true
+        type: boolean
+        default: false
+      summary:
+        description: Public commit summary under 72 characters (required to publish)
+        type: string
+      details:
+        description: Public-facing changes, without internal names or PR references (required to publish)
+        type: string
 
 permissions:
   contents: read
@@ -25,68 +35,30 @@ concurrency:
 jobs:
   release:
     if: github.repository == 'mindverse-ltd/macaron-artifacts'
-    runs-on: self-hosted
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: bash --noprofile --norc -euo pipefail {0}
-    env:
-      RELEASE_TAG: ${{ inputs.tag_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Check release prerequisites
-        run: |
-          # Keep free-form dispatch input out of shell code and the agent's instructions.
-          [[ "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]] || { echo '::error::Enter a version tag such as v1.0.0'; exit 1; }
-          for tool in git gh jq rsync pi; do command -v "$tool"; done
-          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha'
-
-      - name: Define action directory
-        run: |
-          action_root="$HOME/.mindlab-bot-actions"
-          mkdir -p "$action_root"
-          action_dir="$(mktemp -d "$action_root/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.XXXXXX")"
-          echo "MINDLAB_BOT_ACTION_DIR=$action_dir" >> "$GITHUB_ENV"
-
-      - name: Clone mindlab-bot
-        run: gh repo clone MindLab-Research/mindlab-bot "$MINDLAB_BOT_ACTION_DIR"
-
-      - name: Load public repository credentials
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test release script
+        run: node --test .github/scripts/public-release.test.mjs
+      - name: Build public snapshot
         env:
+          RELEASE_TAG: ${{ inputs.tag_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE_RELEASE: ${{ inputs.force }}
+          PUBLIC_RELEASE_SUMMARY: ${{ inputs.summary }}
+          PUBLIC_RELEASE_DETAILS: ${{ inputs.details }}
           MINDLAB_BOT_GH_TOKEN: ${{ secrets.MINDLAB_BOT_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          token_file="$HOME/.config/mindlab-bot/github-token"
-          if [[ -z "$MINDLAB_BOT_GH_TOKEN" && -r "$token_file" ]]; then
-            MINDLAB_BOT_GH_TOKEN="$(cat "$token_file")"
-          fi
-          [[ -n "$MINDLAB_BOT_GH_TOKEN" ]] || { echo '::error::Configure the mindlab-bot token on the runner or in MINDLAB_BOT_GH_TOKEN'; exit 1; }
-          echo "::add-mask::$MINDLAB_BOT_GH_TOKEN"
-          echo "MINDLAB_BOT_GH_TOKEN=$MINDLAB_BOT_GH_TOKEN" >> "$GITHUB_ENV"
-
-      - name: Check repository mapping
-        working-directory: ${{ env.MINDLAB_BOT_ACTION_DIR }}
-        run: |
-          jq -e '.repositories[] | select(.name == "macaron-artifacts") | .public == "MindLab-Research/macaron-artifacts" and .public_token_env == "MINDLAB_BOT_GH_TOKEN" and .public_ssh_key_env == null' config/repositories.json
-          source_repo="$(jq -r '.repositories[] | select(.name == "macaron-artifacts") | .private' config/repositories.json)"
-          # The bot still lists macaron-claude-code; GitHub resolves its rename to this repository.
-          [[ "$(gh api "repos/$source_repo" --jq '.full_name')" == "$GITHUB_REPOSITORY" ]]
-
-      - name: Check release access without publishing
-        if: inputs.dry_run
-        run: |
-          # API permission checks cannot prove branch-rule acceptance or model-provider authentication.
-          [[ "$(gh api repos/MindLab-Research/mindlab-bot --jq '.permissions.push')" == 'true' ]] || { echo '::error::Runner credentials cannot write the commit mapping'; exit 1; }
-          bot_login="$(GH_TOKEN="$MINDLAB_BOT_GH_TOKEN" gh api user --jq '.login')"
-          [[ "$bot_login" == 'mindlab-bot' ]] || { echo '::error::Public repository token must belong to mindlab-bot'; exit 1; }
-          [[ "$(GH_TOKEN="$MINDLAB_BOT_GH_TOKEN" gh api repos/MindLab-Research/macaron-artifacts --jq '.permissions.push')" == 'true' ]] || { echo '::error::Bot token cannot write the public repository'; exit 1; }
-          printf '%s\n' 'Dry run passed: tools, source tag, repository mapping, bot identity, and API-reported write permissions checked.' 'No release agent was invoked, and no tags, public commits, or mappings were written. Model-provider authentication and actual push acceptance were not tested.' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Publish source tag
-        # Require an explicit false input: missing input must never fall through to publishing.
-        if: github.event.inputs.dry_run == 'false'
-        working-directory: ${{ env.MINDLAB_BOT_ACTION_DIR }}
-        # The runner supplies pi configuration and separate gh access for source reads and mapping writes.
-        run: pi --no-session -p "Use the release skill to publish repository macaron-artifacts at tag $RELEASE_TAG"
-
-      - name: Cleanup
-        if: always() && env.MINDLAB_BOT_ACTION_DIR != ''
-        run: rm -rf -- "$MINDLAB_BOT_ACTION_DIR"
+          args=(--tag "$RELEASE_TAG")
+          # Missing or invalid inputs stay dry; only an explicit false enables remote writes.
+          [[ "$DRY_RUN" == 'false' ]] && args+=(--publish)
+          [[ "$FORCE_RELEASE" == 'true' ]] && args+=(--force)
+          node .github/scripts/public-release.mjs "${args[@]}"

@@ -427,7 +427,7 @@ test('built /api/search: real Orama client honours the contract', async (t) => {
   try {
     const client = oramaStaticClient({ from: 'http://test.local/api/search' });
 
-    for (const id of ['MACARON_CODEX_TRANSPORT', 'MACARON_AUTH_TOKEN', 'permission_request']) {
+    for (const id of ['MACARON_PORT', 'MACARON_DATA_DIR', 'OPENCLAW_GATEWAY_URL']) {
       const hits = await client.search(id);
       assert.ok(Array.isArray(hits) && hits.length > 0, `built index: "${id}" should hit`);
       const corrupted = await client.search(id.replace(/_/g, ''));

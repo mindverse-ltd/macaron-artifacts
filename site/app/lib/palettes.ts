@@ -1,10 +1,15 @@
 import type { ThemeRegistration } from '@shikijs/types';
 
-export const palettes = [{ id: 'neutral', label: 'Neutral' }, { id: 'vitesse-light', label: 'Vitesse Light' }, { id: 'vitesse-dark', label: 'Vitesse Dark' }, { id: 'github-light', label: 'GitHub Light' }, { id: 'github-dark', label: 'GitHub Dark' }, { id: 'nord', label: 'Nord' }] as const;
+const pairedPalettes = [{ id: 'vitesse', label: 'Vitesse', light: 'vitesse-light', dark: 'vitesse-dark' }, { id: 'github', label: 'GitHub', light: 'github-light', dark: 'github-dark' }] as const;
+export const palettes = [{ id: 'neutral', label: 'Neutral' }, ...pairedPalettes] as const;
 export type PaletteId = typeof palettes[number]['id'];
+export type PaletteVariantId = Exclude<keyof typeof loaders, never>;
+const legacyPaletteFamilies = { 'vitesse-light': 'vitesse', 'vitesse-dark': 'vitesse', 'github-light': 'github', 'github-dark': 'github' } as const;
+export function paletteFamily(id: string | null | undefined): PaletteId | undefined { if (!id) return; if (palettes.some(palette => palette.id === id)) return id as PaletteId; return legacyPaletteFamilies[id as keyof typeof legacyPaletteFamilies]; }
+export function paletteVariant(id: Exclude<PaletteId, 'neutral'>, mode: 'light' | 'dark'): PaletteVariantId { return pairedPalettes.find(item => item.id === id)![mode]; }
 const loaders = { 'vitesse-light': () => import('@shikijs/themes/vitesse-light'), 'vitesse-dark': () => import('@shikijs/themes/vitesse-dark'), 'github-light': () => import('@shikijs/themes/github-light'), 'github-dark': () => import('@shikijs/themes/github-dark'), nord: () => import('@shikijs/themes/nord') };
 export const syntaxThemes = { light: 'github-light', dark: 'github-dark', 'vitesse-light': 'vitesse-light', 'vitesse-dark': 'vitesse-dark', 'github-light': 'github-light', 'github-dark': 'github-dark', nord: 'nord' } as const;
-export const loadPalette = async (id: Exclude<PaletteId, 'neutral'>) => (await loaders[id]()).default;
+export const loadPalette = async (id: PaletteVariantId) => (await loaders[id]()).default;
 
 function luminance(hex: string) {
   const value = hex.replace('#', '');

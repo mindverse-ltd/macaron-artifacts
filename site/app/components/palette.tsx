@@ -2,31 +2,31 @@ import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { useTheme } from 'fumadocs-ui/provider/base';
 import { Popover, PopoverContent, PopoverTrigger } from 'fumadocs-ui/components/ui/popover';
 import { Check, Moon, Palette, Sun } from 'lucide-react';
-import { loadPalette, palettes, paletteVariables, type PaletteId } from '@/lib/palettes';
+import { loadPalette, palettes, paletteFamily, paletteVariant, paletteVariables, type PaletteId } from '@/lib/palettes';
 
 const KEY = 'macaron-artifacts:docs-palette:v1';
 const PaletteContext = createContext<{ selected: PaletteId; select: (id: PaletteId) => void; error?: string } | null>(null);
 export function PaletteProvider({ children }: { children: ReactNode }) {
   const [selected, select] = useState<PaletteId>('neutral');
   const [error, setError] = useState<string>();
-  const { setTheme } = useTheme();
-  useEffect(() => { try { const saved = localStorage.getItem(KEY); if (palettes.some(palette => palette.id === saved)) select(saved as PaletteId); } catch { /* Optional browser preferences. */ } }, []);
+  const { resolvedTheme } = useTheme();
+  useEffect(() => { try { const family = paletteFamily(localStorage.getItem(KEY)); if (family) select(family); } catch { /* Optional browser preferences. */ } }, []);
   useEffect(() => {
     let current = true;
     const root = document.documentElement;
     const clear = () => { for (const name of [...root.style]) if (name.startsWith('--color-fd-')) root.style.removeProperty(name); root.style.removeProperty('--genui'); delete root.dataset.palette; };
-    if (selected === 'neutral') { clear(); setError(undefined); }
-    else void loadPalette(selected).then(theme => {
+    const variant = selected === 'neutral' ? undefined : paletteVariant(selected, resolvedTheme === 'dark' ? 'dark' : 'light');
+    if (!variant) { clear(); setError(undefined); }
+    else void loadPalette(variant).then(theme => {
       if (!current) return;
       clear();
       for (const [name, value] of Object.entries(paletteVariables(theme))) root.style.setProperty(`--color-fd-${name}`, value);
       root.style.setProperty('--genui', theme.colors?.['button.background'] ?? theme.fg ?? '#c96442');
-      root.dataset.palette = selected;
-      setTheme(theme.type === 'dark' ? 'dark' : 'light');
+      root.dataset.palette = variant;
       setError(undefined);
     }, reason => { if (current) setError(reason instanceof Error ? reason.message : 'Theme could not be loaded'); });
     return () => { current = false; };
-  }, [selected, setTheme]);
+  }, [selected, resolvedTheme]);
   const choose = (id: PaletteId) => { select(id); try { localStorage.setItem(KEY, id); } catch { /* Optional browser preferences. */ } };
   return <PaletteContext value={{ selected, select: choose, error }}>{children}</PaletteContext>;
 }
@@ -37,8 +37,7 @@ export function PaletteSwitch({ className = '' }: { className?: string }) {
   if (!palette) return null;
   const toggle = () => {
     const dark = resolvedTheme === 'dark';
-    if (palette.selected === 'neutral') setTheme(dark ? 'light' : 'dark');
-    else palette.select(palette.selected.startsWith('github') ? dark ? 'github-light' : 'github-dark' : dark ? 'vitesse-light' : 'vitesse-dark');
+    setTheme(dark ? 'light' : 'dark');
   };
   return <div className={`site:inline-flex site:shrink-0 site:items-center site:gap-1 ${className}`}>
     {/* Keep both icons and labels in the prerendered HTML; next-themes sets the root class before hydration. */}

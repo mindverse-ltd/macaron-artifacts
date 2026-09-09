@@ -22,6 +22,7 @@ jobs:
       # Keep bun even though deps install with pnpm: the publish step's `npm pack`
       # fires the root `prepack`, which runs `bun build` to bundle the server.
       - uses: oven-sh/setup-bun@v2
+      - run: node --test .github/scripts/public-release.test.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test

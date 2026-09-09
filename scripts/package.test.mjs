@@ -83,7 +83,7 @@ async function files(directory, prefix = '') {
   return paths;
 }
 
-test('the single published package installs in isolation and serves four harnesses and all client assets', { timeout: 300_000 }, async t => {
+test('the single published package installs in isolation and serves six harnesses and all client assets', { timeout: 300_000 }, async t => {
   const temporary = await mkdtemp(join(tmpdir(), 'macaron-package-'));
   let app;
   t.after(async () => { try { await app?.stop(); } finally { await rm(temporary, { recursive: true, force: true }); } });
@@ -131,12 +131,12 @@ test('the single published package installs in isolation and serves four harness
   // SDK. Creating app sessions below does not start a native turn or call a provider.
   const cli = join(temporary, 'native-version-stub');
   await writeFile(cli, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(91);\nconsole.log('package-smoke-native 1.0.0');\n`, { mode: 0o755 });
-  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_OPENCODE_PATH = cli;
+  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_OPENCODE_PATH = cli; env.MACARON_HERMES_PATH = cli; env.MACARON_OPENCLAW_PATH = cli;
   const guidance = await readFile(join(installed, 'artifacts/skills/ui4a/SKILL.md'), 'utf8');
   assert.match(guidance, /ui4a\/tsx/); assert.match(guidance, /\$ui4a\/ui/); assert.match(guidance, /\.artifacts\//);
   app = await start(bin, consumer, env, join(temporary, 'sessions'));
   const harnesses = await (await fetch(`${app.base}/api/harnesses`)).json();
-  assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'opencode', 'pi']);
+  assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'hermes', 'openclaw', 'opencode', 'pi']);
   for (const harness of harnesses) {
     assert.equal(harness.available, true, `${harness.id} must be available from its CLI stub or bundled SDK`);
     assert.match(harness.detail, harness.id === 'pi' ? /^pi SDK \S+/ : /package-smoke-native/);
@@ -157,5 +157,5 @@ test('the single published package installs in isolation and serves four harness
     const actual = createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
     assert.equal(actual, expected, `${path} must be served intact from the installed package`);
   }));
-  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, four harnesses, OpenCode and pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files`);
+  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, six harnesses, OpenCode/pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files`);
 });

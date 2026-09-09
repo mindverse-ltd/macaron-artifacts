@@ -13,6 +13,7 @@ import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
 import { ProfileStore, validateProfileInput } from './profiles.js';
 import { safeError } from './harnesses/common.js';
+import { closeHermesConnections } from './harnesses/hermes.js';
 import { PairingManager, bearerToken, isLoopbackHost, originHost, originProtocol, type PairingGrant, type PairingOptions } from './pairing.js';
 
 export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions }) {
@@ -224,7 +225,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       res.writeHead(200, { 'content-type': mime[extname(file)] ?? 'application/octet-stream' }); res.end(await readFile(file));
     } catch (error) { if (!res.headersSent) json(res, { error: safeError(error) }, (error as { status?: number }).status ?? (error as { statusCode?: number }).statusCode ?? ((error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400)); else res.end(); }
   });
-  return { server, store, profiles, active, pairing, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { server, store, profiles, active, pairing, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); await closeHermesConnections(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -1,10 +1,10 @@
 # Macaron Artifacts
 
-A single React WebUI for native coding harnesses. Claude Code, Codex, OpenCode, and pi share the same conversation, approvals, UI4A rendering, session storage, and themes. The default layout and palette come from `ui4a-playground`.
+A single React WebUI for native coding harnesses. Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw share the same conversation, approvals, UI4A rendering, session storage, and themes. The default layout and palette come from `ui4a-playground`.
 
 ## Install and run
 
-The only published package and CLI is `macaron-artifacts`. Choose Claude Code, Codex, OpenCode, or pi inside the application; installing another WebUI package is not required to switch harnesses. Node.js 22.19 or newer is required.
+The only published package and CLI is `macaron-artifacts`. Choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw inside the application; installing another WebUI package is not required to switch harnesses. Node.js 22.19 or newer is required.
 
 ```sh
 bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
@@ -57,12 +57,14 @@ Open **Profiles** in the sidebar to create or edit a configuration. Select it in
 | Codex | Native Profile files, main/subagent models and effort, provider/Base URL, API key; searchable native features with inherit/on/off states and managed restrictions |
 | OpenCode | Main model, provider/Base URL, API key, model variant, main agent and per-subagent model overrides |
 | pi | Model, provider/Base URL, API key and the model's supported thinking levels; pi has no built-in subagents |
+| Hermes | Native model/reasoning overrides, optional Gateway URL/Profile, Gateway token; provider credentials remain in Hermes |
+| OpenClaw | Native model/thinking overrides, optional Gateway URL/Profile/agent, Gateway token; provider credentials remain in OpenClaw |
 
 Edits affect the next turn of every conversation using that Profile. The current turn and its title/suggestion fork retain one captured configuration. Switching a conversation's Profile is available when its current turn finishes and keeps native history. A Profile in use cannot be deleted until its conversations select another configuration.
 
 Codex uses the current native `<name>.config.toml` format under `CODEX_HOME` (default `~/.codex`), shared with the CLI. Editing preserves unknown fields and comments; stale edits are rejected. The app-server does not accept `--profile`, so the adapter resolves the file and trusted project layers into per-thread overrides. It preserves Codex's configuration precedence and login/session directory. Legacy `[profiles.name]` tables are not used.
 
-Other harnesses receive per-process or per-session overrides without rewriting their native configuration. Credentials for all four live only in `profiles/profiles.json` under `MACARON_DATA_DIR`, with owner-only directory/file permissions (`0700`/`0600`); this is a local plaintext secret store, not an OS keychain. The API returns only whether a private credential is configured. Leaving a saved credential blank keeps it; **Remove credential** clears it when saved. Inherit authentication uses the harness's existing local login or environment.
+Other harnesses receive per-process or per-session overrides without rewriting their native configuration. Credentials for all six live only in `profiles/profiles.json` under `MACARON_DATA_DIR`, with owner-only directory/file permissions (`0700`/`0600`); this is a local plaintext secret store, not an OS keychain. The API returns only whether a private credential is configured. Leaving a saved credential blank keeps it; **Remove credential** clears it when saved. Inherit authentication uses the harness's existing local login or environment.
 
 Model and feature choices come from the native SDK/CLI. Custom model IDs remain editable when discovery is unavailable. pi custom models still need an appropriate native `models.json` definition; the app does not invent provider capabilities. No credentials are stored in browser preferences, conversation files or stream journals.
 
@@ -70,13 +72,12 @@ Model and feature choices come from the native SDK/CLI. Custom model IDs remain 
 
 AI SDK 7's experimental [HarnessAgent](https://ai-sdk.dev/docs/ai-sdk-harnesses/overview) and harness packages were assessed; the official `harness-pi` package supports a host process, so sandboxing is not a universal constraint. Direct native integration keeps control over session persistence, metadata branches, local configuration, and approval callbacks. We use the Claude SDK, [Codex app-server](https://developers.openai.com/codex/app-server), OpenCode SDK connected to its local CLI server, and pi SDK, normalizing their events into the existing AI SDK UI message stream. The client keeps its shared `@ai-sdk/react` Chat and `useChat` APIs.
 
-| Native capability | Claude Code | Codex app-server | OpenCode | pi |
-| --- | --- | --- | --- | --- |
-| Text and reasoning deltas | Yes | Yes | Yes | Yes |
-| Tool input | Raw argument deltas | Completed input | Input snapshots, not argument deltas | Raw argument deltas |
-| Command output | No live output exposed by the Agent SDK | Raw stdout/stderr deltas | Tool output snapshots | Cumulative native output updates |
-| Approval | Native callback | Native request | Native permission request | Host gate using the SDK tool execution hook |
-| Disposable metadata fork | `resume` + `forkSession`, no persistence | Ephemeral `thread/fork` | Native session fork, deleted after use | Native branch held in memory |
+| Native capability | Claude Code | Codex | OpenCode | pi | Hermes | OpenClaw |
+| --- | --- | --- | --- | --- | --- | --- |
+| Text/reasoning deltas | Yes | Yes | Yes | Yes | Yes | Yes |
+| Tool input | Raw deltas | Completed input | Snapshots | Raw deltas | Native tool events | Gateway events |
+| Approval | Native callback | Native request | Native permission | SDK hook | Gateway approval | Gateway approval |
+| Metadata isolation | Native fork | Ephemeral fork | Deleted fork | In-memory branch | `prompt.btw` | Guarded native fork |
 
 Metadata retains the same instructions, model and tool catalog, appending only its final metadata request. OpenCode's fork blocks execution through a tool hook; pi uses an in-memory native branch that retains session affinity and blocks tools at execution. It runs outside the main turn and is cancelled when a new turn arrives. This is prefix-friendly; cache hits still depend on the upstream provider. Usage parts preserve the native cached-input count. Metadata failure leaves the main response intact.
 
@@ -114,4 +115,4 @@ The root package publishes only the unified application. The old `mcc`, `mcx`, a
 
 ## Deferred adapters
 
-Kimi Code still needs instruction-plugin integration, an execution gate covering every tool for metadata branches, and a compatible mapping for native question options. Hermes ACP forks do not preserve the selected provider and cached system prompt, and ACP exposes no session deletion for disposable metadata forks. Neither harness is selectable in this release. A dsh adapter is also deferred.
+OpenClaw metadata enrichment requires the bundled metadata-gate plugin to be installed and enabled in the Gateway; the adapter refuses to run an unguarded fork. Kimi Code and dsh remain deferred.

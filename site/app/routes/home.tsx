@@ -24,7 +24,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 // The package name and CLI stay the same whichever harness a conversation uses.
-const PKG = `https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@${__COMMIT_SHA__}`;
+const PKG = `https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@${__COMMIT_SHA__}`;
 
 export default function Home() {
   return (

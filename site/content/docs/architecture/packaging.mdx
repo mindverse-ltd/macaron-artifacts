@@ -24,13 +24,13 @@ pnpm exec pkg-pr-new publish --no-compact --bin .
 The preview URL uses the same package name for every harness:
 
 ```sh
-bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>
+bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
 The docs replace `<sha>` with the current build's short commit SHA using `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, or the local Git revision. Use a commit with a successful package preview build.
 
 <Callout title="Distribution boundary">
-  The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Their source and plugin launchers are archived on the [`v0` branch](https://github.com/mindverse-ltd/macaron-artifacts/tree/v0). Start with [Usage](/docs/usage) for the current installation flow.
+  The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Their source and plugin launchers are archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Start with [Usage](/docs/usage) for the current installation flow.
 </Callout>
 
 ## Application modules

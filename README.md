@@ -9,17 +9,17 @@ Requires Node.js 22.19 or newer. Claude Code, Codex, and OpenCode use their inst
 Run a commit's preview package directly:
 
 ```sh
-bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>
+bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
 Or install that same package globally:
 
 ```sh
-npm install -g https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>
+npm install -g https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 macaron-artifacts
 ```
 
-Replace `<sha>` with the commit from a successful [package preview build](https://github.com/mindverse-ltd/macaron-artifacts/actions/workflows/pkg-pr-new.yml). Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default; for OpenCode and pi, enter an optional override as `provider/model`.
+Replace `<sha>` with the commit from a successful [package preview build](https://github.com/MindLab-Research/macaron-artifacts/actions/workflows/pkg-pr-new.yml). Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default; for OpenCode and pi, enter an optional override as `provider/model`.
 
 To connect the hosted WebUI, start the server with `macaron-artifacts --pair`. Open [artifacts.macaron.im/connect](https://artifacts.macaron.im/connect), enter the address and the one-time code printed in the terminal, and the browser will open the local WebUI. Pairing codes expire after ten minutes and are consumed once. For a server reached through SSH, forward its loopback port first: `ssh -N -L 43860:127.0.0.1:43860 user@host`, then use `http://127.0.0.1:43860` in the connect form.
 
@@ -30,7 +30,7 @@ macaron-artifacts --help
 
 There is one published package and one launcher. The old `mcc`, `mcx`, and `mkx` distributions are discontinued; harness selection belongs inside the unified application.
 
-The previous WebUI, plugin launchers, and replay tools are archived on the [`v0` branch](https://github.com/mindverse-ltd/macaron-artifacts/tree/v0).
+The previous WebUI, plugin launchers, and replay tools are archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0).
 
 ## Features
 

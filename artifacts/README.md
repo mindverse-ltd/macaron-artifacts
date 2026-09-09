@@ -7,7 +7,7 @@ A single React WebUI for native coding harnesses. Claude Code, Codex, OpenCode, 
 The only published package and CLI is `macaron-artifacts`. Choose Claude Code, Codex, OpenCode, or pi inside the application; installing another WebUI package is not required to switch harnesses. Node.js 22.19 or newer is required.
 
 ```sh
-bunx macaron-artifacts@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha>
+bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
 Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port` and `--data-dir`.
@@ -101,7 +101,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm test:package
-MACARON_PACKAGE_SOURCE=https://pkg.pr.new/mindverse-ltd/macaron-artifacts/macaron-artifacts@<sha> pnpm test:package
+MACARON_PACKAGE_SOURCE=https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha> pnpm test:package
 ```
 
 Tests exercise harness event conversion, real JSONL RPC framing, approval/cancellation, >4,000-event replay, crash recovery, metadata isolation, scoped capabilities and incremental rendering. Browser acceptance uses the real built application for inline and file previews, state retention, relative imports, theme switching and narrow layouts.

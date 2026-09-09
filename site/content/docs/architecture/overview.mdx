@@ -4,7 +4,7 @@ description: A tour of how Macaron Artifacts fits together — one server binary
 ---
 
 <Callout type="warn" title="Historical v0 implementation">
-  This page describes the previous application, archived on the [`v0` branch](https://github.com/mindverse-ltd/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
 </Callout>
 
 Macaron Artifacts is a local WebUI for driving agent sessions from the browser. Under the hood it is a small monorepo: a **Fastify server** that fronts the Claude Agent SDK, Codex (via the `codex app-server` transport by default), and the Kimi Code CLI, a **React SPA** that renders sessions and streams turns, and a **shared** package that pins the wire contract between them. This section walks the whole system top to bottom.

@@ -1,6 +1,6 @@
 # Macaron Artifacts
 
-> **Historical v0 guide.** These pages describe the retired WebUI and plugin launchers, archived on the [`v0` branch](https://github.com/mindverse-ltd/macaron-artifacts/tree/v0). For the current unified application, follow the [README](../README.md).
+> **Historical v0 guide.** These pages describe the retired WebUI and plugin launchers, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). For the current unified application, follow the [README](../README.md).
 
 A local WebUI that ships as a plugin for Claude Code, Codex, and Kimi Code — install any of them, and they run side-by-side:
 
@@ -44,17 +44,17 @@ Three independent packages, each shipping its own prebuilt server + web assets:
 Install none of them; run whichever you want directly:
 
 ```bash
-bunx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
-bunx mcx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
-bunx mkx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+bunx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+bunx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
 ```
 
 `npx` works the same — all three packages have `bin` name == package name:
 
 ```bash
-npx mcc@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcc@<sha>    # Claude → http://localhost:7878
-npx mcx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mcx@<sha>    # Codex  → http://localhost:7979
-npx mkx@https://pkg.pr.new/mindverse-ltd/macaron-artifacts/mkx@<sha>    # Kimi   → http://localhost:7980
+npx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>    # Claude → http://localhost:7878
+npx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>    # Codex  → http://localhost:7979
+npx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>    # Kimi   → http://localhost:7980
 ```
 
 Replace `<sha>` with any commit on `main`. Each launcher just boots the same server with `MACARON_ENGINE` set (`codex` / `kimi`; unset = Claude) and its own default port. All bins accept `--host` / `--port`; run with `--help` for the full flag list.

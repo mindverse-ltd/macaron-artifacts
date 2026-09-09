@@ -27,6 +27,12 @@ function mix(color: string, target: string, amount: number): string {
   return hex(start.map((channel, index) => channel + (end[index] - channel) * amount));
 }
 
+/** Resting controls follow VS Code's quiet 15% secondary border; focus and HC keep the native token. */
+function restingBorder(value: unknown, background: string, amount = .18): string {
+  const color = parseColor(value);
+  return color?.alpha === 0 ? 'transparent' : color ? mix(background, composite(value, background), amount) : 'transparent';
+}
+
 function luminance(color: string): number {
   const linear = parseColor(color)!.rgb.map(channel => channel / 255).map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
   return linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722;
@@ -101,11 +107,13 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
   const inputColors = (background: string, ink: string) => {
     const input = pair(pick(colors['input.background'], mix(background, ink, .06)), colors['input.foreground'], background, ink);
     const dropdown = pair(pick(colors['dropdown.background'], input.bg), colors['dropdown.foreground'], background, input.fg);
+    const explicitDropdownBorder = pick(colors['dropdown.border']);
+    const dropdownBorder = decoration(explicitDropdownBorder, colors.contrastBorder, luminance(dropdown.bg) > .5 ? mix(dropdown.bg, dropdown.fg, .15) : 'transparent');
     return {
       'input-bg': input.bg, 'input-fg': input.fg, 'input-border': decoration(colors['input.border'], colors.contrastBorder),
       'input-placeholder': readable(composite(pick(colors['input.placeholderForeground'], mix(input.bg, input.fg, .66)), input.bg), [input.bg]), 'input-focus': focus(input.bg, input.fg),
       'dropdown-bg': dropdown.bg, 'dropdown-fg': dropdown.fg,
-      'dropdown-border': decoration(colors['dropdown.border'], colors.contrastBorder, luminance(dropdown.bg) > .5 ? mix(dropdown.bg, dropdown.fg, .15) : 'transparent'), 'dropdown-focus': focus(dropdown.bg, dropdown.fg),
+      'dropdown-border': dropdownBorder, 'dropdown-border-rest': explicitDropdownBorder ? restingBorder(explicitDropdownBorder, dropdown.bg) : dropdownBorder, 'dropdown-focus': focus(dropdown.bg, dropdown.fg),
     };
   };
   const hover = pair(pick(colors['list.hoverBackground'], mix(surface, fg, .06)), colors['list.hoverForeground']);
@@ -116,6 +124,7 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
   accent = readable(accent, [accentFg]);
   const accentHover = buttonHover(accent, accentFg, composite(pick(colors['button.hoverBackground'], mix(accent, accentFg, .08)), surface));
   const secondary = pair(pick(colors['button.secondaryBackground'], mix(surface, fg, .09)), colors['button.secondaryForeground']);
+  const explicitSecondaryBorder = pick(colors['button.secondaryBorder'], colors['button.border']);
   const secondaryHover = readable(composite(pick(colors['button.secondaryHoverBackground'], mix(secondary.bg, secondary.fg, .08)), surface), [secondary.fg]);
   // Shiki's syntax colors target editor.background. Markdown's code container can have its own fill without repainting that syntax plane.
   const code = pair(surface, fg), codeBlock = pair(pick(colors['textCodeBlock.background'], surface2), fg);
@@ -132,7 +141,7 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
     'control-border': decoration(colors['radio.inactiveBorder'], colors['button.secondaryBorder'], colors.contrastBorder, mix(surface, fg, .15)),
     ...inputColors(surface, fg),
     accent, 'accent-fg': accentFg, 'accent-hover': accentHover,
-    secondary: secondary.bg, 'secondary-fg': secondary.fg, 'secondary-hover': secondaryHover, 'secondary-border': decoration(colors['button.secondaryBorder'], colors['button.border'], colors.contrastBorder),
+    secondary: secondary.bg, 'secondary-fg': secondary.fg, 'secondary-hover': secondaryHover, 'secondary-border': decoration(explicitSecondaryBorder, colors.contrastBorder), 'secondary-border-rest': explicitSecondaryBorder ? restingBorder(explicitSecondaryBorder, secondary.bg) : decoration(colors.contrastBorder),
     code: code.bg, 'code-fg': code.fg, 'code-muted': readable(composite(muted, code.bg), [code.bg]), 'code-focus': focus(code.bg, code.fg), 'code-block': codeBlock.bg, 'code-block-fg': codeBlock.fg,
     'inline-code': inlineCode.bg, 'inline-code-fg': inlineCode.fg, bubble: bubble.bg, 'bubble-fg': bubble.fg,
     'bubble-muted': readable(composite(muted, bubble.bg), [bubble.bg]), 'bubble-link': readable(composite(pick(colors['textLink.foreground'], accent), bubble.bg), [bubble.bg]), 'bubble-focus': focus(bubble.bg, bubble.fg),

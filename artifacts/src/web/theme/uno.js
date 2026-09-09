@@ -1,7 +1,7 @@
 import { presetWind4 } from '@unocss/preset-wind4';
 import { presetAnimations } from 'unocss-preset-animations';
 
-const roleColors = ['hover-fg', 'contrast', 'contrast-active', 'code', 'code-fg', 'code-block', 'code-block-fg', 'code-muted', 'code-focus', 'inline-code', 'inline-code-fg', 'bubble', 'bubble-fg', 'bubble-muted', 'bubble-link', 'bubble-focus', 'status', 'status-fg', 'secondary', 'secondary-fg', 'secondary-hover', 'secondary-border', 'tab-active', 'tab-active-fg', 'sidebar-selection', 'sidebar-selection-fg', 'panel-border', 'input-focus', 'dropdown-focus'];
+const roleColors = ['hover-fg', 'contrast', 'contrast-active', 'code', 'code-fg', 'code-block', 'code-block-fg', 'code-muted', 'code-focus', 'inline-code', 'inline-code-fg', 'bubble', 'bubble-fg', 'bubble-muted', 'bubble-link', 'bubble-focus', 'status', 'status-fg', 'secondary', 'secondary-fg', 'secondary-hover', 'secondary-border', 'secondary-border-rest', 'tab-active', 'tab-active-fg', 'sidebar-selection', 'sidebar-selection-fg', 'panel-border', 'input-focus', 'dropdown-border-rest', 'dropdown-focus'];
 const contexts = ['sidebar', 'titlebar', 'panel', 'widget', 'menu'];
 const controls = ['input-bg', 'input-fg', 'input-border', 'input-placeholder', 'input-focus', 'dropdown-bg', 'dropdown-fg', 'dropdown-border', 'dropdown-focus'];
 // Portal menus establish their own color context; local inputs composite against the surface that actually owns them.

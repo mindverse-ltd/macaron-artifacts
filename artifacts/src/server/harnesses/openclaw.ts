@@ -37,7 +37,7 @@ async function assertMetadataGate(client: GatewayClient): Promise<void> {
   const inspected = record(await client.request('plugins.inspect', { pluginId: METADATA_PLUGIN_ID }));
   const plugin = record(inspected.plugin), declared = record(inspected.declared);
   const contracts = Array.isArray(declared.contracts) ? declared.contracts.map(String) : [];
-  if (plugin.enabled !== true || !contracts.some(value => value === `trustedToolPolicies:${METADATA_PLUGIN_ID}` || value === `trustedToolPolicies:macaron-metadata-gate`)) throw new Error('OpenClaw metadata gate plugin is not enabled on this Gateway; refusing an unguarded metadata fork');
+  if (plugin.enabled !== true || !contracts.some(value => value.includes('macaron-metadata-gate'))) throw new Error('OpenClaw metadata gate plugin is not enabled on this Gateway; refusing an unguarded metadata fork');
 }
 
 function emitSnapshot(data: Record<string, unknown>, state: StreamState, queue: EventQueue<ChatChunk>): void {
@@ -93,7 +93,7 @@ export const openClawAdapter: HarnessAdapter = {
       client = await createClient(turn, queue, sessionRef, state, signal, turn.approve);
       if (turn.enrichment) { if (!parent?.key) throw new Error('OpenClaw metadata generation requires a completed native session'); await assertMetadataGate(client); }
       const agentId = selectedAgent(turn);
-      const created = turn.enrichment ? await client.request<Record<string, unknown>>('sessions.create', { key: `${METADATA_SESSION_PREFIX}${randomUUID()}`, parentSessionKey: parent?.key, fork: true, forkFrom: 'last-completed', succeedsParent: false, ...(agentId ? { agentId } : {}), cwd: turn.cwd, model: turn.model || turn.profile?.config.model, thinkingLevel: turn.profile?.config.effort }) : parent ? { key: parent.key, sessionId: parent.id } : await client.request<Record<string, unknown>>('sessions.create', { ...(agentId ? { agentId } : {}), cwd: turn.cwd, model: turn.model || turn.profile?.config.model, thinkingLevel: turn.profile?.config.effort });
+      const created = turn.enrichment ? await client.request<Record<string, unknown>>('sessions.create', { key: `${METADATA_SESSION_PREFIX}${randomUUID()}`, parentSessionKey: parent?.key, fork: true, forkFrom: 'last-completed', emitCommandHooks: true, succeedsParent: false, ...(agentId ? { agentId } : {}), cwd: turn.cwd, model: turn.model || turn.profile?.config.model, thinkingLevel: turn.profile?.config.effort }) : parent ? { key: parent.key, sessionId: parent.id } : await client.request<Record<string, unknown>>('sessions.create', { ...(agentId ? { agentId } : {}), cwd: turn.cwd, model: turn.model || turn.profile?.config.model, thinkingLevel: turn.profile?.config.effort });
       active = { key: string(created.key || created.sessionKey || created.id || created.sessionId), id: string(created.sessionId || created.id) || undefined, cwd: turn.cwd }; if (!active.key) throw new Error('OpenClaw did not return a session key'); sessionRef.key = active.key;
       if (!turn.enrichment) turn.onNativeSession(encode(active));
       const producer = client.request('agent', { sessionKey: active.key, sessionId: active.id, message: turn.prompt, extraSystemPrompt: turn.instructions, idempotencyKey: runId }).catch(error => queue.fail(error));

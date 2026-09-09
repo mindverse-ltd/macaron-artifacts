@@ -108,7 +108,7 @@ function Toggle({ side, label, onClick, fade }: { side: "top" | "bottom"; label:
     <button
       onClick={onClick}
       // `inset-x-0` + `mx-auto w-fit` 才是绝对定位下的水平居中；只给 left-1/2 会连按钮自身宽度一起偏
-      className={`interactive absolute inset-x-0 z-10 mx-auto w-fit rounded-full bg-surface-3/100 px-2 py-0.5 text-[11px] text-muted shadow-sm hover:text-fg ${side === "top" ? "top-1.5" : "bottom-1.5"}`}
+      className={`interactive absolute inset-x-0 z-10 mx-auto w-fit rounded-full border border-secondary-border bg-secondary px-2 py-0.5 text-[11px] text-secondary-fg hover:bg-secondary-hover ${side === "top" ? "top-1.5" : "bottom-1.5"}`}
       style={fade ? { opacity: `calc((var(--fade-${side}) - ${REVEAL}) * ${REVEAL_RAMP})` } : undefined}
     >
       {label}

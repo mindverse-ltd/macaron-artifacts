@@ -2,7 +2,7 @@ export const ui4aModules = {
   "$ui4a/ui": {
     Button: 'Native button props, variant?: "primary" | "secondary" | "ghost" | "danger", size?: "sm" | "md".',
     Field: "Native input props plus label: string and hint?: string. Includes an associated accessible label.",
-    Card: "Native div props. A restrained bordered surface; use only when content needs a boundary.",
+    Card: "Native div props. A restrained filled surface for grouping; prefer spacing and surface hierarchy over adding borders.",
     Badge: "Native span props. Compact secondary status or metadata.",
     Tabs: "{ items: { id: string, label: ReactNode, children: ReactNode }[], value?: string, onChange?: (id: string) => void }.",
     Disclosure: "{ title: ReactNode, children: ReactNode, defaultOpen?: boolean }. Accessible expandable content; child state survives collapsing.",

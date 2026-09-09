@@ -7,9 +7,10 @@ import { Button, Field } from './ui4a-ui';
 
 type Option = { value: string; label: string; detail?: string };
 type ProfileFieldsProps = { harness: HarnessId; config: ProfileConfig; onChange(config: ProfileConfig): void; options: ProfileOptions; credentials: ProfileInput['credentials']; configured: { apiKey: boolean; authToken: boolean }; onCredentialsChange(next: ProfileInput['credentials']): void; disabled: boolean };
-const control = 'interactive w-full min-w-0 rounded-lg border border-input-border bg-input-bg px-3 py-2 text-sm text-input-fg placeholder:text-input-placeholder focus:border-focus focus:outline-none data-[disabled]:opacity-50';
-const popup = 'z-60 max-h-[min(18rem,var(--anchor-max-height))] w-[var(--input-width)] min-w-48 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg bg-surface-2 p-1 shadow-xl outline-none';
-const optionClass = 'interactive flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted data-[focus]:bg-surface-3 data-[focus]:text-fg data-[selected]:font-medium data-[selected]:text-fg';
+const control = 'interactive w-full min-w-0 rounded-lg border border-input-border bg-input-bg px-3 py-2 text-sm text-input-fg placeholder:text-input-placeholder focus:border-input-focus focus:outline-none data-[disabled]:opacity-50';
+const dropdownControl = 'interactive w-full min-w-0 rounded-lg border border-dropdown-border bg-dropdown-bg px-3 py-2 text-sm text-dropdown-fg focus-visible:outline-dropdown-focus data-[disabled]:opacity-50';
+const popup = 'theme-menu z-60 max-h-[min(18rem,var(--anchor-max-height))] w-[var(--input-width)] min-w-48 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg p-1 outline-none';
+const optionClass = 'interactive flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg data-[focus]:bg-surface-3 data-[focus]:text-hover-fg data-[selected]:font-medium';
 const optional = (value: string) => value || undefined;
 const asOptions = (values: string[]): Option[] => [...new Set(values)].map(value => ({ value, label: value }));
 const inherit = { value: '', label: '继承本机配置' };
@@ -24,7 +25,7 @@ export function FreeChoice({ label, value = '', options, onChange, hint, disable
   return <HeadlessField disabled={disabled} className="min-w-0"><Label htmlFor={id} className="mb-1.5 block text-xs font-medium text-muted">{label}</Label>
     <Combobox value={value} disabled={disabled} virtual={{ options: choices.map(option => option.value) }} onChange={next => { if (!tabbing.current) onChange(next ?? ''); }} onClose={() => { setQuery(''); tabbing.current = false; }} immediate>
       <div className="relative"><ComboboxInput id={id} aria-describedby={hint ? hintId : undefined} displayValue={(selected: string) => selected} autoComplete="off" spellCheck={false} placeholder={placeholder} onChange={event => { setQuery(event.target.value); onChange(event.target.value); }} onKeyDownCapture={event => { tabbing.current = event.key === 'Tab'; }} className={`${control} pr-9`} />
-        <ComboboxButton aria-label={`浏览${label}`} className="interactive absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-lg text-muted hover:text-fg data-[disabled]:opacity-50"><Icon name="chevronDown" className="size-3.5" /></ComboboxButton></div>
+        <ComboboxButton aria-label={`浏览${label}`} className="interactive absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-lg text-input-fg data-[disabled]:opacity-50"><Icon name="chevronDown" className="size-3.5" /></ComboboxButton></div>
       <ComboboxOptions anchor={{ to: 'bottom start', gap: 6, padding: 16 }} modal={false} className={popup}>{({ option: id }: { option: string }) => {
         // Virtual rows can outlive a catalog/search update for one render; their stable ID remains a valid custom choice.
         const option = byValue.get(id) ?? { value: id, label: id };
@@ -38,14 +39,14 @@ function Choice({ label, value, options, onChange, hint, disabled = false }: { l
   const id = useId(), hintId = useId(), selected = options.find(option => option.value === value);
   const choices = selected ? options : [...options, { value, label: value }];
   return <HeadlessField disabled={disabled} className="min-w-0"><Label htmlFor={id} className="mb-1.5 block text-xs font-medium text-muted">{label}</Label>
-    <Listbox value={value} onChange={onChange} disabled={disabled}><ListboxButton id={id} aria-describedby={hint ? hintId : undefined} className={`${control} flex items-center justify-between gap-2 text-left`}><span className="min-w-0 truncate">{selected?.label ?? value}</span><Icon name="chevronDown" className="size-3.5 shrink-0 text-muted" /></ListboxButton>
+    <Listbox value={value} onChange={onChange} disabled={disabled}><ListboxButton id={id} aria-describedby={hint ? hintId : undefined} className={`${dropdownControl} flex items-center justify-between gap-2 text-left`}><span className="min-w-0 truncate">{selected?.label ?? value}</span><Icon name="chevronDown" className="size-3.5 shrink-0" /></ListboxButton>
       <ListboxOptions anchor={{ to: 'bottom start', gap: 6, padding: 16 }} modal={false} className={`${popup} w-[var(--button-width)]`}>{choices.map(option => <ListboxOption key={option.value} value={option.value} className={optionClass}>{({ selected }) => <><Icon name="check" className={`size-3 shrink-0 ${selected ? '' : 'opacity-0'}`} /><span>{option.label}</span></>}</ListboxOption>)}</ListboxOptions>
     </Listbox>{hint ? <Description id={hintId} className="mt-1.5 text-xs text-muted">{hint}</Description> : null}
   </HeadlessField>;
 }
 
 function Advanced({ title, children }: { title: string; children: ReactNode }) {
-  return <Disclosure as="section" className="border-t border-border pt-3"><DisclosureButton className="interactive group flex w-full items-center justify-between gap-3 rounded-md py-1 text-left text-sm font-medium text-muted hover:text-fg"><span>{title}</span><Icon name="chevronDown" className="size-3.5 group-data-[open]:rotate-180" /></DisclosureButton><DisclosurePanel className="pt-4">{children}</DisclosurePanel></Disclosure>;
+  return <Disclosure as="section" className="border-t border-contrast pt-3"><DisclosureButton className="interactive group flex w-full items-center justify-between gap-3 rounded-md py-1 text-left text-sm font-medium text-muted hover:bg-surface-3 hover:text-hover-fg"><span>{title}</span><Icon name="chevronDown" className="size-3.5 group-data-[open]:rotate-180" /></DisclosureButton><DisclosurePanel className="pt-4">{children}</DisclosurePanel></Disclosure>;
 }
 
 function FeatureFields({ config, options, onChange, disabled }: Pick<ProfileFieldsProps, 'config' | 'options' | 'onChange' | 'disabled'>) {

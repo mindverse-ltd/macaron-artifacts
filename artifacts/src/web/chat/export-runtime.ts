@@ -68,7 +68,7 @@ export function initializeChatExport() {
       button.title = open ? '仅显示最新摘要' : '查看先前摘要';
       button.querySelector('span')!.textContent = open ? '仅显示最新' : `${button.dataset.reasoningCount} 段摘要`;
       for (const entry of section.querySelectorAll<HTMLElement>('[data-reasoning-entry]')) {
-        entry.hidden = !open && entry.dataset.reasoningLatest !== 'true'; entry.classList.toggle('reasoning-current', !open);
+        entry.hidden = !open && entry.dataset.reasoningLatest !== 'true';
       }
       if (!open) viewport.scrollTop = viewport.scrollHeight;
       update();

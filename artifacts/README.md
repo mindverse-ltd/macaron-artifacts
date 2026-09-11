@@ -30,6 +30,10 @@ App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` ov
 
 For a custom Claude gateway, start the app with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as the CLI. Environment injected only by a shell alias is not inherited by a separately launched app.
 
+## HTML snapshots
+
+Use the export arrow beside **Source** on an inline card or in the Canvas header to download or copy an HTML snapshot after the preview finishes. Canvas downloads use the artifact name. Snapshots preserve the rendered content, current form values, readable canvas images, and active theme. They are static: React handlers, chat/file capabilities, scripts, and embedded frames are not included. External images, fonts, and styles may still require network access. Switch back to preview before exporting from source view.
+
 ## Boundaries
 
 | Module | Responsibility |

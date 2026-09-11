@@ -83,7 +83,7 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
     };
   }, [sessionId, scope, filename]);
 
-  return <div className={UI4A_CLASS} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0 }}>
+  return <div className={UI4A_CLASS} data-ui4a-ready={painted && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0 }}>
     <div ref={host} data-ui4a-render-host="" />
     {!painted && source ? <CodeBlock code={source} /> : null}
     {error ? <div role="alert" className="mt-2 rounded border border-danger/30 p-3 text-sm text-danger">{error}</div> : null}

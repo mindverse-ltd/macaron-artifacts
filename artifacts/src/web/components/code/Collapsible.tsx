@@ -52,19 +52,10 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
   const [keyboard, setKeyboard] = useState(false);
   const [height, setHeight] = useState(0);
   const [open, setOpen] = useState(false);
-  /**
-   * 高度过渡只服务于「用户点了展开/收起」这一次跳变。
-   *
-   * 常开着的话，流式增长每帧都会把 `height` 换成新值、于是每帧重启一次 300ms 缓动 —— 目标一直在跑，
-   * 过渡永远追不上（实测滞后单调涨到 497px），看着就是一抖一抖地往上蹭。内容自己长高本来就是连续的，
-   * 不需要补间。
-   */
-  const [toggling, setToggling] = useState(false);
   const toggle = (next: boolean, event: React.MouseEvent<HTMLButtonElement>) => {
     const keyboard = event.detail === 0;
     pendingFocus.current = document.activeElement === event.currentTarget ? event.currentTarget : null;
     setKeyboard(keyboard);
-    setToggling(!keyboard);
     setOpen(next);
   };
   const edges = useTailFollow(scroller, height, RAMP);
@@ -105,8 +96,8 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
           id={contentId} tabIndex={collapsed ? 0 : -1}
           data-export-scroller
           className="no-scrollbar overflow-y-auto"
-          onTransitionEnd={(event) => event.propertyName === "height" && setToggling(false)}
-          style={{ height: collapsed ? CAP : height || undefined, transition: toggling ? "height 300ms cubic-bezier(0.32,0.72,0,1)" : undefined, maskImage: MASK, WebkitMaskImage: MASK }}
+          // Settle layout once; interpolating the height relayouts every following message on each frame.
+          style={{ height: collapsed ? CAP : height || undefined, maskImage: MASK, WebkitMaskImage: MASK }}
         >
           <div ref={inner} data-export-content>{children}</div>
         </div>

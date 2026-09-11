@@ -40,7 +40,7 @@ function ReasoningView({ presentation, active, historyOpen }: { presentation: Re
       <div id={regionId} ref={viewport} className="reasoning-viewport" role="region" aria-label={kind === 'summary' ? '思考摘要' : '思考过程'} tabIndex={overflowing ? 0 : undefined}>
         <div ref={content} className="reasoning-content">
           {/* Keep earlier summaries mounted so exports include history that has never been opened. */}
-          {entries.map(entry => <div key={entry.key} hidden={kind === 'summary' && !historyOpen && entry.key !== entries.at(-1)?.key} data-reasoning-entry data-reasoning-latest={kind === 'summary' ? entry.key === entries.at(-1)?.key : undefined} className={kind === 'summary' && !historyOpen ? 'reasoning-current' : undefined}><Markdown text={entry.text} live={active} /></div>)}
+          {entries.map(entry => <div key={entry.key} hidden={kind === 'summary' && !historyOpen && entry.key !== entries.at(-1)?.key} data-reasoning-entry data-reasoning-latest={kind === 'summary' ? entry.key === entries.at(-1)?.key : undefined}><Markdown text={entry.text} live={active} /></div>)}
           {!entries.length && active ? <span className="reasoning-placeholder">正在思考</span> : null}
         </div>
       </div>

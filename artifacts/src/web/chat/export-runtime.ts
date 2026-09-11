@@ -38,7 +38,6 @@ export function initializeChatExport() {
       const keyboard = event.detail === 0, ownsFocus = document.activeElement === button;
       section.toggleAttribute('data-keyboard', keyboard);
       section.dataset.exportOpen = String(button.dataset.exportToggle !== 'collapse');
-      scroller.style.transition = keyboard ? 'none' : 'height 300ms cubic-bezier(0.32,0.72,0,1)';
       update();
       if (ownsFocus) {
         const next = toggles.find(item => !item.hidden) ?? scroller;
@@ -46,7 +45,6 @@ export function initializeChatExport() {
         next.focus({ preventScroll: !keyboard });
       }
     });
-    scroller.addEventListener('transitionend', event => { if (event.target === scroller && event.propertyName === 'height') scroller.style.transition = 'none'; });
     updates.push(update); scroller.addEventListener('scroll', schedule, { passive: true });
     observer.observe(content); observer.observe(scroller);
   }
@@ -68,7 +66,7 @@ export function initializeChatExport() {
       button.title = open ? '仅显示最新摘要' : '查看先前摘要';
       button.querySelector('span')!.textContent = open ? '仅显示最新' : `${button.dataset.reasoningCount} 段摘要`;
       for (const entry of section.querySelectorAll<HTMLElement>('[data-reasoning-entry]')) {
-        entry.hidden = !open && entry.dataset.reasoningLatest !== 'true'; entry.classList.toggle('reasoning-current', !open);
+        entry.hidden = !open && entry.dataset.reasoningLatest !== 'true';
       }
       if (!open) viewport.scrollTop = viewport.scrollHeight;
       update();

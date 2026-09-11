@@ -5,9 +5,15 @@ description: Build compact interactive React UI inside chat or a persistent canv
 
 <!-- Generated from src/web/ui4a/manifest.ts; update that manifest when changing the runtime contract. -->
 
-Use ordinary prose for an answer that needs no interaction. Use inline UI for a focused choice, calculator, comparison, or small tracker. Use a canvas for a reusable workspace with several views or persistent files.
+Use ordinary prose when there is no meaningful action for the reader. In technical explanations, proactively use a small inline demonstration when selecting a stage, comparing alternatives, or changing one parameter makes the current point clearer; do not wait for the user to request a UI. Place each focused demonstration beside the point it explains, including across follow-up replies, instead of saving every visual for one large final dashboard. Use a canvas for a reusable workspace with several views or persistent files.
+
+Ask a clarification only when missing user information changes the answer. Offer a short inline choice or input, and send the complete selected answer through `$ui4a/chat.sendMessage` on explicit submission. Persist the answered state with `$ui4a/state.usePersistedState` and prevent duplicate submission. Reading interactions such as tabs, filters, diagram selection, and parameter exploration stay local and do not send chat messages. A clear request needs an answer, not an unnecessary preference questionnaire.
 
 For inline UI, put one complete React module in a fenced block whose language is exactly `ui4a/tsx`. Export a default React component. It renders progressively as the block arrives; write a usable scaffold before long data or secondary details. Keep component and import names stable while editing. Close every block and include complete final syntax.
+
+This host does not render Mermaid fences. Use inline React with SVG where useful for a diagram, and keep it focused on one explanation. Preserve the operations and branches that matter to the claim; label any simplification or assumption. Keep source-backed facts separate from hypotheses, and do not present a schematic parameter demo as measured data. Write a short lead-in and takeaway around each interface; avoid repeating the same explanation in both prose and UI.
+
+Keep each inline explanation compact. When repeated full diagrams would crowd the container, show one selected variant with a mode control. For SVG, derive spacing and the viewBox from the full node, label, and connector bounds so nothing overlaps or clips. A mode change must update every affected element and formula, not only the caption; keep semantic colors and legends consistent with the visible state.
 
 For a canvas, write `.artifacts/canvases/<id>.ui4a.tsx`; the UI discovers it and opens a side panel. Use a stable descriptive id. Supporting modules can live beside it and use relative imports with explicit `.tsx`, `.ts`, `.jsx`, `.js`, or `.json` extensions. Relative module imports are available for file canvases, not inline blocks. Keep the dependency graph acyclic. Mention the canvas briefly in the conversation instead of duplicating its source in a fence.
 
@@ -18,6 +24,10 @@ For a simple equation in prose, use \( ... \) for inline math or \[ ... \] for d
 Fit the provided container: use width:100%, min-width:0, wrapping text, and container-relative layouts. Avoid page headers, outer background fills, min-height:100vh, and viewport-width sizing. Inherit the host's theme. Semantic UnoCSS colors are surface, surface-2, surface-3, border, fg, muted, accent, accent-fg, danger, success, warn, and series-1 through series-6; use restrained spacing and hierarchy. Do not hard-code a light or dark page.
 
 Use complete UnoCSS utilities in `className`, such as `hover:bg-accent hover:text-accent-fg`. The runtime extracts classes without build-time transformers: variant groups such as `hover:(bg-accent text-accent-fg)`, Attributify, and CSS directives such as `@apply` are unavailable. Prefer literal class strings and mappings for conditional styles.
+
+Use semantic tokens for every text color, SVG fill/stroke, and control state; do not create a fixed hex/RGB palette for diagrams. SVG text is painted by `fill`, not CSS `color`: use `<text fill="var(--fg)">` or `fill="currentColor"` with an inherited semantic text color. Pair `surface-2` node fills with `fg` labels, and solid `accent` fills with `accent-fg`; do not reuse a page foreground on an arbitrary colored fill. Use series colors for marks and connectors, keeping small labels in `fg` or `muted` on the host surface. A light node palette with dark labels must not leak onto a transparent dark background.
+
+Before finishing, check the text/background pairs for node labels, headings, legends, and selected/unselected controls in both host modes. Keep small text opaque; lowering its opacity can make even a semantic foreground unreadable. When a preview is available, verify both light and dark modes instead of judging only one screenshot.
 
 React, react-dom, react-dom/client, the React JSX runtimes, and the modules below are provided locally. Other npm imports can resolve through the CDN, but prefer built-in capabilities and avoid network dependencies for basic UI. Do not invent `$ui4a/*` modules; `$ui4a/ai`, command execution, and directory listing are unavailable. Persist only JSON-compatible state; do not store credentials. File read/write paths start with `.artifacts/` and are relative to this session's workspace.
 

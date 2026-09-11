@@ -16,6 +16,12 @@ UI4A lets a harness produce a real React interface alongside its answer. The sam
 
 The manifest in `artifacts/src/web/ui4a/manifest.ts` is the source of truth for the generated `skills/ui4a/SKILL.md`.
 
+SVG labels use `fill="var(--fg)"` (or `fill="currentColor"` with a semantic text color); inheriting CSS `color` alone does not override SVG `fill`. Pair node backgrounds and labels, such as `surface-2` with `fg` or `accent` with `accent-fg`. Series colors distinguish diagram marks and connectors; they are not a blanket foreground for small labels. Generated diagrams follow the same light/dark tokens as the host.
+
+The skill also asks the harness to check labels, headings, legends, and control states in both modes, keeping small text opaque. These generation instructions guide future output; they do not automatically recolor existing artifacts.
+
+The guidance favors compact inline demonstrations alongside technical explanations and follow-up replies. Necessary clarification controls send the selected answer as a visible user turn; reading controls such as tabs and diagram selections stay local. Mermaid fences are not rendered by this host, so diagrams use inline React/SVG. Diagrams must fit their container, and changing a mode must update its affected labels, structure, and formulas together. These are presentation choices, not a requirement to add an interface to every reply.
+
 | Module | Purpose |
 | --- | --- |
 | `$ui4a/ui` | Button, Field, Card, Badge, Tabs, and Disclosure |

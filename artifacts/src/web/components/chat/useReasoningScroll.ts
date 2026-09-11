@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { followReasoningScroll, reasoningScrollTop } from './reasoning-scroll';
 
 const EDGE_RAMP = 24;
 const BOTTOM_TOLERANCE = 2;
@@ -25,14 +26,13 @@ export function useReasoningScroll(contentKey: string, live: boolean) {
     const inner = content.current;
     if (!element || !inner) return;
     let frame = 0;
-    let lastTop = element.scrollTop;
+    let lastTop = reasoningScrollTop(element);
     let lastHeight = element.scrollHeight;
     const measure = () => {
       frame = 0;
-      const gap = Math.max(0, element.scrollHeight - element.clientHeight);
-      if (forcePin.current || (liveRef.current && followingRef.current)) element.scrollTop = gap;
+      const gap = followReasoningScroll(element, liveRef.current && followingRef.current, forcePin.current);
       forcePin.current = false;
-      const top = Math.max(0, element.scrollTop);
+      const top = reasoningScrollTop(element);
       const bottom = Math.max(0, gap - top);
       if (bottom <= BOTTOM_TOLERANCE) followingRef.current = true;
       else if (!liveRef.current) followingRef.current = false;
@@ -48,7 +48,8 @@ export function useReasoningScroll(contentKey: string, live: boolean) {
     };
     schedule.current = requestMeasure;
     const onScroll = () => {
-      const top = element.scrollTop;
+      // Elastic rebound is not an upward gesture; compare only positions inside the scrollable range.
+      const top = reasoningScrollTop(element);
       const shrank = element.scrollHeight < lastHeight;
       if (!shrank && top < lastTop - 0.5) followingRef.current = false;
       if (element.scrollHeight - element.clientHeight - top <= BOTTOM_TOLERANCE) followingRef.current = true;

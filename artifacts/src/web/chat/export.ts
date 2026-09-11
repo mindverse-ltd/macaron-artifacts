@@ -12,7 +12,10 @@ export async function chatHtml(transcript: HTMLElement, title: string): Promise<
     link.className = button.className; link.dataset.streamdown = 'link'; link.append(...button.childNodes); button.replaceWith(link);
   }
   output.querySelectorAll('[data-streamdown="link-safety-modal"]').forEach(element => element.remove());
-  for (const button of output.querySelectorAll('button')) if (!button.closest('.ui4a-surface') && !button.matches('[data-export-toggle], [data-export-reasoning-toggle]')) button.remove();
+  for (const button of output.querySelectorAll('button')) {
+    if (button.closest('.ui4a-surface') || button.matches('[data-export-toggle], [data-export-reasoning-toggle]')) continue;
+    if (button.matches('[data-streamdown="link"]')) button.replaceWith(...button.childNodes); else button.remove();
+  }
   // CodeBlock lazily highlights on intersection; closed tools must also export ready-to-read syntax.
   for (const pre of output.querySelectorAll<HTMLElement>('pre[data-code-language]')) {
     const code = pre.querySelector('code');

@@ -32,8 +32,8 @@ export function initializeChatExport() {
       section.dataset.exportOpen = String(button.dataset.exportToggle !== 'collapse');
       scroller.style.transition = 'height 300ms cubic-bezier(0.32,0.72,0,1)';
       update();
-      const next = toggles.find(item => !item.hidden);
-      if (next) next.focus({ preventScroll: true }); else { scroller.tabIndex = 0; scroller.focus({ preventScroll: true }); }
+      const next = toggles.find(item => !item.hidden) ?? section.closest('details')?.querySelector('summary') ?? scroller.querySelector<HTMLElement>('[tabindex]');
+      next?.focus({ preventScroll: true });
     });
     updates.push(update); scroller.addEventListener('scroll', schedule, { passive: true });
     observer.observe(content); observer.observe(scroller);

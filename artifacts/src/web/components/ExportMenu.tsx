@@ -9,18 +9,19 @@ export function ExportMenu({ target, filename = 'macaron-card', disabled = false
   useEffect(() => { if (!feedback || feedback.error) return; const timer = setTimeout(() => setFeedback(undefined), 2000); return () => clearTimeout(timer); }, [feedback]);
   const run = async (copy: boolean) => {
     setBusy(true); setFeedback(undefined);
+    let preparationError: unknown;
     try {
       const surface = target.current?.querySelector<HTMLElement>(kind === 'chat' ? '[data-chat-content]' : '[data-ui4a-ready="true"]');
       if (!surface || disabled) throw new Error('预览尚未就绪，请稍后重试');
       if (copy && !navigator.clipboard) throw new Error('浏览器不支持复制，请下载 HTML');
-      const html = kind === 'chat' ? import('../chat/export').then(module => module.chatHtml(surface, filename)) : snapshotHtml(surface, filename);
+      const html = kind === 'chat' ? import('../chat/export').then(module => module.chatHtml(surface, filename)).catch(error => { preparationError = error; throw error; }) : snapshotHtml(surface, filename);
       if (copy) {
         // Start the clipboard operation during the click, even when chat highlighting completes asynchronously.
         if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) await navigator.clipboard.write([new ClipboardItem({ 'text/plain': Promise.resolve(html).then(text => new Blob([text], { type: 'text/plain' })) })]);
         else await navigator.clipboard.writeText(await html);
       } else downloadHtml(await html, filename);
       setFeedback({ text: copy ? '已复制 HTML' : '已下载 HTML' });
-    } catch (error) { setFeedback({ text: error instanceof Error ? error.message : '导出失败，请重试', error: true }); }
+    } catch (error) { const reason = preparationError ?? error; setFeedback({ text: reason instanceof Error ? reason.message : '导出失败，请重试', error: true }); }
     finally { setBusy(false); }
   };
   return <div className="relative shrink-0">

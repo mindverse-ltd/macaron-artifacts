@@ -5,17 +5,17 @@ import { memo, useId, useMemo } from 'react';
 import { Disclosure, DisclosureButton } from '@headlessui/react';
 import type { ReasoningUIPart } from 'ai';
 import { Streamdown } from 'streamdown';
-import { cjk } from '@streamdown/cjk';
+import { markdownPlugins } from '../../chat/markdown';
+import { normalizeMath } from '../../chat/math';
 import { Icon } from '../Icon';
 import { analyzeReasoning } from './reasoning-model';
 import { useReasoningScroll } from './useReasoningScroll';
 import { exportRehypePlugins } from '../../chat/export-links';
 import './Reasoning.css';
 
-const PLUGINS = { cjk };
 const Markdown = memo(function Markdown({ text, live }: { text: string; live: boolean }) {
   // Reasoning is text, never an executable UI4A surface. Streamdown handles incomplete Markdown.
-  return <Streamdown plugins={PLUGINS} rehypePlugins={exportRehypePlugins} controls={false} isAnimating={live}>{text}</Streamdown>;
+  return <Streamdown plugins={markdownPlugins} rehypePlugins={exportRehypePlugins} controls={false} isAnimating={live}>{normalizeMath(text)}</Streamdown>;
 });
 
 export const Reasoning = memo(function Reasoning({ parts, live }: { parts: readonly ReasoningUIPart[]; live: boolean }) {

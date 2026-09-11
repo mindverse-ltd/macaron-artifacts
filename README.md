@@ -41,6 +41,7 @@ The previous WebUI, plugin launchers, and replay tools are archived on the [`v0`
 - Titles and follow-up suggestions run on disposable native forks after the main response, preserving its prompt prefix without blocking the composer.
 - Inline `ui4a/tsx` fences render as their source arrives. Files at `.artifacts/canvases/<name>.ui4a.tsx` render in Canvas, including relative TSX, TypeScript, and JSON imports.
 - Generated components use a small `$ui4a/ui` library and scoped chat, state, and file capabilities. Shiki themes drive both syntax highlighting and interface colors.
+- Chat renders `\(...\)` and `\[...\]` LaTeX. Bundled `$ui4a/ui/katex` and `$ui4a/ui/charts` components support streaming formulas and interactive charts in `ui4a/tsx`.
 
 Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are supported. Hermes uses its headless JSON-RPC gateway. OpenClaw uses its pinned v4 Gateway client; its metadata enrichment requires the Macaron metadata-gate plugin and fails closed when that guard is unavailable. Native session-history migration and attachments are not included yet.
 

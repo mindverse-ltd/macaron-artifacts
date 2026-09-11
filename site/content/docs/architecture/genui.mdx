@@ -19,11 +19,13 @@ The manifest in `artifacts/src/web/ui4a/manifest.ts` is the source of truth for 
 | Module | Purpose |
 | --- | --- |
 | `$ui4a/ui` | Button, Field, Card, Badge, Tabs, and Disclosure |
+| `$ui4a/ui/katex` | LaTeX and MathBlock with stable formula rendering |
+| `$ui4a/ui/charts` | Responsive Recharts components with streaming snapshots and stable data/axes |
 | `$ui4a/chat` | Send a visible user message after an explicit user action |
 | `$ui4a/state` | Session- and surface-scoped JSON persistence |
 | `$ui4a/fs` | Read and write files below `.artifacts` |
 
-The component set is deliberately small and follows `ui4a-playground`: native HTML and Wind4 utilities handle layout, and Headless UI or Recharts can be imported for additional controls and charts. UI4A code runs as trusted local React in the host page; it is not an isolation sandbox for arbitrary third-party code.
+Native HTML and Wind4 utilities handle layout, and Headless UI can be imported for additional controls. Prefer the bundled chart and formula modules for mathematical explanations: combine a formula, a restrained line chart and numeric sliders driven by the same state. UI4A code runs as trusted local React in the host page; it is not an isolation sandbox for arbitrary third-party code.
 
 ## Authoring rules
 

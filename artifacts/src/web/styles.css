@@ -23,6 +23,15 @@ body { margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+button.pressable.interactive { transition-duration: 160ms; transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+button.pressable.interactive:active { transition-duration: 100ms; }
+button.pressable:focus-visible:active { scale: none; }
+/* Headless UI reports the resolved placement, including a popup flipped above its trigger. */
+.select-popup { --popup-origin-x: 100%; --popup-origin-y: 0%; transform-origin: var(--popup-origin-x) var(--popup-origin-y); transition-property: opacity, scale; }
+.select-popup[data-anchor~='top'] { --popup-origin-y: 100%; }
+.select-popup[data-anchor~='start'] { --popup-origin-x: 0%; }
+.select-popup:dir(rtl) { --popup-origin-x: 0%; }
+.select-popup:dir(rtl)[data-anchor~='start'] { --popup-origin-x: 100%; }
 .tool-disclosure-icon { transition: transform 160ms ease; }
 .tool-call[open] > summary .tool-disclosure-icon { transform: rotate(90deg); }
 .tool-call > summary:focus-visible { outline-offset: -2px; }
@@ -218,10 +227,14 @@ button:disabled { cursor: not-allowed; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Text, status icons and aria-busy retain feedback; rapid infinite loops must not survive the duration reduction. */
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  button.pressable:active, .select-popup { scale: none !important; }
+  .select-popup { transition-property: opacity !important; transition-duration: 150ms !important; }
 }

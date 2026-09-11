@@ -26,10 +26,10 @@ export function ExportMenu({ target, filename = 'macaron-card', disabled = false
     finally { setBusy(false); }
   };
   return <Menu as="div" className="shrink-0">
-      <MenuButton type="button" title={disabled ? kind === 'chat' ? '对话完成后可导出' : '预览完成后可导出' : `导出${label}`} aria-label={`导出${label}`} aria-busy={busy} disabled={disabled || busy} className="export-trigger interactive grid size-9 place-items-center rounded-md text-muted hover:bg-surface-3 hover:text-hover-fg data-[open]:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40">{busy ? <LoaderCircle aria-hidden className="size-4 animate-spin motion-reduce:animate-none" /> : <Download aria-hidden className="size-4" />}</MenuButton>
-      <MenuItems anchor={{ to: 'bottom end', gap: 6, padding: 8 }} className="theme-menu z-50 w-44 max-w-[calc(100vw-16px)] rounded-lg p-1 outline-none">
-        <MenuItem><button type="button" onClick={() => void run(false)} className="export-menu-item interactive flex min-h-10 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm data-[focus]:bg-surface-3 data-[focus]:text-hover-fg"><Download aria-hidden className="size-4 shrink-0" />下载{label}</button></MenuItem>
-        <MenuItem><button type="button" onClick={() => void run(true)} className="export-menu-item interactive flex min-h-10 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm data-[focus]:bg-surface-3 data-[focus]:text-hover-fg"><Copy aria-hidden className="size-4 shrink-0" />复制{label}</button></MenuItem>
+      <MenuButton type="button" title={disabled ? kind === 'chat' ? '对话完成后可导出' : '预览完成后可导出' : `导出${label}`} aria-label={`导出${label}`} aria-busy={busy} disabled={disabled || busy} className="export-trigger btn-icon size-9 rounded-md data-[open]:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40">{busy ? <LoaderCircle aria-hidden className="size-4 animate-spin motion-reduce:animate-none" /> : <Download aria-hidden className="size-4" />}</MenuButton>
+      <MenuItems anchor={{ to: 'bottom end', gap: 6, padding: 8 }} className="theme-menu z-popover w-44 max-w-[calc(100vw-16px)] rounded-lg p-1 outline-none">
+        <MenuItem><button type="button" onClick={() => void run(false)} className="export-menu-item menu-item min-h-10 w-full rounded-md px-3 py-2 text-left"><Download aria-hidden className="size-4 shrink-0" />下载{label}</button></MenuItem>
+        <MenuItem><button type="button" onClick={() => void run(true)} className="export-menu-item menu-item min-h-10 w-full rounded-md px-3 py-2 text-left"><Copy aria-hidden className="size-4 shrink-0" />复制{label}</button></MenuItem>
       </MenuItems>
     </Menu>;
 }

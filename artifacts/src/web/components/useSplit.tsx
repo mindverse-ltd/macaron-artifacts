@@ -107,7 +107,7 @@ export function SplitHandle({ dragging, fraction = 50, handlers }: { dragging: b
       // 视觉上只有 1px 的线，但热区有 9px —— 光标能落在上面，才谈得上"可拖动"
       className={`group relative hidden w-px shrink-0 cursor-col-resize touch-none bg-panel-border outline-none @[681px]/panes:block ${dragging ? "bg-accent" : ""}`}
     >
-      <span className="absolute inset-y-0 -right-1 -left-1 z-10" />
+      <span className="absolute inset-y-0 -right-1 -left-1 z-content-overlay" />
       <span className={`interactive absolute inset-y-0 left-0 w-px bg-accent ${dragging ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus:opacity-100"}`} />
     </div>
   );

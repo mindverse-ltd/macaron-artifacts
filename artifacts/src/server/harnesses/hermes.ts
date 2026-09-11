@@ -42,11 +42,13 @@ export const hermesAdapter: HarnessAdapter = {
     if (ref?.profile && ref.profile !== profileName(turn.profile)) throw new Error('Hermes session belongs to a different native profile; start a new session before switching Hermes profiles');
     const token = turn.profile?.authToken;
     const rpc = connectionFor(turn, token);
-    let nativeId = ref?.sessionId || '', storedId = ref?.storedId, activeTurn = false, done = false, textStarted = false, thoughtStarted = false, streamed = false, metadataText = '', resolveDone!: () => void, rejectDone!: (error: Error) => void;
+    let nativeId = ref?.sessionId || '', storedId = ref?.storedId, activeTurn = false, done = false, textStarted = false, thoughtId = '', thoughtSequence = 0, streamed = false, metadataText = '', resolveDone!: () => void, rejectDone!: (error: Error) => void;
     const completed = new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
     void completed.catch(() => {});
     const queue = new EventQueue<ChatChunk>();
     const push = (items: ChatChunk[]) => { for (const item of items) queue.push(item); };
+    // Preserve the tool/text boundary when the next native thinking delta starts a new segment.
+    const endThought = () => { if (thoughtId) { push([{ type: 'reasoning-end', id: thoughtId }]); thoughtId = ''; } };
     const fail = (error: Error) => { queue.fail(error); rejectDone(error); };
     const unsub = rpc.onEvent(event => {
       const type = string(event.type), sid = string(event.session_id), payload = record(event.payload);
@@ -55,11 +57,11 @@ export const hermesAdapter: HarnessAdapter = {
       if (turn.enrichment) return;
       if (!activeTurn) return;
       if (type === 'message.start') { push([]); return; }
-      if (type === 'message.delta') { const text = string(payload.text); if (text && !textStarted) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }]); } if (text) { streamed = true; push([{ type: 'text-delta', id: 'hermes-message', delta: text }]); } }
-      else if (type === 'reasoning.delta' || type === 'thinking.delta') { const text = string(payload.text); if (text && !thoughtStarted) { thoughtStarted = true; push([{ type: 'reasoning-start', id: 'hermes-reasoning' }]); } if (text) push([{ type: 'reasoning-delta', id: 'hermes-reasoning', delta: text }]); }
-      else if (type === 'tool.start') push([{ type: 'tool-input-available', toolCallId: string(payload.tool_id), toolName: string(payload.name), input: payload.args ?? {}, dynamic: true, providerExecuted: true }]);
+      if (type === 'message.delta') { const text = string(payload.text); if (text) endThought(); if (text && !textStarted) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }]); } if (text) { streamed = true; push([{ type: 'text-delta', id: 'hermes-message', delta: text }]); } }
+      else if (type === 'reasoning.delta' || type === 'thinking.delta') { const text = string(payload.text); if (text && !thoughtId) { thoughtId = `hermes-reasoning-${++thoughtSequence}`; push([{ type: 'reasoning-start', id: thoughtId }]); } if (text) push([{ type: 'reasoning-delta', id: thoughtId, delta: text }]); }
+      else if (type === 'tool.start') { endThought(); push([{ type: 'tool-input-available', toolCallId: string(payload.tool_id), toolName: string(payload.name), input: payload.args ?? {}, dynamic: true, providerExecuted: true }]); }
       else if (type === 'tool.complete') { const id = string(payload.tool_id); push([{ type: 'tool-output-available', toolCallId: id, output: payload.result ?? payload.result_text ?? '', dynamic: true, providerExecuted: true }]); }
-      else if (type === 'message.complete') { const text = string(payload.text); if (!streamed && text) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }, { type: 'text-delta', id: 'hermes-message', delta: text }]); } if (thoughtStarted) push([{ type: 'reasoning-end', id: 'hermes-reasoning' }]); if (textStarted) push([{ type: 'text-end', id: 'hermes-message' }]); done = true; queue.end(); resolveDone(); }
+      else if (type === 'message.complete') { endThought(); const text = string(payload.text); if (!streamed && text) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }, { type: 'text-delta', id: 'hermes-message', delta: text }]); } if (textStarted) push([{ type: 'text-end', id: 'hermes-message' }]); done = true; queue.end(); resolveDone(); }
       else if (type === 'error' || type === 'connection.error') fail(new Error(string(payload.message) || 'Hermes turn failed'));
       else if (type === 'approval.request') {
         void abortable(turn.approve({ id: string(payload.request_id), tool: 'terminal', input: payload }), turn.signal)

@@ -19,6 +19,8 @@ Host controls use native HTML plus Headless UI where behavior is stateful: dialo
 
 The layout preserves background turns when the selected conversation changes. Mobile viewports collapse Canvas into a drawer, and the split separator exposes its current value to assistive technology. Focus indicators come from the theme's focus token rather than from repeated container borders.
 
+Reasoning is visible by default. Summary updates show the latest entry while keeping earlier entries available; full reasoning uses a height-limited scrolling region with fading edges. Scrolling up pauses automatic following. The UI preserves independent AI SDK reasoning parts and their tool/text boundaries instead of joining them into one monologue. Streaming motion and automatic following stop when the turn ends or is interrupted.
+
 ## Themes
 
 The picker stores a paired light/dark family. Appearance (`auto`, light, or dark) remains independent from family selection, and only the variant matching the current appearance is loaded. Theme roles include editor, sidebar, title bar, menu, widget, input, dropdown, selection, focus, and optional borders; missing roles fall back to composited semantic values instead of painting every surface with a border.

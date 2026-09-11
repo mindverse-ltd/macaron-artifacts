@@ -1,0 +1,35 @@
+.tool-disclosure { min-width: 0; overflow: clip; border-radius: 6px; background: var(--surface-2); font-size: 12px; }
+.tool-disclosure-heading { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; background: var(--surface); }
+.tool-disclosure-trigger { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; width: 100%; padding: 8px 12px; border: 0; background: var(--surface); color: var(--muted); font: inherit; line-height: 1.7; text-align: left; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.tool-disclosure-trigger:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: -2px; }
+.tool-disclosure-icon { display: grid; flex: 0 0 14px; width: 14px; height: 1lh; place-items: center; }
+.tool-disclosure-icon > svg, .tool-disclosure-chevron { width: 14px; height: 14px; flex: none; }
+.tool-disclosure-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.tool-disclosure-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-disclosure-trailing { margin-left: auto; }
+.tool-disclosure-trigger[data-open] .tool-disclosure-icon > .tool-disclosure-chevron { transform: rotate(90deg); }
+.tool-disclosure-trigger[data-open] > .tool-disclosure-trailing { transform: rotate(180deg); }
+.tool-disclosure-panel { min-width: 0; }
+@media (hover: hover) { .tool-disclosure-trigger:hover { background: var(--surface-3); color: var(--hover-fg, var(--fg)); } }
+
+/* One content axis for prose, reasoning and tools; status icons occupy the shared gutter. */
+.chat-message-content { --chat-gutter: 22px; min-width: 0; padding-inline-start: var(--chat-gutter); }
+.chat-message-content > .reasoning, .chat-message-content > .tool-group { margin-inline-start: calc(-1 * var(--chat-gutter)); }
+.tool-group { overflow: visible; border-radius: 0; background: transparent; font-size: 13px; }
+.tool-group > .tool-disclosure-heading { position: static; border-radius: 4px; background: transparent; }
+.tool-group .tool-disclosure-trigger { min-height: 32px; padding: 4px 0; border-radius: 4px; background: transparent; }
+.tool-group .tool-disclosure-label { font-weight: 400; }
+.tool-group-failed .tool-disclosure-label { color: var(--danger); }
+.tool-group .tool-disclosure-trailing { width: 12px; height: 12px; margin-inline-end: 4px; }
+.tool-group-details { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-height: min(28rem, 52svh); overflow: auto; overscroll-behavior: contain; padding: 8px 8px 4px 22px; scrollbar-color: var(--border) transparent; scrollbar-width: thin; }
+.tool-call-detail { min-width: 0; }
+.tool-call-heading { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 6px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.tool-call-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.tool-call-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-call-heading > svg { flex: none; width: 14px; height: 14px; }
+.tool-call-heading > .text-danger { flex: none; }
+.tool-call-detail > :not(.tool-call-heading) { border-radius: 4px; }
+.tool-group-pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: tool-group-breathe 1.8s ease-in-out infinite; }
+@keyframes tool-group-breathe { 50% { opacity: .35; } }
+@media (hover: hover) { .tool-group .tool-disclosure-trigger:hover { background: var(--surface-2); } }
+@media (prefers-reduced-motion: reduce) { .tool-group-pulse { animation: none; } }

@@ -122,6 +122,35 @@ describe('Codex native deltas', () => {
     expect(chunks.at(-1)).toMatchObject({ type: 'tool-output-available', output: 'test\n' });
   });
 
+  test.each(['item/started', 'item/completed'])('preserves native command actions through %s and UI message parsing', async (method) => {
+    const mapper = new CodexEventMapper();
+    const commandActions = [
+      { type: 'read', command: 'cat README.md', name: 'README.md', path: '/tmp/README.md' },
+      { type: 'search', command: 'rg theme src', query: 'theme', path: 'src' },
+      { type: 'listFiles', command: 'ls src', path: 'src' },
+      { type: 'unknown', command: 'bun test' },
+    ];
+    const input = { command: 'cat README.md && rg theme src && ls src && bun test', cwd: '/tmp', commandActions };
+    const item = { id: 'cmd-actions', type: 'commandExecution', ...input, status: 'completed', exitCode: 0, aggregatedOutput: 'done' };
+    const chunks = mapper.map(method, { item });
+    if (method === 'item/started') chunks.push(...mapper.map('item/completed', { item }));
+    expect(chunks.filter(chunk => chunk.type === 'tool-input-available')).toEqual([
+      { type: 'tool-input-available', toolCallId: item.id, toolName: 'exec_command', input, dynamic: true, providerExecuted: true },
+    ]);
+    const stream = new ReadableStream<ChatChunk>({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } });
+    let message;
+    for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
+    expect(message?.parts).toHaveLength(1);
+    expect(message?.parts[0]).toMatchObject({ type: 'dynamic-tool', toolCallId: item.id, toolName: 'exec_command', input, output: 'done', state: 'output-available' });
+  });
+
+  test.each([undefined, null, 'read', { type: 'read', path: '/tmp/README.md' }])('omits non-array native command actions (%j)', commandActions => {
+    const mapper = new CodexEventMapper(), input = { command: 'cat README.md', cwd: '/tmp' };
+    const chunks = mapper.map('item/started', { item: { id: 'cmd-actions', type: 'commandExecution', ...input, commandActions } });
+    expect(chunks[0]).toMatchObject({ type: 'tool-input-available', input });
+    expect(chunks[0]).not.toHaveProperty('input.commandActions');
+  });
+
   test('emits native cached-token accounting', () => {
     const mapper = new CodexEventMapper();
     expect(mapper.map('thread/tokenUsage/updated', { tokenUsage: { last: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80 }, total: { inputTokens: 10000 } } })).toEqual([{ type: 'data-usage', id: 'usage', data: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80 } }]);

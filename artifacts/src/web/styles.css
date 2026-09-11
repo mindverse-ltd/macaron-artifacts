@@ -169,26 +169,63 @@ button.pressable:focus-visible:active { scale: none; }
 
 /* 表格：靠分隔线而不是格子线，避免嵌套边框 */
 .md [data-streamdown="table-wrapper"] {
+  min-width: 0;
+  max-width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+/* Streamdown keeps a second, unlabelled scrolling frame inside the wrapper. */
+.md [data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
   border: 0;
   border-radius: 0;
   background: transparent;
   overflow-x: auto;
+  box-shadow: none;
 }
 .md [data-streamdown="table"] {
   width: 100%;
   border-collapse: collapse;
   background: transparent;
+  font-size: inherit;
+  line-height: inherit;
+}
+.md :where([data-streamdown="table-header"], [data-streamdown="table-body"], [data-streamdown="table-row"]) {
+  border: 0;
+  background: transparent;
 }
 .md :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]) {
   border: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   background: transparent;
-  padding: 0.45em 0.7em;
+  padding: 0.4em 0.65em;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: top;
+  white-space: normal;
+}
+/* GFM alignment arrives as inline text-align, which must remain stronger than this default. */
+.md :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):not([align]) {
   text-align: left;
 }
 .md [data-streamdown="table-header-cell"] {
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: 500;
+  color: inherit;
+}
+.md :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
+  padding-left: 0;
+}
+.md :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):last-child {
+  padding-right: 0;
+}
+.md [data-streamdown="table"] > :last-child > [data-streamdown="table-row"]:last-child > :where(th, td) {
+  border-bottom: 0;
+}
+/* Pasted fragments can consist entirely of thead; do not turn their body text into a heading. */
+.md [data-streamdown="table"]:not(:has(> tbody > tr)) [data-streamdown="table-header-cell"] {
+  font-weight: inherit;
 }
 
 /* 渐隐带的强度，0～1。注册成 `<number>` 是为了能被 transition 补间：滚轮一格就是 ~100px，

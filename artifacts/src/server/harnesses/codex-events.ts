@@ -82,7 +82,7 @@ export class CodexEventMapper {
   }
   private tool(item: Record<string, unknown>): { name: string; input: unknown } | undefined {
     switch (item.type) {
-      case 'commandExecution': return { name: 'exec_command', input: { command: item.command, cwd: item.cwd } };
+      case 'commandExecution': return { name: 'exec_command', input: { command: item.command, cwd: item.cwd, ...(Array.isArray(item.commandActions) ? { commandActions: item.commandActions } : {}) } };
       case 'fileChange': return { name: 'apply_patch', input: { changes: item.changes } };
       case 'mcpToolCall': return { name: `mcp__${string(item.server)}__${string(item.tool)}`, input: item.arguments };
       case 'dynamicToolCall': return { name: [string(item.namespace), string(item.tool)].filter(Boolean).join('.'), input: item.arguments };

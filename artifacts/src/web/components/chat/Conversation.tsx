@@ -5,6 +5,9 @@ import type { WorkspaceStore } from '../../chat/store';
 import { useStickToBottom } from './useStickToBottom';
 import { MessageBody } from './MessageBody';
 import { ToolCall } from './ToolCall';
+import { ToolGroup } from './ToolGroup';
+import { groupToolEntries } from './tool-groups';
+import { conversationParts } from './conversation-parts';
 import { ApprovalCard } from './ApprovalCard';
 import { Composer } from './Composer';
 import { Reasoning } from './Reasoning';
@@ -44,29 +47,17 @@ function SessionComposer({ store, sessionId, busy, onSend }: { store: WorkspaceS
 }
 
 const Message = memo(function Message({ message, streaming, sessionId, cwd, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {
-  // The server forwards one part per output delta; the joined text exists only here.
-  const outputs = new Map<string, string>();
-  const firstDelta = new Map<string, number>();
-  const toolIds = new Set<string>();
-  for (const [index, part] of message.parts.entries()) {
-    if ('toolCallId' in part) toolIds.add(part.toolCallId);
-    if (part.type !== 'data-command') continue;
-    const { toolCallId, output } = part.data;
-    // Older saved sessions used one cumulative part; new streams store raw deltas.
-    outputs.set(toolCallId, part.id === `command:${toolCallId}` ? output : (outputs.get(toolCallId) ?? '') + output);
-    if (!firstDelta.has(toolCallId)) firstDelta.set(toolCallId, index);
-  }
-  return <article data-message-role={message.role} className={message.role === 'user' ? 'theme-bubble max-w-[85%] self-end rounded-2xl px-4 py-2 text-sm' : 'flex flex-col gap-3'}>
-    {message.parts.map((part, index) => {
+  const { entries, outputs } = conversationParts(message.parts, streaming);
+  return <article data-message-role={message.role} className={message.role === 'user' ? 'theme-bubble max-w-[85%] self-end rounded-2xl px-4 py-2 text-sm' : 'chat-message-content flex flex-col gap-3'}>
+    {groupToolEntries(entries).map(row => {
+      if (row.kind === 'tools') return <ToolGroup key={row.index} parts={row.parts} live={streaming}>{row.parts.map((part, index) => <ToolCall key={part.toolCallId ?? index} cwd={cwd} part={part} commandOutput={part.toolCallId ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />)}</ToolGroup>;
+      const { part, index } = row;
       if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
       if (part.type === 'reasoning') {
         const parts = reasoningRunAt(message.parts, index);
         return parts ? <Reasoning key={index} parts={parts} live={streaming && index + parts.length === message.parts.length} /> : null;
       }
-      if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') return <ToolCall key={index} cwd={cwd} part={part} commandOutput={'toolCallId' in part ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />;
       if (part.type === 'data-approval') return <ApprovalCard key={part.data.id} approval={part.data} onDecide={approved => onApprove(part.data.id, approved)} />;
-      // An orphan command stream renders once, at its first delta, carrying the joined output.
-      if (part.type === 'data-command') return !toolIds.has(part.data.toolCallId) && firstDelta.get(part.data.toolCallId) === index ? <ToolCall key={index} part={{ type: 'tool-command', state: streaming ? 'input-available' : 'output-available', output: outputs.get(part.data.toolCallId) }} onArtifact={onArtifact} /> : null;
       if (part.type === 'file' && part.mediaType.startsWith('image/')) return <img key={index} src={part.url} alt={part.filename ?? ''} className="max-h-60 rounded-lg border border-contrast object-contain" />;
       return null;
     })}

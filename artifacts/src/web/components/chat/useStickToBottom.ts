@@ -64,6 +64,13 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>()
       if (distance <= STICK_THRESHOLD_PX) setStuckBoth(true);
     };
     element.addEventListener("scroll", onScroll, { passive: true });
+    // Opening details is an explicit reading action, not new model output to follow.
+    const onInspect = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.target instanceof Element && event.target.closest('[data-chat-expander]')) setStuckBoth(false);
+    };
+    box.addEventListener('click', onInspect, true);
+    box.addEventListener('keydown', onInspect, true);
 
     const observer = new ResizeObserver(() => {
       if (!stuckRef.current) return;
@@ -79,6 +86,8 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>()
 
     return () => {
       element.removeEventListener("scroll", onScroll);
+      box.removeEventListener('click', onInspect, true);
+      box.removeEventListener('keydown', onInspect, true);
       observer.disconnect();
     };
   }, [setStuckBoth]);

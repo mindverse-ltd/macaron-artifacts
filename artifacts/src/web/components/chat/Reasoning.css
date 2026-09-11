@@ -1,9 +1,10 @@
 @property --reasoning-fade-top { syntax: '<number>'; inherits: true; initial-value: 0; }
 @property --reasoning-fade-bottom { syntax: '<number>'; inherits: true; initial-value: 0; }
 
-.reasoning { display: flex; align-items: flex-start; gap: .625rem; min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
-.reasoning-indicator { flex: 0 0 5px; height: 5px; margin-top: .55rem; border-radius: 50%; background: currentColor; opacity: .45; }
-.reasoning[data-reasoning-active='true'] .reasoning-indicator { opacity: .85; animation: reasoning-breathe 1.8s ease-in-out infinite; }
+.reasoning { display: flex; align-items: flex-start; gap: 8px; min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.reasoning-indicator { display: grid; flex: 0 0 14px; width: 14px; height: 1lh; margin-top: 4px; place-items: center; }
+.reasoning-indicator::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .45; content: ''; }
+.reasoning[data-reasoning-active='true'] .reasoning-indicator::before { opacity: .85; animation: reasoning-breathe 1.8s ease-in-out infinite; }
 .reasoning-main { flex: 1; min-width: 0; }
 .reasoning-viewport { max-height: min(14rem, 36svh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; transition: --reasoning-fade-top 140ms ease, --reasoning-fade-bottom 140ms ease; mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(1 - var(--reasoning-fade-top))) 0, #000 16px, #000 calc(100% - 16px), rgb(0 0 0 / calc(1 - var(--reasoning-fade-bottom))) 100%); }
 .reasoning[data-reasoning-kind='summary'] .reasoning-viewport { max-height: min(10rem, 30svh); }
@@ -36,4 +37,4 @@
 @media (hover: hover) { .reasoning-action:hover { color: var(--fg); } }
 @media (pointer: coarse) { .reasoning-action { min-height: 44px; padding-inline: .5rem; } }
 @keyframes reasoning-breathe { 50% { opacity: .3; } }
-@media (prefers-reduced-motion: reduce) { .reasoning *, .reasoning { animation: none !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .reasoning *, .reasoning, .reasoning-indicator::before { animation: none !important; transition: none !important; } }

@@ -221,6 +221,9 @@ importers:
       scheduler:
         specifier: 0.27.0
         version: 0.27.0
+      shell-quote:
+        specifier: 1.8.4
+        version: 1.8.4
       shiki:
         specifier: 4.4.3
         version: 4.4.3
@@ -255,6 +258,9 @@ importers:
       '@types/scheduler':
         specifier: 0.26.0
         version: 0.26.0
+      '@types/shell-quote':
+        specifier: 1.7.5
+        version: 1.7.5
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.1.1(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))
@@ -1561,6 +1567,9 @@ packages:
 
   '@types/scheduler@0.26.0':
     resolution: {integrity: sha512-WFHp9YUJQ6CKshqoC37iOlHnQSmxNc795UhB26CyBBttrN9svdIrUjl/NjnNmfcwtncN0h/0PPAFWv9ovP8mLA==}
+
+  '@types/shell-quote@1.7.5':
+    resolution: {integrity: sha512-+UE8GAGRPbJVQDdxi16dgadcBfQ+KG2vgZhV1+3A1XmHbmwcdwhCUwIdy+d3pAGrbvgRoVSjeI9vOWyq376Yzw==}
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
@@ -4915,6 +4924,8 @@ snapshots:
   '@types/retry@0.12.0': {}
 
   '@types/scheduler@0.26.0': {}
+
+  '@types/shell-quote@1.7.5': {}
 
   '@types/trusted-types@2.0.7':
     optional: true

@@ -21,6 +21,10 @@ The layout preserves background turns when the selected conversation changes. Mo
 
 Reasoning is visible by default. Summary updates show the latest entry while keeping earlier entries available; full reasoning uses a height-limited scrolling region with fading edges. Scrolling up pauses automatic following. The UI preserves independent AI SDK reasoning parts and their tool/text boundaries instead of joining them into one monologue. Streaming motion and automatic following stop when the turn ends or is interrupted.
 
+Adjacent tool calls share one collapsed status row, including progress and failures. Expanding it reveals every call in order with its arguments, output, and Canvas actions. Text, reasoning, images, and approvals separate groups; transport metadata and command output deltas do not create extra rows. Tool labels, reasoning, and assistant prose share a common text alignment, and toggling details preserves selectable output and keyboard focus.
+
+Tool summaries include the actual files, search terms, and directories. Codex's native `commandActions` take precedence; structured tool arguments and a conservative shell parser cover other harnesses and older sessions. Repeated targets are deduplicated only in the summary. Unknown or mixed commands retain their generic description and full original input; activity labels are not permission classifications.
+
 ## Themes
 
 The picker stores a paired light/dark family. Appearance (`auto`, light, or dark) remains independent from family selection, and only the variant matching the current appearance is loaded. Theme roles include editor, sidebar, title bar, menu, widget, input, dropdown, selection, focus, and optional borders; missing roles fall back to composited semantic values instead of painting every surface with a border.

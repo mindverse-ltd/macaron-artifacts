@@ -1,5 +1,9 @@
 /** Capture the visible result, never the generated module or its privileged host bridges. */
 export function snapshotHtml(surface: HTMLElement, title: string): string {
+  return `<!doctype html>\n${snapshotDocument(surface, title).documentElement.outerHTML}`;
+}
+
+export function snapshotDocument(surface: HTMLElement, title: string, kind: 'surface' | 'chat' = 'surface'): Document {
   const sourceDocument = surface.ownerDocument;
   const output = sourceDocument.implementation.createHTMLDocument(title);
   const root = sourceDocument.documentElement;
@@ -18,7 +22,7 @@ export function snapshotHtml(surface: HTMLElement, title: string): string {
     style.media = sheet.media.mediaText; output.head.append(style);
   }
   // App chrome locks body scrolling; exported documents need their own scrollable viewport.
-  const layout = output.createElement('style'); layout.textContent = 'html,body{height:auto;min-height:100%;overflow:auto}body{margin:0}.ui4a-surface{min-height:100vh}'; output.head.append(layout);
+  const layout = output.createElement('style'); layout.textContent = `html,body{height:auto;min-height:100%;overflow:auto}body{margin:0;container-type:inline-size}${kind === 'surface' ? '.ui4a-surface{min-height:100vh}' : '[data-chat-content] [hidden]{display:none!important}'}`; output.head.append(layout);
   const clone = surface.cloneNode(true) as HTMLElement;
   // Canvas inherits a panel palette that is different from the document palette.
   const computed = sourceDocument.defaultView!.getComputedStyle(surface);
@@ -26,6 +30,7 @@ export function snapshotHtml(surface: HTMLElement, title: string): string {
   const originals = [surface, ...surface.querySelectorAll('*')], copies = [clone, ...clone.querySelectorAll('*')];
   for (let index = 0; index < originals.length; index++) {
     const original = originals[index]!, copy = copies[index]!;
+    if (kind === 'chat' && original.scrollTop) copy.setAttribute('data-export-scroll-top', String(original.scrollTop));
     if (original instanceof HTMLInputElement) {
       if (original.type === 'password' || original.type === 'file') copy.removeAttribute('value');
       else copy.setAttribute('value', original.value);
@@ -59,7 +64,7 @@ export function snapshotHtml(surface: HTMLElement, title: string): string {
   // The selected picture is already captured in img.currentSrc; old source sets can override it when reopened.
   clone.querySelectorAll('script, iframe, object, embed, picture source, [data-export-control]').forEach(node => node.remove());
   output.body.append(clone);
-  return `<!doctype html>\n${output.documentElement.outerHTML}`;
+  return output;
 }
 
 export function downloadHtml(html: string, filename: string) {

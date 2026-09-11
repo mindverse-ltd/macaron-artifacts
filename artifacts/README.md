@@ -34,6 +34,8 @@ For a custom Claude gateway, start the app with the same `ANTHROPIC_BASE_URL` an
 
 Use the export arrow beside **Source** on an inline card or in the Canvas header to download or copy an HTML snapshot after the preview finishes. Canvas downloads use the artifact name. Snapshots preserve the rendered content, current form values, readable canvas images, and active theme. They are static: React handlers, chat/file capabilities, scripts, and embedded frames are not included. External images, fonts, and styles may still require network access. Switch back to preview before exporting from source view.
 
+The conversation title bar also exports the whole chat after the current turn finishes. Its HTML contains only the message column in the current theme, including links, highlighted code, tool calls, and complete reasoning history. Tool details, long outputs, and earlier summaries can still expand and collapse without the app server. The sidebar, composer, suggestions, and approval actions are omitted; inline cards remain static snapshots. A small embedded script handles transcript controls only.
+
 ## Boundaries
 
 | Module | Responsibility |

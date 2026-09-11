@@ -22,7 +22,8 @@ describe('Claude profile settings', () => {
     expect(claudeNativeModel({}, { ANTHROPIC_DEFAULT_MODEL: 'fallback' })).toBe('fallback');
     expect(claudeNativeModel({}, {})).toBe('default');
     let model = 'native-first', reads = 0;
-    const readSettings = async () => { reads++; return { effective: { model }, provenance: {}, sources: [] }; };
+    // This fixture tests captured settings, independently of the reviewer's shell model override.
+    const readSettings = async () => { reads++; return { effective: { model, env: { ANTHROPIC_MODEL: '' } }, provenance: {}, sources: [] }; };
     const captured = await resolveClaudeProfile('/tmp', { config: {} }, readSettings);
     model = 'native-next';
     const main = claudeOptions(turn({ profile: captured, nativeId: 'previous-profile-session' }), new AbortController());

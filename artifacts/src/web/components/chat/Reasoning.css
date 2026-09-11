@@ -5,7 +5,8 @@
 .reasoning-indicator { flex: 0 0 5px; height: 5px; margin-top: .55rem; border-radius: 50%; background: currentColor; opacity: .45; }
 .reasoning[data-reasoning-active='true'] .reasoning-indicator { opacity: .85; animation: reasoning-breathe 1.8s ease-in-out infinite; }
 .reasoning-main { flex: 1; min-width: 0; }
-.reasoning-viewport { max-height: min(14rem, 36svh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; transition: --reasoning-fade-top 140ms ease, --reasoning-fade-bottom 140ms ease; mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(1 - var(--reasoning-fade-top))) 0, #000 16px, #000 calc(100% - 16px), rgb(0 0 0 / calc(1 - var(--reasoning-fade-bottom))) 100%); }
+/* Reasoning belongs to the transcript: let scrolling continue into the chat at either edge. */
+.reasoning-viewport { max-height: min(14rem, 36svh); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; transition: --reasoning-fade-top 140ms ease, --reasoning-fade-bottom 140ms ease; mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(1 - var(--reasoning-fade-top))) 0, #000 16px, #000 calc(100% - 16px), rgb(0 0 0 / calc(1 - var(--reasoning-fade-bottom))) 100%); }
 .reasoning[data-reasoning-kind='summary'] .reasoning-viewport { max-height: min(10rem, 30svh); }
 .reasoning-content { min-width: 0; overflow-wrap: anywhere; padding-block: 4px; }
 .reasoning-content [data-reasoning-entry]:not([hidden]) ~ [data-reasoning-entry]:not([hidden]) { margin-top: .75rem; }

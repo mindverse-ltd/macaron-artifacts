@@ -38,7 +38,6 @@ export function initializeChatExport() {
       const keyboard = event.detail === 0, ownsFocus = document.activeElement === button;
       section.toggleAttribute('data-keyboard', keyboard);
       section.dataset.exportOpen = String(button.dataset.exportToggle !== 'collapse');
-      scroller.style.transition = keyboard ? 'none' : 'height 300ms cubic-bezier(0.32,0.72,0,1)';
       update();
       if (ownsFocus) {
         const next = toggles.find(item => !item.hidden) ?? scroller;
@@ -46,7 +45,6 @@ export function initializeChatExport() {
         next.focus({ preventScroll: !keyboard });
       }
     });
-    scroller.addEventListener('transitionend', event => { if (event.target === scroller && event.propertyName === 'height') scroller.style.transition = 'none'; });
     updates.push(update); scroller.addEventListener('scroll', schedule, { passive: true });
     observer.observe(content); observer.observe(scroller);
   }

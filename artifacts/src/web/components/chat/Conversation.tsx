@@ -7,7 +7,8 @@ import { MessageBody } from './MessageBody';
 import { ToolCall } from './ToolCall';
 import { ApprovalCard } from './ApprovalCard';
 import { Composer } from './Composer';
-import { Collapsible } from '../code/Collapsible';
+import { Reasoning } from './Reasoning';
+import { reasoningRunAt } from './reasoning-model';
 import { Button } from '../ui4a-ui';
 import { Icon } from '../Icon';
 
@@ -58,7 +59,10 @@ const Message = memo(function Message({ message, streaming, sessionId, cwd, onSe
   return <article data-message-role={message.role} className={message.role === 'user' ? 'theme-bubble max-w-[85%] self-end rounded-2xl px-4 py-2 text-sm' : 'flex flex-col gap-3'}>
     {message.parts.map((part, index) => {
       if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
-      if (part.type === 'reasoning') return <details key={index} className="overflow-clip rounded-lg bg-surface-2 text-xs text-muted"><summary className="interactive cursor-pointer px-3 py-2 select-none hover:bg-surface-3 hover:text-hover-fg">思考过程</summary><Collapsible className="theme-code"><p className="px-3 py-2 leading-relaxed whitespace-pre-wrap text-code-fg">{part.text}</p></Collapsible></details>;
+      if (part.type === 'reasoning') {
+        const parts = reasoningRunAt(message.parts, index);
+        return parts ? <Reasoning key={index} parts={parts} live={streaming && index + parts.length === message.parts.length} /> : null;
+      }
       if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') return <ToolCall key={index} cwd={cwd} part={part} commandOutput={'toolCallId' in part ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />;
       if (part.type === 'data-approval') return <ApprovalCard key={part.data.id} approval={part.data} onDecide={approved => onApprove(part.data.id, approved)} />;
       // An orphan command stream renders once, at its first delta, carrying the joined output.

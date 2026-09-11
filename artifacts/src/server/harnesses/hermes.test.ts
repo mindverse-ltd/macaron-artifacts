@@ -19,8 +19,15 @@ describe('Hermes gateway adapter protocol helpers', () => {
     expect(rpcPayload({ session_id: 'runtime-1' })).toEqual({ session_id: 'runtime-1' });
   });
 
-  test('resumes the durable session and maps Hermes thinking deltas', async () => {
+  test.each(['streamed', 'fallback', 'interleaved'] as const)('resumes the durable session and preserves %s reasoning boundaries', async mode => {
     const OriginalWebSocket = globalThis.WebSocket;
+    const originalUrl = process.env.MACARON_HERMES_URL;
+    const events: [string, Record<string, unknown>][] = mode === 'interleaved' ? [
+      ['thinking.delta', { text: 'plan ' }], ['reasoning.delta', { text: 'first' }],
+      ['tool.start', { tool_id: 'tool-1', name: 'read_file', args: {} }], ['tool.complete', { tool_id: 'tool-1', result: 'source' }],
+      ['thinking.delta', { text: 'check ' }], ['message.delta', { text: '' }], ['reasoning.delta', { text: 'result' }],
+      ['message.delta', { text: 'answer' }], ['message.complete', { text: 'answer' }],
+    ] : [['thinking.delta', { text: 'plan' }], ...(mode === 'streamed' ? [['message.delta', { text: 'answer' }]] as [string, Record<string, unknown>][] : []), ['message.complete', { text: 'answer' }]];
     let runtime = 0;
     class FakeWebSocket {
       static OPEN = 1;
@@ -32,7 +39,7 @@ describe('Hermes gateway adapter protocol helpers', () => {
         const request = JSON.parse(raw) as { id: number; method: string; params: Record<string, unknown> }, reply = (result: Record<string, unknown>) => this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) });
         if (request.method === 'session.create') { runtime = 1; reply({ session_id: 'runtime-1', stored_session_id: 'stored-1' }); }
         else if (request.method === 'session.resume') { runtime = 2; reply({ session_id: 'runtime-2', stored_session_id: 'stored-1' }); }
-        else if (request.method === 'prompt.submit') { reply({ status: 'streaming' }); queueMicrotask(() => { const sid = `runtime-${runtime}`; for (const [type, payload] of [['thinking.delta', { text: 'plan' }], ['message.delta', { text: 'answer' }], ['message.complete', { text: 'answer' }]] as const) this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type, session_id: sid, payload } }) }); }); }
+        else if (request.method === 'prompt.submit') { reply({ status: 'streaming' }); queueMicrotask(() => { const sid = `runtime-${runtime}`; for (const [type, payload] of events) this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type, session_id: sid, payload } }) }); }); }
         else reply({});
       }
       close() { this.readyState = 3; }
@@ -46,13 +53,23 @@ describe('Hermes gateway adapter protocol helpers', () => {
       let nativeId: string | undefined;
       const run = async (prompt: string) => { const chunks = []; for await (const chunk of hermesAdapter.run({ ...base, prompt, nativeId, onNativeSession: id => { nativeId = id; } })) chunks.push(chunk); return chunks; };
       const first = await run('first'), resumed = await run('second');
-      expect(first.filter(chunk => chunk.type === 'reasoning-delta').map(chunk => chunk.delta)).toEqual(['plan']);
+      expect(first.filter(chunk => chunk.type === 'reasoning-delta').map(chunk => chunk.delta)).toEqual(mode === 'interleaved' ? ['plan ', 'first', 'check ', 'result'] : ['plan']);
+      const starts = first.filter(chunk => chunk.type === 'reasoning-start'), ends = first.filter(chunk => chunk.type === 'reasoning-end');
+      expect(new Set(starts.map(chunk => chunk.id)).size).toBe(mode === 'interleaved' ? 2 : 1);
+      expect(ends.map(chunk => chunk.id)).toEqual(starts.map(chunk => chunk.id));
+      expect(first.findLastIndex(chunk => chunk.type === 'reasoning-end')).toBeLessThan(first.findIndex(chunk => chunk.type === 'text-start'));
+      if (mode === 'interleaved') {
+        const toolIndex = first.findIndex(chunk => chunk.type === 'tool-input-available');
+        expect(first[toolIndex - 1]).toEqual({ type: 'reasoning-end', id: starts[0]?.id });
+        expect(first[toolIndex + 2]).toEqual({ type: 'reasoning-start', id: starts[1]?.id });
+        expect(first.filter(chunk => chunk.type === 'reasoning-delta').map(chunk => chunk.id)).toEqual([starts[0]?.id, starts[0]?.id, starts[1]?.id, starts[1]?.id]);
+      }
       expect(decodeHermesNativeId(nativeId!).sessionId).toBe('runtime-2');
       expect(resumed.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['answer']);
     } finally {
       await closeHermesConnections();
       globalThis.WebSocket = OriginalWebSocket;
-      delete process.env.MACARON_HERMES_URL;
+      if (originalUrl === undefined) delete process.env.MACARON_HERMES_URL; else process.env.MACARON_HERMES_URL = originalUrl;
     }
   });
 });

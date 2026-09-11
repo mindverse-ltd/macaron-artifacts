@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ReasoningUIPart } from 'ai';
-import { analyzeReasoning, reasoningRunAt } from './reasoning-model';
+import { analyzeReasoning, createSummaryArrivalTracker, reasoningRunAt } from './reasoning-model';
 
 const part = (text: string, extra: Partial<ReasoningUIPart> = {}): ReasoningUIPart => ({ type: 'reasoning', text, ...extra });
 const summary = (text: string, extra: Partial<ReasoningUIPart> = {}) => part(text, { providerMetadata: { macaron: { reasoningKind: 'summary' } }, ...extra });
@@ -96,5 +96,43 @@ describe('reasoning presentation', () => {
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].text).toBe('**Inspecting the source**');
     expect(analyzeReasoning([part('', { state: 'done' })])).toEqual({ kind: 'full', entries: [] });
+  });
+});
+
+describe('summary arrival identity', () => {
+  const entries = (text: string, state: 'streaming' | 'done' = 'streaming') => analyzeReasoning([summary(text, { id: 'summary', state })], true).entries;
+  test('seeds the initial snapshot and remounted history without replaying', () => {
+    const current = entries('**Current**');
+    const tracker = createSummaryArrivalTracker(current);
+    expect(tracker.isNew(current, true)).toBe(false);
+    expect(tracker.isNew(entries('**Current**\nMore text'), true)).toBe(false);
+  });
+  test('fades each new live identity once, not each token or repeated appearance', () => {
+    const first = entries('**First**'), next = entries('**First**\n\n**Next**');
+    const arrives = createSummaryArrivalTracker(first);
+    expect(arrives.isNew(next, true)).toBe(true); arrives.consume(next);
+    expect(arrives.isNew(entries('**First**\n\n**Next**\nNew token'), true)).toBe(false);
+    arrives.consume(first);
+    expect(arrives.isNew(next, true)).toBe(false);
+  });
+  test('consumes hidden history arrivals and completed backfill even when the turn is live', () => {
+    const arrives = createSummaryArrivalTracker([]);
+    expect(arrives.isNew(entries('**History**', 'done'), true)).toBe(false); arrives.consume(entries('**History**', 'done'));
+    expect(arrives.isNew(entries('**History**\n\n**Hidden arrival**'), false)).toBe(false); arrives.consume(entries('**History**\n\n**Hidden arrival**'));
+    expect(arrives.isNew(entries('**History**\n\n**Hidden arrival**'), true)).toBe(false);
+    expect(arrives.isNew(entries('**History**\n\n**Hidden arrival**\n\n**Visible arrival**'), true)).toBe(true);
+  });
+  test('history-open arrivals become baseline before the latest view is restored', () => {
+    const arrives = createSummaryArrivalTracker(entries('**Initial**'));
+    const hidden = entries('**Initial**\n\n**Hidden**');
+    expect(arrives.isNew(hidden, false)).toBe(false); arrives.consume(hidden);
+    expect(arrives.isNew(hidden, true)).toBe(false);
+  });
+  test('unknown provenance is baseline, and incomplete headings do not count as arrivals', () => {
+    const initial = analyzeReasoning([summary('**Existing**', { id: 'summary' })], true).entries;
+    const arrives = createSummaryArrivalTracker([]);
+    expect(arrives.isNew(initial, true)).toBe(false); arrives.consume(initial);
+    expect(arrives.isNew(entries('**Existing**\n\n**Incompl'), true)).toBe(false);
+    expect(arrives.isNew(entries('**Existing**\n\n**Complete**'), true)).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import type { ThemeRegistration } from '@shikijs/types';
+import { contrastRatio, themePalette } from '../../../artifacts/src/web/theme/palette';
 
 const pairedPalettes = [{ id: 'vitesse', label: 'Vitesse', light: 'vitesse-light', dark: 'vitesse-dark' }, { id: 'github', label: 'GitHub', light: 'github-light', dark: 'github-dark' }] as const;
 export const palettes = [{ id: 'neutral', label: 'Neutral' }, ...pairedPalettes] as const;
@@ -25,19 +26,35 @@ export function readableText(background: string, proposed: string) {
 }
 
 export function paletteVariables(theme: ThemeRegistration): Record<string, string> {
-  const colors = theme.colors ?? {}, dark = theme.type === 'dark';
-  const background = colors['editor.background'] ?? theme.bg ?? (dark ? '#121212' : '#ffffff');
-  const foreground = colors['editor.foreground'] ?? theme.fg ?? (dark ? '#eeeeee' : '#171717');
-  const mix = (amount: number) => `color-mix(in srgb, ${foreground} ${amount}%, ${background})`;
-  const primary = colors['button.background'] ?? foreground;
-  const muted = colors.descriptionForeground ?? mix(62);
+  const dark = theme.type === 'dark';
+  let palette = themePalette(theme, dark);
+  // Editor themes often separate panes by a line alone. Docs use surface depth instead:
+  // keep the native hue and lightness direction, then revalidate the sidebar's text and states.
+  const sidebar = palette['sidebar-bg'], background = palette.surface;
+  if (contrastRatio(sidebar, background) < 1.14) {
+    const darker = sidebar === background ? !dark : luminance(sidebar)! < luminance(background)!;
+    const channels = [1, 3, 5].map(index => Number.parseInt(sidebar.slice(index, index + 2), 16));
+    for (let step = 1; step <= 100; step++) {
+      const fill = `#${channels.map(channel => Math.round(channel + ((darker ? 0 : 255) - channel) * step / 100).toString(16).padStart(2, '0')).join('')}`;
+      if (contrastRatio(fill, background) < 1.14) continue;
+      palette = themePalette({ ...theme, colors: { ...theme.colors, 'sideBar.background': fill } }, dark);
+      break;
+    }
+  }
+  // Reuse the WebUI's alpha compositing and contrast correction. Fumadocs' primary mixes
+  // text and fill roles, so navigation/link scopes below receive separate semantic tokens.
   return {
-    background, foreground, card: colors['editorWidget.background'] ?? mix(3), 'card-foreground': foreground,
-    popover: colors['menu.background'] ?? mix(5), 'popover-foreground': foreground,
-    muted: mix(6), 'muted-foreground': muted, border: colors['panel.border'] ?? mix(15),
-    primary, 'primary-foreground': readableText(primary, colors['button.foreground'] ?? background),
-    secondary: mix(7), 'secondary-foreground': foreground, accent: colors['list.hoverBackground'] ?? mix(10), 'accent-foreground': foreground,
-    ring: readableText(background, colors.focusBorder ?? primary), overlay: dark ? '#0008' : '#0003', destructive: colors.errorForeground ?? (dark ? '#ff6b83' : '#b91c1c'),
-    info: colors['editorInfo.foreground'] ?? '#3b82f6', warning: colors['editorWarning.foreground'] ?? '#d97706', error: colors.errorForeground ?? '#dc2626', success: colors['gitDecoration.addedResourceForeground'] ?? '#16a34a', idea: primary,
+    background: palette.surface, foreground: palette.fg, card: palette['surface-2'], 'card-foreground': palette.fg,
+    popover: palette['menu-bg'], 'popover-foreground': palette['menu-fg'],
+    muted: palette['surface-2'], 'muted-foreground': palette.muted, border: palette.border, 'contrast-border': palette.contrast,
+    primary: palette.accent, 'primary-foreground': palette['accent-fg'], 'primary-hover': palette['accent-hover'], link: palette.link,
+    secondary: palette.secondary, 'secondary-foreground': palette['secondary-fg'], accent: palette['surface-3'], 'accent-foreground': palette['hover-fg'],
+    ring: palette.focus, overlay: dark ? '#0008' : '#0003', destructive: palette.danger,
+    info: palette.link, warning: palette.warn, error: palette.danger, success: palette.success, idea: palette.link,
+    'sidebar-bg': palette['sidebar-bg'], 'sidebar-fg': palette['sidebar-fg'], 'sidebar-muted': palette['sidebar-muted'],
+    'sidebar-hover': palette['sidebar-hover'], 'sidebar-hover-fg': palette['sidebar-hover-fg'], 'sidebar-focus': palette['sidebar-focus'],
+    'sidebar-selection': palette['sidebar-selection'], 'sidebar-selection-fg': palette['sidebar-selection-fg'],
+    'menu-hover': palette['menu-hover'], 'menu-hover-fg': palette['menu-hover-fg'], 'menu-focus': palette['menu-focus'], 'menu-muted': palette['menu-muted'],
+    code: palette.code, 'code-fg': palette['code-fg'], 'inline-code': palette['inline-code'], 'inline-code-fg': palette['inline-code-fg'],
   };
 }

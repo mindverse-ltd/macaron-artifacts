@@ -7,6 +7,7 @@ import { ThemeProvider } from './theme/ThemeProvider';
 import 'virtual:uno.css';
 import './styles.css';
 import { consumePairHandoff } from './chat/connection';
+import { Notifications } from './components/Notifications';
 
 consumePairHandoff();
-createRoot(document.getElementById('root')!).render(<StrictMode><ThemeProvider><WorkspaceProvider><ProfileProvider><App /></ProfileProvider></WorkspaceProvider></ThemeProvider></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><ThemeProvider><WorkspaceProvider><ProfileProvider><App /></ProfileProvider></WorkspaceProvider><Notifications /></ThemeProvider></StrictMode>);

@@ -23,6 +23,21 @@ body { margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+.tool-disclosure-icon { transition: transform 160ms ease; }
+.tool-call[open] > summary .tool-disclosure-icon { transform: rotate(90deg); }
+.tool-call > summary:focus-visible { outline-offset: -2px; }
+/* Notifications live outside scrolling panels; expand the close hit area without enlarging its glyph. */
+.app-notifications [data-close-button]::after { content: ''; position: absolute; inset: -12px; }
+.app-notifications [data-content] { overflow-wrap: anywhere; }
+.app-notifications[data-sonner-toaster] [data-sonner-toast] [data-description] { color: var(--widget-muted); }
+.app-notifications [data-sonner-toast]:focus-visible,
+.app-notifications [data-close-button]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .export-trigger, .artifact-close { width: 44px; height: 44px; }
+  .export-menu-item, .tool-call > summary { min-height: 44px; }
+  .artifact-source-toggle { min-width: 44px; height: 44px; }
+  [data-export-toggle] { min-width: 44px; min-height: 44px; }
+}
 /* Low-specificity defaults preserve keyboard focus without overriding outline-none
    on composite controls, whose enclosing border is their focus indicator. */
 :where(:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }

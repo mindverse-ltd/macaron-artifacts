@@ -5,7 +5,10 @@ export type ToolActivity = Omit<CommandActivity, 'kind'> & { kind: CommandActivi
 const LABELS = { read: '读取', search: '搜索', list: '查看目录', fetch: '获取网页', write: '写入', edit: '编辑' };
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
-export const toolName = (part: ToolPartLike) => (part.toolName ?? part.type.replace(/^tool-/, '')).replace(/^mcp__[^]+?__/, '');
+export function toolName(part: ToolPartLike): string {
+  const raw = part.toolName ?? part.type.replace(/^tool-/, '');
+  return raw.replace(/^mcp__[^]+?__/, '') || raw;
+}
 
 export function toolActivities(part: ToolPartLike): ToolActivity[] | undefined {
   const input = record(part.input), name = toolName(part), path = text(input.file_path ?? input.filePath ?? input.path ?? input.filename);

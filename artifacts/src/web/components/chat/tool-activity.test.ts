@@ -1,10 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { activityPresentation, toolActivities } from './tool-activity';
+import { activityPresentation, toolActivities, toolName } from './tool-activity';
 import { summarizeTools, type ToolPartLike } from './tool-groups';
 
 const tool = (name: string, input: unknown, state = 'output-available'): ToolPartLike => ({ type: 'dynamic-tool', toolName: name, input, state });
 
 describe('semantic tool descriptions', () => {
+  test('normalizes tool names consistently and preserves malformed MCP names', () => {
+    expect(toolName({ type: 'tool-Read' })).toBe('Read');
+    expect(toolName(tool('mcp__server__read_file', {}))).toBe('read_file');
+    expect(toolName(tool('mcp__server__', {}))).toBe('mcp__server__');
+    expect(toolName(tool('mcp____Read', {}))).toBe('mcp____Read');
+    expect(summarizeTools([tool('mcp__server__', {})]).detail).toBe('mcp__server__ 1');
+  });
+
   test('uses native command actions and preserves search terms and paths', () => {
     const input = { command: 'opaque wrapper', cwd: '/workspace', commandActions: [
       { type: 'read', name: 'model.ts', path: '/workspace/src/model.ts', command: 'cat src/model.ts' },

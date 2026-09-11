@@ -1,4 +1,4 @@
-import { activityPresentation, toolActivities } from './tool-activity';
+import { activityPresentation, toolActivities, toolName } from './tool-activity';
 
 export type ToolPartLike = { type: string; toolName?: string; toolCallId?: string; state?: string; input?: unknown; errorText?: string };
 export type ToolGroup<T> = { kind: 'tools'; parts: (T & ToolPartLike)[]; index: number } | { kind: 'part'; part: T; index: number };
@@ -31,8 +31,7 @@ export function summarizeTools(parts: readonly ToolPartLike[], live = true): { l
   const activities = parts.map(toolActivities);
   let succeeded = 0, failed = 0, active = 0, waiting = 0;
   for (const [index, part] of parts.entries()) {
-    const raw = part.toolName ?? part.type.replace(/^tool-/, '');
-    const name = raw.startsWith('mcp__') ? raw.split('__').slice(2).join('__') || raw : raw;
+    const name = toolName(part);
     const label = LABELS[name] ?? name;
     if (!activities[index]) names.set(label, (names.get(label) ?? 0) + 1);
     if (part.state === 'output-error' || part.state === 'output-denied' || part.errorText) failed++;

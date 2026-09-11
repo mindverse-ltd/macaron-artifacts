@@ -3,6 +3,17 @@
 /* streamdown 的逐词淡入只输出 `animation: sd-fadeIn`，keyframes 在它自己这个文件里 ——
    不引就是指向一个不存在的动画，CSS 静默忽略，文字直接蹦出来，看不出任何异常 */
 @import "streamdown/styles.css";
+@import "katex/dist/katex.min.css";
+
+.md .katex-display, .ui4a-math-block { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 2rem), transparent); }
+.md .katex-display::-webkit-scrollbar, .ui4a-math-block::-webkit-scrollbar { display: none; }
+.ui4a-math-block { display: block; min-width: 0; }
+.ui4a-math-block .katex-display { margin: 0; }
+.ui4a-chart { color: var(--muted); font-size: 12px; }
+.ui4a-chart .recharts-cartesian-axis-tick text { fill: var(--muted); }
+.ui4a-chart .recharts-cartesian-grid line { stroke: var(--border); }
+.ui4a-chart .recharts-default-tooltip { background: var(--surface) !important; border-color: var(--border) !important; border-radius: 6px; color: var(--fg); }
+.ui4a-chart .recharts-tooltip-label { color: var(--fg); }
 
 html,
 body {

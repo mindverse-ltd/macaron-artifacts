@@ -1,9 +1,10 @@
-import { lazy, memo, Suspense, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
 import { cjk } from '@streamdown/cjk';
 import { CodeBlock } from '../code/CodeBlock';
 import { Collapsible } from '../code/Collapsible';
 import { parseSegments } from './segments';
+import { ExportMenu } from '../ExportMenu';
 
 const Ui4aSurface = lazy(() => import('../../ui4a/Ui4aSurface').then(module => ({ default: module.Ui4aSurface })));
 const PLUGINS = { cjk };
@@ -21,6 +22,7 @@ export const MessageBody = memo(function MessageBody({ text, messageId, streamin
 
 function InlineUi4a({ source, ...props }: { source: string; streaming: boolean; scope: string; sessionId: string; onSend: (text: string) => void }) {
   const [showSource, setShowSource] = useState(false);
+  const target = useRef<HTMLDivElement>(null);
   const fallback = <div className="theme-code overflow-clip rounded-xl"><Collapsible><CodeBlock code={source} /></Collapsible></div>;
-  return <div className="group relative"><button type="button" onClick={() => setShowSource(value => !value)} className="theme-widget interactive absolute top-2 right-2 z-10 rounded-lg px-2 py-1 text-xs text-muted opacity-0 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100">{showSource ? '预览' : '源码'}</button>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div>;
+  return <div><div className="flex h-10 items-center justify-end gap-1"><button type="button" onClick={() => setShowSource(value => !value)} aria-pressed={showSource} className="interactive h-9 rounded-md px-2 text-xs text-muted hover:bg-surface-3 hover:text-hover-fg">{showSource ? '预览' : '源码'}</button><ExportMenu target={target} disabled={props.streaming || showSource} /></div><div ref={target}>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div></div>;
 }

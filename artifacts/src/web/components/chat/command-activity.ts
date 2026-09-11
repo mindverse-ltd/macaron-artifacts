@@ -4,8 +4,8 @@ export type CommandActivity = { kind: 'read' | 'search' | 'list'; target: string
 
 const searchFlags = new Set('--heading --no-heading --line-number --no-line-number --hidden --no-ignore --no-ignore-vcs --follow --ignore-case --smart-case --case-sensitive --fixed-strings --word-regexp --line-regexp --only-matching --files-with-matches --files-without-match --count --count-matches --column --with-filename --no-filename --multiline --multiline-dotall --files'.split(' '));
 const searchValues = new Set('-g --glob --iglob -t --type -T --type-not -m --max-count --max-depth --max-filesize -A --after-context -B --before-context -C --context --color -e --regexp'.split(' '));
-const grepFlags = new Set('--line-number --ignore-case --fixed-strings --word-regexp --line-regexp --only-matching --files-with-matches --files-without-match --count --with-filename --no-filename --recursive --extended-regexp'.split(' '));
-const grepValues = new Set('-m --max-count -A --after-context -B --before-context -C --context --include --exclude --exclude-dir --color -e --regexp'.split(' '));
+const grepFlags = new Set('--line-number --ignore-case --fixed-strings --word-regexp --line-regexp --only-matching --files-with-matches --files-without-match --count --with-filename --no-filename --recursive --extended-regexp --color --colour'.split(' '));
+const grepValues = new Set('-m --max-count -A --after-context -B --before-context -C --context --include --exclude --exclude-dir -e --regexp'.split(' '));
 const listFlags = new Set('--hidden --no-ignore --full-path --glob --fixed-strings --case-sensitive --ignore-case --absolute-path'.split(' '));
 const lsFlags = new Set('--all --almost-all --directory --recursive --human-readable'.split(' '));
 const listValues = new Set('-d --max-depth --min-depth -t --type -e --extension -E --exclude'.split(' '));
@@ -22,6 +22,11 @@ function argumentsOf(args: string[], flags: Set<string>, values: Set<string>, sh
     if (!ended && arg === '--') { ended = true; continue; }
     if (ended || !arg.startsWith('-')) { positional.push(arg); continue; }
     const equals = arg.indexOf('='), option = equals > 0 ? arg.slice(0, equals) : arg;
+    // grep accepts an optional color value only after '='; the next word is still the query.
+    if (flags.has(option) && (option === '--color' || option === '--colour')) {
+      if (equals > 0 && !['always', 'never', 'auto'].includes(arg.slice(equals + 1))) return;
+      continue;
+    }
     const attached = !arg.startsWith('--') && arg.length > 2 && values.has(arg.slice(0, 2));
     const valueOption = attached ? arg.slice(0, 2) : option;
     if (values.has(valueOption)) {

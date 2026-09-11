@@ -24,6 +24,15 @@ describe('command activity display fallback', () => {
     expect(parseCommandActivities('fd --hidden')).toEqual([{ kind: 'list', target: '.' }]);
   });
 
+  test('keeps grep optional color arguments distinct from ripgrep required values', () => {
+    const expected = [{ kind: 'search' as const, target: 'name', path: 'package.json' }];
+    for (const option of ['--color', '--colour', '--color=always', '--colour=auto', '--color=never']) expect(parseCommandActivities(`grep ${option} name package.json`)).toEqual(expected);
+    expect(parseCommandActivities('grep --color always package.json')).toEqual([{ kind: 'search', target: 'always', path: 'package.json' }]);
+    expect(parseCommandActivities('rg --color always name package.json')).toEqual(expected);
+    expect(parseCommandActivities('rg --color=always name package.json')).toEqual(expected);
+    expect(parseCommandActivities('grep --color=invalid name package.json')).toBeUndefined();
+  });
+
   test('accepts only fully recognized command sequences and bounded shell wrappers', () => {
     expect(parseCommandActivities('/bin/zsh -lc \'cat README.md && rg needle src; ls docs\'')).toEqual([{ kind: 'read', target: 'README.md' }, { kind: 'search', target: 'needle', path: 'src' }, { kind: 'list', target: 'docs' }]);
     expect(parseCommandActivities('sh -c "bash -c \'cat README.md\'"')).toEqual([{ kind: 'read', target: 'README.md' }]);

@@ -15,7 +15,7 @@ export function NewSessionDialog({ harnesses, initialHarness, initialCwd, onClos
   const [error, setError] = useState<string>();
   const info = harnesses.find(item => item.id === harness);
   const submit = async () => { if (!cwd.trim() || !info?.available || busy) return; setBusy(true); setError(undefined); try { await onCreate({ harness, cwd: cwd.trim(), profileId: profileId || null, ...(model.trim() ? { model: model.trim() } : {}) }); onClose(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); } };
-  return <><Dialog open onClose={() => { if (!busy) onClose(); }} className="relative z-50"><div className="fixed inset-0 bg-black/40" /><div className="fixed inset-0 flex items-center justify-center p-3 sm:p-4"><DialogPanel className="theme-widget max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl p-4 sm:p-5">
+  return <><Dialog open onClose={() => { if (!busy) onClose(); }} className="relative z-dialog"><div className="fixed inset-0 bg-black/40" /><div className="fixed inset-0 flex items-center justify-center p-3 sm:p-4"><DialogPanel className="theme-widget max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl p-4 sm:p-5">
     <DialogTitle className="mb-4 text-base font-medium">新会话</DialogTitle>
     <form aria-busy={busy} onSubmit={event => { event.preventDefault(); void submit(); }} className="flex flex-col gap-4">
       <RadioGroup name="harness" value={harness} onChange={value => { setHarness(value); setProfileId(''); setModel(''); }} disabled={busy} aria-orientation="horizontal" className="flex flex-col gap-2">

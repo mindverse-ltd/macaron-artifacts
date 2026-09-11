@@ -43,6 +43,9 @@ button.pressable:focus-visible:active { scale: none; }
 .select-popup[data-anchor~='start'] { --popup-origin-x: 0%; }
 .select-popup:dir(rtl) { --popup-origin-x: 0%; }
 .select-popup:dir(rtl)[data-anchor~='start'] { --popup-origin-x: 100%; }
+/* Keyboard actions settle immediately, including when Escape interrupts a pointer-opened popup. */
+.select-popup[data-keyboard], [data-export-collapsible][data-keyboard], [data-export-collapsible][data-keyboard] > [data-export-scroller], [data-export-collapsible][data-keyboard] > [data-export-toggle] { transition: none !important; }
+[data-export-toggle][data-export-fallback] { opacity: 1 !important; }
 .tool-disclosure-icon { transition: transform 160ms ease; }
 .tool-call[open] > summary .tool-disclosure-icon { transform: rotate(90deg); }
 .tool-call > summary:focus-visible { outline-offset: -2px; }

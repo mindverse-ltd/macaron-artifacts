@@ -18,5 +18,11 @@ export const unoConfig = (scope) => ({
   presets: [presetWind4({ important: scope, preflights: { reset: !scope } }), presetAnimations()],
   theme: { colors: { ...Object.fromEntries(roleColors.map(key => [key, `var(--${key})`])), surface: 'var(--surface)', 'surface-2': 'var(--surface-2)', 'surface-3': 'var(--surface-3)', border: 'var(--border)', 'control-border': 'var(--control-border, var(--border))', 'input-bg': 'var(--input-bg, var(--surface))', 'input-fg': 'var(--input-fg, var(--fg))', 'input-border': 'var(--input-border, var(--border))', 'input-placeholder': 'var(--input-placeholder, var(--muted))', 'dropdown-bg': 'var(--dropdown-bg, var(--surface))', 'dropdown-fg': 'var(--dropdown-fg, var(--fg))', 'dropdown-border': 'var(--dropdown-border, var(--border))', focus: 'var(--focus, var(--accent))', link: 'var(--link, var(--accent))', fg: 'var(--fg)', muted: 'var(--muted)', accent: 'var(--accent)', 'accent-fg': 'var(--accent-fg)', 'accent-hover': 'var(--accent-hover, var(--accent))', danger: 'var(--danger)', 'danger-bg': 'var(--danger-bg, var(--danger))', 'danger-fg': 'var(--danger-fg, #fff)', 'danger-hover': 'var(--danger-hover, var(--danger))', success: 'var(--success)', warn: 'var(--warn)', ...Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`series-${index + 1}`, `var(--series-${index + 1})`])) } },
   // Native roles may invert foreground and background. Crossfading both passes through unreadable intermediate colors.
-  shortcuts: { interactive: 'transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]' },
+  shortcuts: {
+    interactive: 'transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]',
+    'btn-icon': 'interactive grid place-items-center text-muted hover:bg-surface-3 hover:text-hover-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+    'menu-item': 'interactive flex items-center gap-2 text-sm data-[focus]:bg-surface-3 data-[focus]:text-hover-fg',
+    // Portal popovers must clear their owning dialog; confirmations stay above both.
+    'z-content-overlay': 'z-10', 'z-sticky': 'z-20', 'z-floating-control': 'z-30', 'z-dialog': 'z-50', 'z-popover': 'z-60', 'z-confirm': 'z-70',
+  },
 });

@@ -61,7 +61,7 @@ function ThemePicker({ slot }: { slot: ThemeSlot }) {
         </div>
         <span id={helpId} className="sr-only">搜索主题，用方向键或悬停预览，Enter 确认，Esc 或 Tab 取消。非当前模式只预览色样。</span>
         {open ? <ThemePreview slot={slot} id={previewId} /> : null}
-        <ComboboxOptions anchor={{ to: 'bottom start', gap: 6, padding: 16 }} onPointerLeave={() => { setPointer(true); setHoveredId(null); }} className="theme-menu z-50 max-h-[min(18rem,var(--anchor-max-height))] w-[var(--input-width)] min-w-60 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg p-1 outline-none">
+        <ComboboxOptions anchor={{ to: 'bottom start', gap: 6, padding: 16 }} onPointerLeave={() => { setPointer(true); setHoveredId(null); }} className="theme-menu z-popover max-h-[min(18rem,var(--anchor-max-height))] w-[var(--input-width)] min-w-60 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg p-1 outline-none">
           {options.map(theme => <ComboboxOption key={theme.id} value={theme.id} onPointerEnter={event => { if (event.pointerType !== 'touch') { setPointer(true); setHoveredId(theme.id); } }} className={({ focus }) => `interactive flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm data-[selected]:font-medium ${(pointer ? hoveredId === theme.id : focus) ? 'bg-surface-3 text-hover-fg' : 'text-fg'}`}>
             {({ selected }) => <><Icon name="check" className={`size-3 shrink-0 ${selected ? '' : 'opacity-0'}`} /><span className="min-w-0 break-words">{theme.label}</span></>}
           </ComboboxOption>)}
@@ -75,8 +75,8 @@ function ThemePicker({ slot }: { slot: ThemeSlot }) {
 export function AppearanceDialog({ onClose }: { onClose: () => void }) {
   const { preferences, activeSlot, setMode, pair } = useTheme();
   const preset = matchingPreset(preferences);
-  return <Dialog open onClose={onClose} className="relative z-50"><div className="fixed inset-0 bg-black/25" /><div className="fixed inset-0 flex items-center justify-center p-4"><DialogPanel className="theme-widget max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg p-5">
-    <div className="mb-5 flex items-center justify-between"><DialogTitle className="text-base font-medium">外观</DialogTitle><button type="button" data-autofocus onClick={onClose} aria-label="关闭外观设置" className="interactive grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-hover-fg"><Icon name="x" /></button></div>
+  return <Dialog open onClose={onClose} className="relative z-dialog"><div className="fixed inset-0 bg-black/25" /><div className="fixed inset-0 flex items-center justify-center p-4"><DialogPanel className="theme-widget max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg p-5">
+    <div className="mb-5 flex items-center justify-between"><DialogTitle className="text-base font-medium">外观</DialogTitle><button type="button" data-autofocus onClick={onClose} aria-label="关闭外观设置" className="btn-icon size-8 rounded-lg"><Icon name="x" /></button></div>
     <RadioGroup value={preferences.mode} onChange={(mode: ThemeMode) => setMode(mode)} aria-orientation="horizontal">
       <Label className="sr-only">显示模式</Label>
       <div className="grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1">{MODES.map(mode => <Radio key={mode.id} as="button" type="button" value={mode.id} aria-label={mode.id === 'system' ? '自动，跟随系统' : mode.label} className="interactive flex h-10 items-center justify-center gap-2 rounded-md text-sm text-muted data-[checked]:bg-accent data-[checked]:font-medium data-[checked]:text-accent-fg data-[checked]:hover:bg-accent-hover [&:not([data-checked]):hover]:bg-surface-3 [&:not([data-checked]):hover]:text-hover-fg"><Icon name={mode.icon} />{mode.label}</Radio>)}</div>

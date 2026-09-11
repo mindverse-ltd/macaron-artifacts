@@ -13,28 +13,40 @@ export function initializeChatExport() {
     const content = section.querySelector<HTMLElement>('[data-export-content]');
     if (!scroller || !content) continue;
     const cap = Number(section.dataset.exportCap), ramp = Number(section.dataset.exportRamp), reveal = Number(section.dataset.exportReveal);
-    const toggles = [...section.querySelectorAll<HTMLButtonElement>('[data-export-toggle]')];
+    const toggles = [...section.querySelectorAll<HTMLButtonElement>(':scope > [data-export-toggle]')];
+    const pointerMotion = () => section.removeAttribute('data-keyboard');
+    section.addEventListener('pointerdown', pointerMotion, { capture: true });
+    section.addEventListener('wheel', pointerMotion, { passive: true });
     const update = () => {
       const height = content.getBoundingClientRect().height;
       if (!height) return; // Closed native details are measured when they open, not frozen at zero height.
       const overflowing = height > cap, collapsed = overflowing && section.dataset.exportOpen !== 'true';
+      scroller.tabIndex = collapsed ? 0 : -1;
       scroller.style.height = `${collapsed ? cap : height}px`;
       restoreScroll(scroller);
       const ratio = (value: number) => Math.round(Math.min(1, Math.max(0, value / ramp)) * 50) / 50;
       const top = collapsed ? ratio(scroller.scrollTop) : 0, bottom = collapsed ? ratio(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop) : 0;
       section.style.setProperty('--fade-top', String(top)); section.style.setProperty('--fade-bottom', String(bottom));
       for (const button of toggles) {
-        button.hidden = button.dataset.exportToggle === 'collapse' ? !(overflowing && !collapsed) : !collapsed || (button.dataset.exportToggle === 'top' ? top : bottom) <= reveal;
+        const fallback = collapsed && top <= reveal && bottom <= reveal && button.dataset.exportToggle === 'bottom';
+        button.toggleAttribute('data-export-fallback', fallback);
+        button.hidden = !fallback && (button.dataset.exportToggle === 'collapse' ? !(overflowing && !collapsed) : !collapsed || (button.dataset.exportToggle === 'top' ? top : bottom) <= reveal);
         button.setAttribute('aria-expanded', String(!collapsed));
       }
     };
-    for (const button of toggles) button.addEventListener('click', () => {
+    for (const button of toggles) button.addEventListener('click', event => {
+      const keyboard = event.detail === 0, ownsFocus = document.activeElement === button;
+      section.toggleAttribute('data-keyboard', keyboard);
       section.dataset.exportOpen = String(button.dataset.exportToggle !== 'collapse');
-      scroller.style.transition = 'height 300ms cubic-bezier(0.32,0.72,0,1)';
+      scroller.style.transition = keyboard ? 'none' : 'height 300ms cubic-bezier(0.32,0.72,0,1)';
       update();
-      const next = toggles.find(item => !item.hidden) ?? section.closest('details')?.querySelector('summary') ?? scroller.querySelector<HTMLElement>('[tabindex]');
-      next?.focus({ preventScroll: true });
+      if (ownsFocus) {
+        const next = toggles.find(item => !item.hidden) ?? scroller;
+        if (next === scroller) scroller.tabIndex = -1;
+        next.focus({ preventScroll: !keyboard });
+      }
     });
+    scroller.addEventListener('transitionend', event => { if (event.target === scroller && event.propertyName === 'height') scroller.style.transition = 'none'; });
     updates.push(update); scroller.addEventListener('scroll', schedule, { passive: true });
     observer.observe(content); observer.observe(scroller);
   }

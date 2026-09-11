@@ -16,7 +16,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const chat = useChat<ChatMessage>({ chat: instance });
   const { viewport, content, stuck, scrollToBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
   const streaming = chat.status === 'submitted' || chat.status === 'streaming';
-  const send = useCallback((text: string) => { store.send(session.id, text); scrollToBottom(); }, [scrollToBottom, session.id, store]);
+  const send = useCallback((text: string) => { store.send(session.id, text); scrollToBottom('instant'); }, [scrollToBottom, session.id, store]);
   const openArtifact = useCallback((path: string) => store.openArtifact(session.id, path), [session.id, store]);
   const approve = useCallback((id: string, approved: boolean) => store.approve(session.id, id, approved), [session.id, store]);
   const last = chat.messages.at(-1);

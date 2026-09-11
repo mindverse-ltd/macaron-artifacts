@@ -16,7 +16,8 @@ import { Button } from '../ui4a-ui';
 import { Icon } from '../Icon';
 
 export function Conversation({ instance, session, store }: { instance: Chat<ChatMessage>; session: SessionSummary; store: WorkspaceStore }) {
-  const chat = useChat<ChatMessage>({ chat: instance });
+  // Coalesce burst notifications so animated Markdown cannot exhaust React's update depth; raw stream data stays intact.
+  const chat = useChat<ChatMessage>({ chat: instance, throttle: 50 });
   const { viewport, content, stuck, scrollToBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
   const streaming = chat.status === 'submitted' || chat.status === 'streaming';
   const send = useCallback((text: string) => { store.send(session.id, text); scrollToBottom('instant'); }, [scrollToBottom, session.id, store]);

@@ -25,22 +25,27 @@ export function readableText(background: string, proposed: string) {
   return (back + .05) / .05 > 1.05 / (back + .05) ? '#000000' : '#ffffff';
 }
 
+function distinctSurface(color: string, background: string, dark: boolean): string {
+  if (contrastRatio(color, background) >= 1.14) return color;
+  const darker = color === background ? !dark : luminance(color)! < luminance(background)!;
+  const channels = [1, 3, 5].map(index => Number.parseInt(color.slice(index, index + 2), 16));
+  for (let step = 1; step <= 100; step++) {
+    const fill = `#${channels.map(channel => Math.round(channel + ((darker ? 0 : 255) - channel) * step / 100).toString(16).padStart(2, '0')).join('')}`;
+    if (contrastRatio(fill, background) >= 1.14) return fill;
+  }
+  return color;
+}
+
 export function paletteVariables(theme: ThemeRegistration): Record<string, string> {
   const dark = theme.type === 'dark';
   let palette = themePalette(theme, dark);
-  // Editor themes often separate panes by a line alone. Docs use surface depth instead:
-  // keep the native hue and lightness direction, then revalidate the sidebar's text and states.
-  const sidebar = palette['sidebar-bg'], background = palette.surface;
-  if (contrastRatio(sidebar, background) < 1.14) {
-    const darker = sidebar === background ? !dark : luminance(sidebar)! < luminance(background)!;
-    const channels = [1, 3, 5].map(index => Number.parseInt(sidebar.slice(index, index + 2), 16));
-    for (let step = 1; step <= 100; step++) {
-      const fill = `#${channels.map(channel => Math.round(channel + ((darker ? 0 : 255) - channel) * step / 100).toString(16).padStart(2, '0')).join('')}`;
-      if (contrastRatio(fill, background) < 1.14) continue;
-      palette = themePalette({ ...theme, colors: { ...theme.colors, 'sideBar.background': fill } }, dark);
-      break;
-    }
-  }
+  // Keep native hue and lightness direction, then revalidate text against each adjusted surface.
+  const sidebar = distinctSurface(palette['sidebar-bg'], palette.surface, dark);
+  const colors = { ...theme.colors, 'sideBar.background': sidebar };
+  if (sidebar !== palette['sidebar-bg']) palette = themePalette({ ...theme, colors }, dark);
+  // A distinct pane can swallow its original selection fill; check the row against the adjusted pane.
+  const selection = distinctSurface(palette['sidebar-selection'], sidebar, dark);
+  if (selection !== palette['sidebar-selection']) palette = themePalette({ ...theme, colors: { ...colors, 'list.inactiveSelectionBackground': selection, 'list.inactiveSelectionForeground': palette['sidebar-selection-fg'] } }, dark);
   // Reuse the WebUI's alpha compositing and contrast correction. Fumadocs' primary mixes
   // text and fill roles, so navigation/link scopes below receive separate semantic tokens.
   return {

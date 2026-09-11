@@ -24,6 +24,7 @@ test('every docs theme keeps text, hover, selection, and focus readable on their
   for (const id of ['github-light', 'github-dark', 'vitesse-light', 'vitesse-dark', 'nord'] as const) {
     const values = paletteVariables(await loadPalette(id));
     assert.ok(contrastRatio(values.background, values['sidebar-bg']) >= 1.14, `${id}: sidebar must be distinct without an outline`);
+    assert.ok(contrastRatio(values['sidebar-selection'], values['sidebar-bg']) >= 1.14, `${id}: current page must remain distinct on the adjusted sidebar`);
     for (const [background, foreground] of [['background', 'foreground'], ['background', 'link'], ['muted', 'muted-foreground'], ['card', 'card-foreground'], ['primary', 'primary-foreground'], ['accent', 'accent-foreground'], ['sidebar-bg', 'sidebar-muted'], ['sidebar-hover', 'sidebar-hover-fg'], ['sidebar-selection', 'sidebar-selection-fg'], ['popover', 'popover-foreground'], ['menu-hover', 'menu-hover-fg'], ['code', 'code-fg'], ['inline-code', 'inline-code-fg']]) {
       assert.ok(contrastRatio(values[background], values[foreground]) >= 4.5, `${id}: ${foreground} on ${background}`);
     }

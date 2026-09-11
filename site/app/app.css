@@ -79,7 +79,7 @@
   --color-fd-accent-foreground: var(--color-fd-sidebar-hover-fg);
   --color-fd-ring: var(--color-fd-sidebar-focus);
 }
-:root[data-palette] :is(#nd-sidebar, #nd-sidebar-mobile) a[data-active='true'] { background: var(--color-fd-sidebar-selection); color: var(--color-fd-sidebar-selection-fg); }
+:root[data-palette] :is(#nd-sidebar, #nd-sidebar-mobile) a[data-active='true'] { background: var(--color-fd-sidebar-selection); color: var(--color-fd-sidebar-selection-fg); font-weight: 600; }
 :root[data-palette] #nd-toc {
   /* The table of contents belongs to the reading surface: no fill, no divider, just neutral text. */
   --color-fd-primary: var(--color-fd-foreground);

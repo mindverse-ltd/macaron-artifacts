@@ -41,6 +41,26 @@ describe('profile validation', () => {
     expect(validateProfileInput({ harness: 'pi', name: 'work', config: { effort: 'off' }, credentials: { apiKey: ' ' } }).credentials).toEqual({ apiKey: null });
   });
 
+  test('accepts only the supported Claude runtime settings and drops inherited values', () => {
+    const environment = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '350000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '383338', CLAUDE_CODE_ATTRIBUTION_HEADER: '0', CLAUDE_CODE_FORK_SUBAGENT: '1', CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' };
+    expect(validateProfileInput(appInput({ environment })).config.environment).toEqual(environment);
+    expect(validateProfileInput(appInput({ environment: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '2000000', CLAUDE_CODE_ATTRIBUTION_HEADER: ' 0 ' } })).config.environment).toEqual({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '2000000', CLAUDE_CODE_ATTRIBUTION_HEADER: '0' });
+    expect(validateProfileInput(appInput({ environment: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '', CLAUDE_CODE_FORK_SUBAGENT: ' ' } })).config).toEqual({});
+  });
+
+  test.each([
+    [], { ANTHROPIC_AUTH_TOKEN: 'test-secret' }, { ANTHROPIC_API_KEY: 'test-secret' }, { NODE_OPTIONS: '--require=./untrusted' }, { UNKNOWN: '' }, JSON.parse('{"__proto__":"value"}'),
+    ...['0', '-1', '1.5', '1e6', '01', '2000001', 'Infinity', '12\n', 350000].map(value => ({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: value })),
+    ...['0', '2000001', '1.5'].map(value => ({ CLAUDE_CODE_MAX_CONTEXT_TOKENS: value })),
+    ...['true', 'false', '2', true, 1].map(value => ({ CLAUDE_CODE_FORK_SUBAGENT: value })),
+  ].map(environment => [environment]))('rejects invalid or secret-bearing runtime environment %#', environment => {
+    expect(() => validateProfileInput(appInput({ environment: environment as never }))).toThrow();
+  });
+
+  test.each(['codex', 'opencode', 'pi', 'hermes', 'openclaw'] as const)('rejects Claude runtime overrides for %s', harness => {
+    expect(() => validateProfileInput({ harness, name: 'work', config: { environment: { CLAUDE_CODE_FORK_SUBAGENT: '1' } } })).toThrow('不支持 environment');
+  });
+
   test.each([
     null, [], { harness: 'unknown', name: 'work', config: {} }, appInput({}, { name: ' ' }), appInput({}, { name: 'a\nb' }), appInput({}, { name: 'x'.repeat(101) }),
     appInput(null as never), appInput({ model: 3 as never }), appInput({ model: 'x'.repeat(501) }), appInput({ model: 'bad\0model' }), appInput({ effort: 'ultra' }),
@@ -56,6 +76,16 @@ describe('profile validation', () => {
 });
 
 describe('app profiles and credentials', () => {
+  test('persists runtime settings while a captured turn retains its previous configuration', async () => {
+    const { store, path, helpers } = await fixture();
+    const profile = await store.save(validateProfileInput(appInput({ environment: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '350000', CLAUDE_CODE_ATTRIBUTION_HEADER: '0' } })));
+    const captured = await store.resolve(profile.id, 'claude-code', '/tmp');
+    await store.save(validateProfileInput(appInput({ environment: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '250000', CLAUDE_CODE_ATTRIBUTION_HEADER: '1' } }, { revision: profile.revision })), profile.id);
+    expect(captured?.config.environment).toEqual({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: '350000', CLAUDE_CODE_ATTRIBUTION_HEADER: '0' });
+    const reloaded = new ProfileStore(path, helpers, unchangedClaude); await reloaded.load();
+    expect((await reloaded.resolve(profile.id, 'claude-code', '/tmp'))?.config.environment).toEqual({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: '250000', CLAUDE_CODE_ATTRIBUTION_HEADER: '1' });
+  });
+
   test('persists private files and returns only credential state in every DTO', async () => {
     const { store, path, helpers } = await fixture();
     const created = await store.save(appInput({ model: 'opus', authMode: 'api-key' }, { credentials: { apiKey: 'private-key', authToken: 'inactive-token' } }));

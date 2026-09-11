@@ -2,7 +2,7 @@ import type { Options, Settings } from '@anthropic-ai/claude-agent-sdk';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ProfileOptions } from '../../shared/profiles.js';
+import { claudeEnvironmentOptions, type ProfileOptions } from '../../shared/profiles.js';
 import type { ResolvedProfile } from './types.js';
 
 const efforts = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -25,6 +25,10 @@ export async function resolveClaudeProfile(cwd: string, profile: ResolvedProfile
 export function claudeProfileEnvironment(profile?: ResolvedProfile): Record<string, string> {
   if (!profile) return {};
   const { config } = profile, env: Record<string, string> = {};
+  for (const option of claudeEnvironmentOptions) {
+    const value = config.environment?.[option.name];
+    if (value !== undefined && value !== '') env[option.name] = value;
+  }
   if (config.effort) {
     if (!efforts.includes(config.effort)) throw new Error('Unsupported Claude Code effort level');
     env.CLAUDE_CODE_EFFORT_LEVEL = config.effort;

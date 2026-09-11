@@ -1,7 +1,7 @@
 import { Checkbox, Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions, Description, Disclosure, DisclosureButton, DisclosurePanel, Field as HeadlessField, Input, Label, Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HarnessId } from '../../shared/types';
-import type { ProfileConfig, ProfileInput, ProfileOptions } from '../../shared/profiles';
+import { claudeEnvironmentOptions, type ProfileConfig, type ProfileInput, type ProfileOptions } from '../../shared/profiles';
 import { Icon } from './Icon';
 import { Button, Field } from './ui4a-ui';
 
@@ -82,6 +82,17 @@ function CredentialFields({ harness, config, onChange, credentials, configured, 
   </div>;
 }
 
+function ClaudeEnvironmentFields({ config, onChange, disabled }: Pick<ProfileFieldsProps, 'config' | 'onChange' | 'disabled'>) {
+  const update = (name: typeof claudeEnvironmentOptions[number]['name'], value: string) => {
+    const environment = { ...config.environment }; if (value) environment[name] = value; else delete environment[name];
+    onChange({ ...config, environment: Object.keys(environment).length ? environment : undefined });
+  };
+  return <Advanced title="上下文与运行参数"><div className="grid gap-4 sm:grid-cols-2">{claudeEnvironmentOptions.map(option => option.type === 'integer'
+    ? <Field key={option.name} label={option.label} type="number" inputMode="numeric" min={option.min} max={option.max} step={1} value={config.environment?.[option.name] ?? ''} onChange={event => update(option.name, event.target.value)} placeholder="继承本机配置" disabled={disabled} />
+    : <Choice key={option.name} label={option.label} value={config.environment?.[option.name] ?? ''} options={[inherit, { value: '1', label: '开启' }, { value: '0', label: '关闭' }]} onChange={value => update(option.name, value)} disabled={disabled} />
+  )}</div></Advanced>;
+}
+
 export function ProfileFields(props: ProfileFieldsProps) {
   const { harness, config, onChange, options, disabled } = props;
   const update = (changes: Partial<ProfileConfig>) => onChange({ ...config, ...changes });
@@ -104,5 +115,6 @@ export function ProfileFields(props: ProfileFieldsProps) {
     {harness === 'opencode' ? <AgentModels config={config} options={options} onChange={onChange} disabled={disabled} models={models} /> : null}
     {harness === 'codex' ? <FeatureFields config={config} options={options} onChange={onChange} disabled={disabled} /> : null}
     {harness === 'claude-code' ? <Advanced title="模型别名与流式传输"><div className="grid gap-4 sm:grid-cols-2">{aliases.map(alias => <FreeChoice key={alias} label={`${alias} 模型别名`} value={config.modelAliases?.[alias]} options={models} onChange={value => { const next = { ...config.modelAliases }; if (value) next[alias] = value; else delete next[alias]; update({ modelAliases: Object.keys(next).length ? next : undefined }); }} disabled={disabled} />)}<Choice label="细粒度工具流" value={config.fineGrainedToolStreaming === undefined ? '' : config.fineGrainedToolStreaming ? 'on' : 'off'} options={[inherit, { value: 'on', label: '开启' }, { value: 'off', label: '关闭' }]} onChange={value => update({ fineGrainedToolStreaming: value === '' ? undefined : value === 'on' })} hint="逐步接收工具参数；服务端需支持对应能力。" disabled={disabled} /></div></Advanced> : null}
+    {harness === 'claude-code' ? <ClaudeEnvironmentFields config={config} onChange={onChange} disabled={disabled} /> : null}
   </div>;
 }

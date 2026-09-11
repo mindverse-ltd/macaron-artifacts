@@ -52,6 +52,19 @@ describe('Claude profile settings', () => {
     expect(() => claudeProfileEnvironment({ config: { effort: 'unknown' } })).toThrow('Unsupported Claude Code effort');
   });
 
+  test('forwards allowlisted runtime settings without importing arbitrary environment keys', async () => {
+    const environment = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '350000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '383338', CLAUDE_CODE_ATTRIBUTION_HEADER: '0', CLAUDE_CODE_FORK_SUBAGENT: '1', CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' };
+    expect(claudeProfileEnvironment({ config: { environment: { ...environment, ANTHROPIC_AUTH_TOKEN: 'untrusted-secret', NODE_OPTIONS: '--require=./untrusted' } as never } })).toEqual(environment);
+    expect(claudeProfileEnvironment({ config: { environment: { CLAUDE_CODE_FORK_SUBAGENT: '' } } })).toEqual({});
+    const inherited = Object.freeze({ CLAUDE_CODE_MAX_CONTEXT_TOKENS: '200000', CLAUDE_CODE_ATTRIBUTION_HEADER: '1' });
+    const prepared = await prepareClaudeProfile({ config: { environment } }, inherited);
+    try {
+      expect(prepared.options.env).toEqual(environment);
+      expect(JSON.parse(await readFile(prepared.options.settings as string, 'utf8'))).toEqual({ env: environment });
+      expect(inherited).toEqual({ CLAUDE_CODE_MAX_CONTEXT_TOKENS: '200000', CLAUDE_CODE_ATTRIBUTION_HEADER: '1' });
+    } finally { await prepared.dispose(); }
+  });
+
   test('switches auth headers and provider selectors without retaining the higher-priority bearer token', () => {
     const key = claudeProfileEnvironment(profile);
     expect(key.ANTHROPIC_API_KEY).toBe(profile.apiKey!); expect(key.ANTHROPIC_AUTH_TOKEN).toBe('');

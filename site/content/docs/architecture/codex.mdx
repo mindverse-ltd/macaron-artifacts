@@ -22,4 +22,6 @@ Each implementation in `artifacts/src/server/harnesses` exposes discovery metada
 
 The Profile API is shared, while each adapter owns its fields. Codex reads and preserves native `<name>.config.toml` files; Claude Code supports main and subagent models, effort, Base URL, and API credentials; OpenCode and pi expose provider/model settings; Hermes and OpenClaw expose gateway and model overrides. Profile edits are captured for the next turn and never rewrite unrelated native configuration.
 
+Claude Code also exposes allowlisted context and runtime settings: automatic compaction window, maximum context tokens, request attribution, subagent context forking, and additional-directory `CLAUDE.md` loading. Empty values inherit native settings; private credentials and tool approvals remain separate from these overrides.
+
 Metadata generation uses a disposable branch or fork with tools disabled. It cannot change the main session's history, files, or provider affinity. If metadata fails, the main response remains intact.

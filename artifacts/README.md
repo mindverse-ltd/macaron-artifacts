@@ -66,6 +66,8 @@ Open **Profiles** in the sidebar to create or edit a configuration. Select it in
 | Hermes | Native model/reasoning overrides, optional Gateway URL/Profile, Gateway token; provider credentials remain in Hermes |
 | OpenClaw | Native model/thinking overrides, optional Gateway URL/Profile/agent, Gateway token; provider credentials remain in OpenClaw |
 
+Claude Code's **Context and runtime settings** also supports `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` (1-2,000,000 tokens), plus inherit/on/off controls for `CLAUDE_CODE_ATTRIBUTION_HEADER`, `CLAUDE_CODE_FORK_SUBAGENT`, and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`. These are the only accepted `config.environment` keys; credentials use the dedicated private fields. Overrides apply to that turn's child process and temporary settings, without changing native configuration or the WebUI approval flow.
+
 Edits affect the next turn of every conversation using that Profile. The current turn and its title/suggestion fork retain one captured configuration. Switching a conversation's Profile is available when its current turn finishes and keeps native history. A Profile in use cannot be deleted until its conversations select another configuration.
 
 Codex uses the current native `<name>.config.toml` format under `CODEX_HOME` (default `~/.codex`), shared with the CLI. Editing preserves unknown fields and comments; stale edits are rejected. The app-server does not accept `--profile`, so the adapter resolves the file and trusted project layers into per-thread overrides. It preserves Codex's configuration precedence and login/session directory. Legacy `[profiles.name]` tables are not used.

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HarnessId } from '../shared/types.js';
-import type { HarnessProfile, ProfileConfig, ProfileInput } from '../shared/profiles.js';
+import { claudeEnvironmentOptions, type HarnessProfile, type ProfileConfig, type ProfileInput } from '../shared/profiles.js';
 import type { ResolvedProfile } from './harnesses/types.js';
 import { deleteCodexProfile, listCodexProfiles, resolveCodexDefaultProfile, resolveCodexProfile, saveCodexProfile } from './harnesses/codex-profiles.js';
 import { resolveClaudeProfile } from './harnesses/claude-profile.js';
@@ -16,7 +16,7 @@ const nativeProfiles: NativeProfiles = { list: listCodexProfiles, save: saveCode
 const harnesses: HarnessId[] = ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'openclaw'];
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const fields: Record<HarnessId, string[]> = {
-  'claude-code': ['model', 'subagentModel', 'effort', 'baseUrl', 'authMode', 'forceSubagentModel', 'modelAliases', 'fineGrainedToolStreaming'],
+  'claude-code': ['model', 'subagentModel', 'effort', 'baseUrl', 'authMode', 'forceSubagentModel', 'modelAliases', 'fineGrainedToolStreaming', 'environment'],
   codex: ['model', 'subagentModel', 'effort', 'subagentEffort', 'provider', 'baseUrl', 'authMode', 'features'],
   opencode: ['model', 'provider', 'baseUrl', 'authMode', 'agent', 'variant', 'agentModels'],
   pi: ['model', 'provider', 'baseUrl', 'authMode', 'effort'],
@@ -41,7 +41,19 @@ export function validateProfileInput(value: unknown): ProfileInput {
   for (const [key, entry] of Object.entries(value.config)) {
     if (!fields[harness].includes(key)) return fail(`${harness} 不支持 ${key}`);
     if (entry === undefined || entry === null || entry === '') continue;
-    if (['forceSubagentModel', 'fineGrainedToolStreaming'].includes(key)) {
+    if (key === 'environment') {
+      if (!record(entry) || Object.keys(entry).length > claudeEnvironmentOptions.length) return fail('运行环境配置格式无效');
+      const environment: Record<string, string> = {};
+      for (const [name, item] of Object.entries(entry)) {
+        const option = claudeEnvironmentOptions.find(option => option.name === name);
+        if (!option) return fail('不支持的运行环境变量；认证信息请使用凭据字段');
+        const value = string(item, option.label, 7);
+        if (!value) continue;
+        if (option.type === 'integer' ? !/^[1-9]\d*$/.test(value) || Number(value) < option.min || Number(value) > option.max : value !== '0' && value !== '1') return fail(`${option.label} 格式无效`);
+        environment[name] = value;
+      }
+      if (Object.keys(environment).length) config.environment = environment;
+    } else if (['forceSubagentModel', 'fineGrainedToolStreaming'].includes(key)) {
       if (typeof entry !== 'boolean') return fail(`${key} 必须为布尔值`);
       config[key] = entry;
     } else if (['features', 'agentModels', 'modelAliases'].includes(key)) {

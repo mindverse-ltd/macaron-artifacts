@@ -8,7 +8,7 @@
 .reasoning-viewport { max-height: min(14rem, 36svh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; transition: --reasoning-fade-top 140ms ease, --reasoning-fade-bottom 140ms ease; mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(1 - var(--reasoning-fade-top))) 0, #000 16px, #000 calc(100% - 16px), rgb(0 0 0 / calc(1 - var(--reasoning-fade-bottom))) 100%); }
 .reasoning[data-reasoning-kind='summary'] .reasoning-viewport { max-height: min(10rem, 30svh); }
 .reasoning-content { min-width: 0; overflow-wrap: anywhere; padding-block: 4px; }
-.reasoning-content [data-reasoning-entry] + [data-reasoning-entry] { margin-top: .75rem; }
+.reasoning-content [data-reasoning-entry]:not([hidden]) ~ [data-reasoning-entry]:not([hidden]) { margin-top: .75rem; }
 .reasoning-content :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) { margin: 0; font-size: inherit; }
 .reasoning-content :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) + :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) { margin-top: .5rem; }
 .reasoning-content :where(strong, [data-streamdown='strong'], h1, h2, h3, h4, h5, h6) { color: var(--fg); font-weight: 500; }

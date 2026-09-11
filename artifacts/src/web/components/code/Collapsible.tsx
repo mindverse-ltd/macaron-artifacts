@@ -77,17 +77,18 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
     <div className={className}>
       {/* 模糊层和展开开关都贴着**窗口**的边，所以定位基准要在这一层。
           两个渐隐强度在这里落地并补间，底下的蒙版和模糊层都是从它们算出来的（继承），因此永远同步 */}
-      <div className="relative" style={{ "--fade-top": collapsed ? edges.top : 0, "--fade-bottom": collapsed ? edges.bottom : 0, transition: `--fade-top ${EASE}, --fade-bottom ${EASE}` } as React.CSSProperties}>
+      <div data-export-collapsible data-export-open={open} data-export-cap={CAP} data-export-ramp={RAMP} data-export-reveal={REVEAL} className="relative" style={{ "--fade-top": collapsed ? edges.top : 0, "--fade-bottom": collapsed ? edges.bottom : 0, transition: `--fade-top ${EASE}, --fade-bottom ${EASE}` } as React.CSSProperties}>
         {/* 高度给到具体像素而不是 max-height：收起态是常量，展开态跟着测量值走。
             `overflow-y-auto` 而不是 hidden —— 跟随尾部靠的就是真的滚动，用户也能自己滚回去看。
             滚动条一律藏起来：蒙版是盖在整个窗口上的，会把滚动条一起糊掉，露着比藏着更难看 */}
         <div
           ref={scroller}
+          data-export-scroller
           className="no-scrollbar overflow-y-auto"
           onTransitionEnd={(event) => event.propertyName === "height" && setToggling(false)}
           style={{ height: collapsed ? CAP : height || undefined, transition: toggling ? "height 300ms cubic-bezier(0.32,0.72,0,1)" : undefined, maskImage: MASK, WebkitMaskImage: MASK }}
         >
-          <div ref={inner}>{children}</div>
+          <div ref={inner} data-export-content>{children}</div>
         </div>
         {/* 强度为 0 时这两层是零高度的空盒子，所以常挂着也不额外合成 —— 但必须常挂着，
             卸掉重挂就没有过渡可言了 */}
@@ -95,17 +96,18 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
         <ProgressiveFade side="bottom" size={FADE} step={BLUR_STEP} />
         {/* 开关浮在被截断的那条边上，居中。哪条边藏了东西就出现在哪条边 —— 跟随尾部时藏的是上面，
             按钮也就只出现在顶上。一律自带底色：它压着的是代码，而渐隐带最多只糊掉一部分 */}
-        {collapsed && edges.top > REVEAL ? <Toggle side="top" label="↑ 展开" fade onClick={() => toggle(true)} /> : null}
-        {collapsed && edges.bottom > REVEAL ? <Toggle side="bottom" label="展开 ↓" fade onClick={() => toggle(true)} /> : null}
-        {overflowing && !collapsed ? <Toggle side="bottom" label="收起 ↑" onClick={() => toggle(false)} /> : null}
+        <Toggle side="top" label="↑ 展开" fade hidden={!(collapsed && edges.top > REVEAL)} onClick={() => toggle(true)} />
+        <Toggle side="bottom" label="展开 ↓" fade hidden={!(collapsed && edges.bottom > REVEAL)} onClick={() => toggle(true)} />
+        <Toggle side="bottom" label="收起 ↑" hidden={!(overflowing && !collapsed)} onClick={() => toggle(false)} />
       </div>
     </div>
   );
 }
 
-function Toggle({ side, label, onClick, fade }: { side: "top" | "bottom"; label: string; onClick: () => void; fade?: boolean }) {
+function Toggle({ side, label, onClick, fade, hidden }: { side: "top" | "bottom"; label: string; onClick: () => void; fade?: boolean; hidden: boolean }) {
   return (
     <button
+      type="button" hidden={hidden} data-export-toggle={fade ? side : 'collapse'}
       onClick={onClick}
       // `inset-x-0` + `mx-auto w-fit` 才是绝对定位下的水平居中；只给 left-1/2 会连按钮自身宽度一起偏
       className={`interactive absolute inset-x-0 z-10 mx-auto w-fit rounded-full border border-secondary-border bg-secondary px-2 py-0.5 text-[11px] text-secondary-fg hover:bg-secondary-hover ${side === "top" ? "top-1.5" : "bottom-1.5"}`}

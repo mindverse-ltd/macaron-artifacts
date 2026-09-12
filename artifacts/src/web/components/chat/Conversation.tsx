@@ -53,7 +53,7 @@ const Message = memo(function Message({ message, streaming, sessionId, cwd, onSe
     {groupToolEntries(entries).map(row => {
       if (row.kind === 'tools') return <ToolGroup key={row.index} parts={row.parts} live={streaming}>{row.parts.map((part, index) => <ToolCall key={part.toolCallId ?? index} cwd={cwd} part={part} commandOutput={part.toolCallId ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />)}</ToolGroup>;
       const { part, index } = row;
-      if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
+      if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={message.role === 'assistant' && streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
       if (part.type === 'reasoning') {
         const parts = reasoningRunAt(message.parts, index);
         return parts ? <Reasoning key={index} parts={parts} live={streaming && index + parts.length === message.parts.length} /> : null;

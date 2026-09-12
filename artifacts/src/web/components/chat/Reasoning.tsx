@@ -1,14 +1,14 @@
 'use client';
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The named overflowing region must support keyboard scrolling. */
 
-import { memo, useId, useMemo } from 'react';
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Disclosure, DisclosureButton } from '@headlessui/react';
 import type { ReasoningUIPart } from 'ai';
 import { Streamdown } from 'streamdown';
 import { markdownPlugins } from '../../chat/markdown';
 import { normalizeMath } from '../../chat/math';
 import { Icon } from '../Icon';
-import { analyzeReasoning } from './reasoning-model';
+import { analyzeReasoning, createSummaryArrivalTracker } from './reasoning-model';
 import { useReasoningScroll } from './useReasoningScroll';
 import { exportRehypePlugins } from '../../chat/export-links';
 import './Reasoning.css';
@@ -33,6 +33,30 @@ function ReasoningView({ presentation, active, historyOpen }: { presentation: Re
   const visible = kind === 'summary' && !historyOpen ? entries.slice(-1) : entries;
   const contentKey = `${historyOpen}:${visible.map(entry => `${entry.key}:${entry.text}`).join('\n')}`;
   const { viewport, content, following, overflowing, resume } = useReasoningScroll(contentKey, active && !historyOpen);
+  const [arrivals] = useState(() => createSummaryArrivalTracker(entries));
+  const arrival = useRef<Animation | null>(null);
+  useLayoutEffect(() => {
+    const enabled = kind === 'summary' && active && !historyOpen;
+    if (!enabled) arrival.current?.cancel();
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const isNew = arrivals.isNew(entries, enabled);
+    if (!enabled) { arrivals.consume(entries); return; }
+    // Background or reduced-motion arrivals are intentionally consumed without replay when the view returns.
+    if (!isNew || document.hidden || reduced.matches) { if (entries.at(-1)?.state !== 'streaming' || document.hidden || reduced.matches) arrivals.consume(entries); return; }
+    const latest = content.current?.querySelector<HTMLElement>(':scope > [data-reasoning-latest="true"]');
+    if (!latest || latest.hidden || !latest.animate) return;
+    // Animate this arrival once. Token renders and display:none history toggles cannot restart a WAAPI animation.
+    arrival.current?.cancel();
+    const animation = latest.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
+    arrivals.consume(entries);
+    arrival.current = animation;
+    const cancel = () => { if (reduced.matches || document.hidden) animation.cancel(); };
+    const cleanup = () => { reduced.removeEventListener('change', cancel); document.removeEventListener('visibilitychange', cancel); };
+    // Only active arrivals subscribe; old reasoning blocks must not accumulate document listeners.
+    reduced.addEventListener('change', cancel); document.addEventListener('visibilitychange', cancel);
+    animation.onfinish = cleanup; animation.oncancel = cleanup;
+  }, [entries, kind, active, historyOpen, arrivals, content]);
+  useEffect(() => () => arrival.current?.cancel(), []);
   return <>
     <div className="reasoning-indicator" aria-hidden="true" />
     <div className="reasoning-main">

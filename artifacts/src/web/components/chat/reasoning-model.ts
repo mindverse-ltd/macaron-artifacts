@@ -1,7 +1,7 @@
 import type { ReasoningUIPart } from 'ai';
 import { parseMarkdownIntoBlocks } from 'streamdown';
 
-type ReasoningEntry = { key: string; text: string };
+type ReasoningEntry = { key: string; text: string; state?: ReasoningUIPart['state'] };
 type ReasoningKind = 'summary' | 'full';
 
 export function reasoningRunAt(parts: readonly { type: string }[], index: number): ReasoningUIPart[] | undefined {
@@ -25,7 +25,7 @@ function summaryEntries(part: ReasoningUIPart, partIndex: number, live: boolean)
   let headingCount = 0;
   let headingsOnly = true;
   const flush = () => {
-    if (text.trim()) entries.push({ key: `${prefix}:${entries.length}`, text: text.trim() });
+    if (text.trim()) entries.push({ key: `${prefix}:${entries.length}`, text: text.trim(), state: part.state });
     text = '';
   };
   const blocks = parseMarkdownIntoBlocks(part.text);
@@ -53,6 +53,18 @@ function summaryEntries(part: ReasoningUIPart, partIndex: number, live: boolean)
   }
   flush();
   return { entries, headingCount, headingsOnly };
+}
+
+/** Treat mounted history and first-seen completed parts as baseline, even while another part is live. */
+export function createSummaryArrivalTracker(initial: readonly ReasoningEntry[]) {
+  const seen = new Set(initial.map(entry => entry.key));
+  return {
+    isNew(entries: readonly ReasoningEntry[], enabled: boolean) {
+      const latest = entries.at(-1);
+      return Boolean(enabled && latest?.state === 'streaming' && !seen.has(latest.key));
+    },
+    consume(entries: readonly ReasoningEntry[]) { for (const entry of entries) seen.add(entry.key); },
+  };
 }
 
 export function analyzeReasoning(parts: readonly ReasoningUIPart[], live = false): { kind: ReasoningKind; entries: ReasoningEntry[] } {

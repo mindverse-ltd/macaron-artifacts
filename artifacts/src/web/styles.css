@@ -44,8 +44,9 @@ button.pressable:focus-visible:active { scale: none; }
 .select-popup:dir(rtl) { --popup-origin-x: 0%; }
 .select-popup:dir(rtl)[data-anchor~='start'] { --popup-origin-x: 100%; }
 /* Keyboard actions settle immediately, including when Escape interrupts a pointer-opened popup. */
-.select-popup[data-keyboard], [data-export-collapsible][data-keyboard], [data-export-collapsible][data-keyboard] > [data-export-scroller], [data-export-collapsible][data-keyboard] > [data-export-toggle] { transition: none !important; }
+.select-popup[data-keyboard], [data-ui4a-disclosure-panel][data-keyboard], [data-export-collapsible][data-keyboard], [data-export-collapsible][data-keyboard] > [data-export-scroller], [data-export-collapsible][data-keyboard] > [data-export-toggle] { transition: none !important; }
 [data-export-toggle][data-export-fallback] { opacity: 1 !important; }
+.tool-disclosure-icon { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 .tool-call[open] > summary .tool-disclosure-icon { transform: rotate(90deg); }
 .tool-call > summary:focus-visible { outline-offset: -2px; }
 /* Notifications live outside scrolling panels; expand the close hit area without enlarging its glyph. */

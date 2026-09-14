@@ -29,7 +29,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-#root { height: 100%; }
+/* Bound generated overflow and prevent the recording header's top margin from collapsing through the app root. */
+#root { display: flow-root; height: 100%; overflow: clip; }
 body { margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }

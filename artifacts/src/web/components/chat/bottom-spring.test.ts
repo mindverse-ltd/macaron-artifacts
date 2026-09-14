@@ -12,10 +12,12 @@ const grow = (hz: number) => {
 };
 
 describe('streaming bottom spring', () => {
-  test('reserves physical overshoot room without hiding the last line', () => {
+  test('targets the physical bottom by default and preserves an explicit inset', () => {
     expect(bottomScrollTarget(0)).toBe(0);
-    expect(bottomScrollTarget(30)).toBe(0);
+    expect(bottomScrollTarget(30)).toBe(30);
     expect(bottomScrollTarget(1200 + BOTTOM_SCROLL_SLACK)).toBe(1200);
+    expect(bottomScrollTarget(1248, 48)).toBe(1200);
+    expect(bottomScrollTarget(30, 48)).toBe(0);
   });
 
   test('retains momentum between streamed lines at 30, 60 and 120 Hz', () => {
@@ -28,36 +30,38 @@ describe('streaming bottom spring', () => {
     expect(Math.abs(runs[0].state.position - runs[2].state.position)).toBeLessThan(12);
   });
 
-  test('coasts into the slack then settles, and can resume after idle', () => {
+  test('an abrupt stop settles without crossing the target or moving backward, then resumes after idle', () => {
     let { state } = grow(60);
-    let furthest = state.position;
     for (let frame = 0; frame < 360; frame++) {
-      state = stepBottomSpring(state, 1248, 1000 / 60);
-      furthest = Math.max(furthest, state.position);
+      const next = stepBottomSpring(state, 1200, 1000 / 60);
+      expect(next.position).toBeGreaterThanOrEqual(state.position);
+      expect(next.position).toBeLessThanOrEqual(1200);
+      state = next;
     }
-    expect(furthest).toBeGreaterThan(1200);
-    expect(furthest).toBeLessThanOrEqual(1248);
     expect(bottomSpringSettled(state)).toBe(true);
     expect(state.position).toBeCloseTo(1200, 3);
-    const resumed = stepBottomSpring(state, 1272, 1000 / 60);
+    const resumed = stepBottomSpring(state, 1224, 1000 / 60);
     expect(resumed.velocity).toBeGreaterThan(0);
     expect(bottomSpringSettled(resumed)).toBe(false);
   });
 
   test('position alone does not cancel pending momentum', () => {
-    const idle = createBottomSpring(1200, 1248);
+    const idle = createBottomSpring(1200, 1200);
     expect(bottomSpringSettled(idle)).toBe(true);
-    expect(bottomSpringSettled({ ...idle, targetVelocity: 20 })).toBe(false);
-    expect(bottomSpringSettled({ ...idle, aim: 1204 })).toBe(false);
+    expect(bottomSpringSettled({ ...idle, velocity: 20 })).toBe(false);
   });
 
-  test('duplicate timestamps preserve state; a background pause cannot amplify growth rate', () => {
-    const initial = createBottomSpring(200, 248);
-    expect(stepBottomSpring(initial, 448, 0)).toBe(initial);
-    expect(stepBottomSpring(initial, 448, -10)).toBe(initial);
-    const resumed = stepBottomSpring(initial, 448, 10_000), nextFrame = stepBottomSpring(initial, 448, 1000 / 60);
-    expect(resumed.targetVelocity).toBeLessThan(nextFrame.targetVelocity);
+  test('duplicate timestamps preserve position without falsely settling; a background pause cannot amplify momentum', () => {
+    const initial = createBottomSpring(200, 200);
+    expect(stepBottomSpring(initial, 200, 0)).toBe(initial);
+    const paused = stepBottomSpring(initial, 400, 0);
+    expect(paused).toEqual({ position: 200, velocity: 0, target: 400 });
+    expect(bottomSpringSettled(paused)).toBe(false);
+    expect(stepBottomSpring(initial, 400, -10)).toEqual(paused);
+    const resumed = stepBottomSpring(initial, 400, 10_000);
+    expect(resumed).toEqual(stepBottomSpring(initial, 400, 1000 / 30));
     expect(Number.isFinite(resumed.position)).toBe(true);
+    expect(resumed.position).toBeGreaterThan(200);
     expect(resumed.position).toBeLessThan(248);
   });
 
@@ -66,8 +70,7 @@ describe('streaming bottom spring', () => {
     const collapsed = stepBottomSpring(state, 300, 1000 / 60);
     expect(collapsed.position).toBe(300);
     expect(collapsed.velocity).toBe(0);
-    expect(collapsed.targetVelocity).toBe(0);
-    expect(collapsed.target).toBe(252);
+    expect(collapsed.target).toBe(300);
     const empty = stepBottomSpring(collapsed, 0, 1000 / 60);
     expect(empty.position).toBe(0);
     expect(bottomSpringSettled(empty)).toBe(true);
@@ -82,5 +85,71 @@ describe('streaming bottom spring', () => {
     const collapsed = stepBottomSpring(state, 200, 1000 / 60, 0);
     expect(collapsed.position).toBe(200);
     expect(collapsed.target).toBe(200);
+  });
+
+  test('unsafe nonzero initial velocities never cross a fixed target or reverse', () => {
+    for (const velocity of [-500, 0, 10, 5000]) {
+      let state = { ...createBottomSpring(999, 1000), velocity };
+      for (let frame = 0; frame < 240; frame++) {
+        const next = stepBottomSpring(state, 1000, 1000 / 120);
+        expect(next.position).toBeGreaterThanOrEqual(state.position);
+        expect(next.position).toBeLessThanOrEqual(1000);
+        expect(next.velocity).toBeGreaterThanOrEqual(0);
+        state = next;
+      }
+    }
+  });
+
+  test('safe velocity remains continuous when the target grows instead of restarting at rest', () => {
+    const state = { ...createBottomSpring(100, 200), velocity: 200 };
+    const next = stepBottomSpring(state, 300, 0.00001);
+    expect(next.velocity).toBeCloseTo(200, 3);
+    expect(next.position).toBeGreaterThan(100);
+    expect(next.position).toBeCloseTo(100, 3);
+  });
+
+  test('a smaller target still ahead brakes without overshooting', () => {
+    let state = { ...createBottomSpring(199, 2000), velocity: 5000 };
+    for (let frame = 0; frame < 180; frame++) {
+      const next = stepBottomSpring(state, 200, 1000 / 60);
+      expect(next.position).toBeGreaterThanOrEqual(state.position);
+      expect(next.position).toBeLessThanOrEqual(200);
+      state = next;
+    }
+  });
+
+  test('changing only the inset corrects once, including at a duplicate timestamp', () => {
+    const initial = createBottomSpring(1000, 1000), resized = stepBottomSpring(initial, 1000, 0, 48);
+    expect(resized.position).toBe(952);
+    expect(resized.velocity).toBe(0);
+    for (let frame = 0; frame < 30; frame++) expect(stepBottomSpring(resized, 1000, 1000 / 60, 48)).toEqual(resized);
+    const restored = stepBottomSpring(resized, 1000, 1000 / 60, 0);
+    expect(restored.position).toBeGreaterThan(952);
+    expect(restored.position).toBeLessThan(1000);
+    expect(createBottomSpring(1000, 1000).position).toBe(1000);
+  });
+
+  test('fixed-target motion agrees at 30, 60, 120 and 240 Hz', () => {
+    const states = [30, 60, 120, 240].map(hz => {
+      let state = createBottomSpring(0, 1000);
+      for (let frame = 0; frame < hz / 2; frame++) state = stepBottomSpring(state, 1000, 1000 / hz);
+      return state;
+    });
+    for (const state of states.slice(1)) {
+      expect(state.position).toBeCloseTo(states[0].position, 8);
+      expect(state.velocity).toBeCloseTo(states[0].velocity, 8);
+    }
+  });
+
+  test('small streamed steps and sudden large mounts remain monotone across delayed frames', () => {
+    let state = createBottomSpring(0, 0), wall = 0;
+    for (let frame = 0; frame < 2000; frame++) {
+      wall += frame % 113 === 0 ? 800 : frame % 7 === 0 ? 1 : 0;
+      const next = stepBottomSpring(state, wall, frame % 137 === 0 ? 10_000 : [1000 / 240, 1000 / 60, 1000 / 30][frame % 3]);
+      expect(next.position).toBeGreaterThanOrEqual(state.position);
+      expect(next.position).toBeLessThanOrEqual(wall);
+      expect(Number.isFinite(next.velocity)).toBe(true);
+      state = next;
+    }
   });
 });

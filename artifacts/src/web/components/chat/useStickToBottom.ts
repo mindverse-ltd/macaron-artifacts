@@ -30,12 +30,13 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
     const readTop = () => Math.min(readWall(), Math.max(0, element.scrollTop));
     const bouncing = () => element.scrollTop < 0 || element.scrollTop > readWall();
     let lastTop = readTop(), lastTime = 0, frame = 0, userScrollUntil = 0, touchY = 0, pointerScrolling = false;
+    let lastWrittenTop = lastTop;
     let followReady = enabledRef.current;
     let spring: BottomSpring | null = null;
     const writeTop = (position: number, wall: number) => {
       lastTop = Math.min(wall, Math.max(0, position));
       element.scrollTop = lastTop;
-      lastTop = element.scrollTop;
+      lastTop = lastWrittenTop = element.scrollTop;
     };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; spring = null; };
     const release = () => { setStuckBoth(false); stop(); };
@@ -47,6 +48,8 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
       const wall = readWall(), top = element.scrollTop, target = bottomScrollTarget(wall, slack);
       if (top < 0 || top > wall) { spring = null; return; }
       if (reducedMotion.matches) { spring = createBottomSpring(target, wall, slack); writeTop(target, wall); return; }
+      // Compare DOM readbacks, not the fractional spring, so even tiny native advances are kept without feeding rounding back into the solver.
+      if (spring && top > lastWrittenTop) spring = { ...spring, position: Math.min(top, target) };
       spring = stepBottomSpring(spring ?? createBottomSpring(top, wall, slack), wall, time - lastTime, slack);
       lastTime = time;
       if (bottomSpringSettled(spring)) { spring = createBottomSpring(target, wall, slack); writeTop(target, wall); return; }
@@ -72,7 +75,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
       const wall = readWall(), top = Math.min(wall, Math.max(0, element.scrollTop)), movedDown = top > lastTop + 1;
       lastTop = top;
       if (bouncing()) return;
-      // Layout clamps, lag behind a growing target and the spring's settle-back are not user intent.
+      // Layout clamps and lag behind a growing target are not user intent.
       // Distance only helps a deliberate downward gesture resume following; it can never cancel an active latch.
       if (!stuckRef.current && !pointerScrolling && movedDown && performance.now() < userScrollUntil && bottomScrollTarget(wall, slack) - top <= 48) {
         followReady = true; spring = createBottomSpring(top, wall, slack); setStuckBoth(true);

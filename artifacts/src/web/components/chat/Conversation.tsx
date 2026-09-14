@@ -27,7 +27,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const suggestions = session.suggestions;
   const queued = store.queue(session.id);
   return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
-    {/* pb-16 adds 48px of spring travel; the resting tail still has the usual 16px inset. */}
+    {/* Content padding supplies the tail inset; the spring targets the actual scroll bottom. */}
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto" style={{ overflowAnchor: 'none' }}><div ref={content} data-chat-content className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-4 pb-16">
       {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
       {chat.status === 'submitted' ? <p className="flex items-center gap-2 text-xs text-muted" role="status"><span className="size-1.5 animate-pulse rounded-full bg-accent" />正在连接…</p> : null}

@@ -8,14 +8,16 @@ import { Streamdown } from 'streamdown';
 import { markdownPlugins } from '../../chat/markdown';
 import { normalizeMath } from '../../chat/math';
 import { Icon } from '../Icon';
+import { STREAMING_ANIMATION, StreamingSpan } from './streaming-animation';
 import { analyzeReasoning } from './reasoning-model';
 import { useReasoningScroll } from './useReasoningScroll';
 import { exportRehypePlugins } from '../../chat/export-links';
 import './Reasoning.css';
 
+const COMPONENTS = { span: StreamingSpan };
 const Markdown = memo(function Markdown({ text, live }: { text: string; live: boolean }) {
   // Reasoning is text, never an executable UI4A surface. Streamdown handles incomplete Markdown.
-  return <Streamdown plugins={markdownPlugins} rehypePlugins={exportRehypePlugins} controls={false} isAnimating={live}>{normalizeMath(text)}</Streamdown>;
+  return <Streamdown plugins={markdownPlugins} rehypePlugins={exportRehypePlugins} components={COMPONENTS} controls={false} animated={live ? STREAMING_ANIMATION : false} isAnimating={live}>{normalizeMath(text)}</Streamdown>;
 });
 
 export const Reasoning = memo(function Reasoning({ parts, live }: { parts: readonly ReasoningUIPart[]; live: boolean }) {
@@ -34,13 +36,12 @@ function ReasoningView({ presentation, active, historyOpen }: { presentation: Re
   const contentKey = `${historyOpen}:${visible.map(entry => `${entry.key}:${entry.text}`).join('\n')}`;
   const { viewport, content, following, overflowing, resume } = useReasoningScroll(contentKey, active && !historyOpen);
   return <>
-    <div className="reasoning-indicator" aria-hidden="true" />
     <div className="reasoning-main">
       <span className="reasoning-sr-only" role="status">{active ? '正在思考' : ''}</span>
-      <div id={regionId} ref={viewport} className="reasoning-viewport" role="region" aria-label={kind === 'summary' ? '思考摘要' : '思考过程'} tabIndex={overflowing ? 0 : undefined}>
+      <div id={regionId} ref={viewport} className="reasoning-viewport no-scrollbar" role="region" aria-label={kind === 'summary' ? '思考摘要' : '思考过程'} tabIndex={overflowing ? 0 : undefined}>
         <div ref={content} className="reasoning-content">
           {/* Keep earlier summaries mounted so exports include history that has never been opened. */}
-          {entries.map(entry => <div key={entry.key} hidden={kind === 'summary' && !historyOpen && entry.key !== entries.at(-1)?.key} data-reasoning-entry data-reasoning-latest={kind === 'summary' ? entry.key === entries.at(-1)?.key : undefined}><Markdown text={entry.text} live={active} /></div>)}
+          {entries.map(entry => <div key={entry.key} hidden={kind === 'summary' && !historyOpen && entry.key !== entries.at(-1)?.key} data-reasoning-entry data-reasoning-streaming={entry.streaming} data-reasoning-latest={kind === 'summary' ? entry.key === entries.at(-1)?.key : undefined}><Markdown text={entry.text} live={entry.streaming} /></div>)}
           {!entries.length && active ? <span className="reasoning-placeholder">正在思考</span> : null}
         </div>
       </div>

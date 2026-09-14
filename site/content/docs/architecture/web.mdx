@@ -19,7 +19,7 @@ Host controls use native HTML plus Headless UI where behavior is stateful: dialo
 
 The layout preserves background turns when the selected conversation changes. Mobile viewports collapse Canvas into a drawer, and the split separator exposes its current value to assistive technology. Focus indicators come from the theme's focus token rather than from repeated container borders.
 
-Streaming assistant prose uses Streamdown's 800 ms character fade with no stagger. New text enters the DOM immediately; the animation follows received text updates without buffering or replaying the response. User messages and restored history remain static, and reduced-motion preferences disable the visual fade.
+Streaming assistant prose uses Streamdown's 800 ms character fade with no stagger. New text enters the DOM immediately; the animation follows received text updates without buffering or replaying the response. A span keeps its initial nonzero duration in a ref until its animation ends, so Streamdown marking the previous batch as historical cannot finish an active fade early. Releasing that duration does not schedule a React render for each character; subsequent updates do not replay it. User messages and restored history remain static, and reduced-motion preferences disable the visual fade.
 
 Reasoning is visible by default. Summary updates show the latest entry while keeping earlier entries available; full reasoning uses a height-limited scrolling region with fading edges. Scrolling up pauses automatic following. The UI preserves independent AI SDK reasoning parts and their tool/text boundaries instead of joining them into one monologue. Streaming motion and automatic following stop when the turn ends or is interrupted.
 

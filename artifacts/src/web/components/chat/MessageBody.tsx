@@ -1,5 +1,5 @@
-import { lazy, memo, Suspense, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import { Streamdown } from 'streamdown';
+import { lazy, memo, Suspense, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { Streamdown, type ExtraProps } from 'streamdown';
 import { markdownPlugins } from '../../chat/markdown';
 import { normalizeMath } from '../../chat/math';
 import { CodeBlock } from '../code/CodeBlock';
@@ -15,7 +15,14 @@ function Pre({ children }: { children?: ReactNode }) {
   const code = children as ReactElement<{ className?: string; children?: ReactNode }> | undefined;
   return <CodeBlock code={String(code?.props.children ?? '').replace(/\n$/, '')} lang={/language-([\w-]+)/.exec(code?.props.className ?? '')?.[1] ?? 'text'} />;
 }
-const COMPONENTS = { pre: Pre };
+function StreamingSpan({ node: _node, style, ...props }: ComponentProps<'span'> & ExtraProps) {
+  const duration = (style as CSSProperties & { '--sd-duration'?: string })?.['--sd-duration'];
+  // Streamdown marks prior tokens as 0ms on every append, which would prematurely finish their active fades.
+  // Completion only changes what the next chunk renders; a ref avoids one React commit per finished token.
+  const activeDuration = useRef('data-sd-animate' in props && duration !== '0ms' ? duration : undefined);
+  return <span {...props} style={activeDuration.current ? { ...style, '--sd-duration': activeDuration.current } as CSSProperties : style} onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === 'sd-fadeIn') activeDuration.current = undefined; props.onAnimationEnd?.(event); }} />;
+}
+const COMPONENTS = { pre: Pre, span: StreamingSpan };
 
 export const MessageBody = memo(function MessageBody({ text, messageId, streaming, sessionId, onSend, allowUi = true }: { text: string; messageId: string; streaming: boolean; sessionId: string; onSend: (text: string) => void; allowUi?: boolean }) {
   const segments = useMemo(() => allowUi ? parseSegments(text) : [{ kind: 'markdown' as const, text }], [allowUi, text]);

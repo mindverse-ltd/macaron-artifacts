@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, readFile, realpath, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parse } from 'partial-json';
+import { Allow, parse } from 'partial-json';
 import type { Artifact, ChatChunk } from '../shared/types.js';
 import { isArtifactEntry } from '../shared/artifact-path.js';
 export { isArtifactEntry } from '../shared/artifact-path.js';
@@ -66,9 +66,13 @@ export class ArtifactObserver {
   private inputs = new Map<string, string>();
   private names = new Map<string, string>();
   private sources = new Map<string, string>();
+  private published = new Map<string, Artifact>();
+  private previews = new Map<string, { path: string; source: string }>();
+  private bases = new Map<string, string>();
   private watchers: FSWatcher[] = [];
   private revision = Date.now();
   private closed = false;
+  private finishing = false;
   private scanning?: Promise<void>;
   private dirty = false;
   constructor(private cwd: string, private emit: (chunk: ChatChunk) => void) {}
@@ -92,37 +96,75 @@ export class ArtifactObserver {
         this.dirty = false;
         const files = await listArtifacts(this.cwd, ++this.revision);
         if (this.closed) return;
+        const previewPaths = new Set([...this.previews.values()].map(preview => preview.path));
         for (const artifact of files) {
           this.sources.set(artifact.path, artifact.source);
-          this.emit({ type: 'data-artifact', id: artifact.path, data: artifact });
+          // A watcher for another file must not replace an unfinished Write with its old disk contents.
+          if (!previewPaths.has(artifact.path)) this.publish(artifact.path, artifact.source, false);
+        }
+        const existing = new Set(files.map(file => file.path));
+        for (const path of this.published.keys()) if (!existing.has(path) && !previewPaths.has(path)) {
+          this.sources.delete(path); this.published.delete(path);
+          this.emit({ type: 'data-artifact', id: path, data: { path, source: '', streaming: false, revision: ++this.revision, deleted: true } });
         }
       }
     })().finally(() => { this.scanning = undefined; });
     return this.scanning;
   }
   accept(chunk: ChatChunk) {
+    if (this.closed || this.finishing) return;
     if (chunk.type === 'tool-input-start') this.names.set(chunk.toolCallId, chunk.toolName);
-    if (chunk.type !== 'tool-input-delta') return;
-    // Only full-file writes produce speculative frames. An edit's new_string is not a whole module.
-    // Checked before accumulating: every other tool's input would be parsed once per delta and thrown away.
-    if (!/write|create/i.test(this.names.get(chunk.toolCallId) ?? '')) return;
-    const json = (this.inputs.get(chunk.toolCallId) ?? '') + chunk.inputTextDelta;
-    this.inputs.set(chunk.toolCallId, json);
+    if (chunk.type === 'tool-output-available' || chunk.type === 'tool-output-error' || chunk.type === 'tool-input-error' || chunk.type === 'tool-output-denied') {
+      const path = this.previews.get(chunk.toolCallId)?.path;
+      this.previews.delete(chunk.toolCallId); this.inputs.delete(chunk.toolCallId); this.names.delete(chunk.toolCallId); this.bases.delete(chunk.toolCallId);
+      const active = path && [...this.previews].findLast(([, preview]) => preview.path === path);
+      if (active) this.publish(active[1].path, active[1].source, true, active[0]);
+      // The caller must await reconciliation before accepting the next tool's Edit base.
+      return this.refresh();
+    }
+    if (chunk.type !== 'tool-input-delta' && chunk.type !== 'tool-input-available') return;
+    const id = chunk.toolCallId, name = chunk.type === 'tool-input-available' ? chunk.toolName : this.names.get(id) ?? '';
+    const edit = /(?:^|[._])edit(?:_file)?$/i.test(name);
+    if (!edit && !/(?:^|[._])(?:write|create)(?:_file)?$/i.test(name)) return;
     try {
-      const input = parse(json) as Record<string, unknown>;
-      const path = input.file_path ?? input.path;
-      if (typeof path !== 'string' || typeof input.content !== 'string') return;
+      let input: Record<string, unknown>, complete: Record<string, unknown>;
+      if (chunk.type === 'tool-input-delta') {
+        const json = (this.inputs.get(id) ?? '') + chunk.inputTextDelta; this.inputs.set(id, json);
+        input = parse(json); complete = parse(json, Allow.OBJ);
+      } else input = complete = chunk.input as Record<string, unknown>;
+      const path = complete.file_path ?? complete.path;
+      if (typeof path !== 'string') return;
       const rel = relative(this.cwd, ui4aPath(this.cwd, path)).split(sep).join('/');
-      if (!isArtifactEntry(rel) || this.sources.get(rel) === input.content) return;
-      this.sources.set(rel, input.content);
-      this.emit({ type: 'data-artifact', id: rel, data: { path: rel, source: input.content, streaming: true, revision: ++this.revision } });
+      if (!isArtifactEntry(rel)) return;
+      let source = input.content;
+      if (edit) {
+        const old = complete.old_string, replacement = input.new_string;
+        if (typeof old !== 'string' || !old || typeof replacement !== 'string') return;
+        if (!this.bases.has(id) && this.sources.has(rel)) this.bases.set(id, this.sources.get(rel)!);
+        const base = this.bases.get(id), first = base?.indexOf(old) ?? -1;
+        // Rebuild the module from a stable pre-edit snapshot; never feed new_string alone to the renderer.
+        // Ambiguous anchors wait for an explicit replace_all, just as a native Edit would.
+        if (base === undefined || first < 0 || base.indexOf(old, first + old.length) >= 0 && complete.replace_all !== true) return;
+        source = complete.replace_all === true ? base.split(old).join(replacement) : base.slice(0, first) + replacement + base.slice(first + old.length);
+      }
+      if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_BYTES) return;
+      // Reinsert on every update so a rejected owner restores the most recently updated active preview.
+      this.previews.delete(id); this.previews.set(id, { path: rel, source }); this.publish(rel, source, true, id);
     } catch { /* Partial JSON and paths are expected while the native tool input is streaming. */ }
   }
+  private publish(path: string, source: string, streaming: boolean, toolCallId?: string) {
+    const prior = this.published.get(path);
+    if (prior?.source === source && prior.streaming === streaming && prior.toolCallId === toolCallId) return;
+    const data = { path, source, streaming, revision: ++this.revision, ...(toolCallId ? { toolCallId } : {}) };
+    this.published.set(path, data); this.emit({ type: 'data-artifact', id: path, data });
+  }
   async finish() {
+    this.finishing = true;
     // Stop new scan producers before taking the final disk snapshot. Otherwise an
     // already queued watcher can emit after finish and reopen a supposedly settled artifact.
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
+    this.previews.clear(); this.inputs.clear(); this.names.clear(); this.bases.clear();
     await this.refresh();
     this.closed = true;
   }

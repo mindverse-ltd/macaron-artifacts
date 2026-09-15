@@ -23,6 +23,22 @@ async function setup(run: (turn: HarnessTurn) => AsyncIterable<ChatChunk>) {
   const session = await (await post('/api/sessions', { cwd, harness: 'claude-code' })).json() as Session;
   return { app, base, post, session, cwd };
 }
+test('consecutive native Edits stream from the previous tool’s committed file', async () => {
+  const path = '.artifacts/canvases/research.ui4a.tsx';
+  const { post, session, cwd } = await setup(async function* (turn) {
+    if (turn.enrichment) return;
+    for (const [id, old_string, new_string, source] of [['first', 'A', 'AA', 'export default () => <p>AA B</p>'], ['second', 'B', 'BB', 'export default () => <p>AA BB</p>']] as const) {
+      yield { type: 'tool-input-available', toolCallId: id, toolName: 'Edit', input: { file_path: path, old_string, new_string } };
+      await writeUi4aFile(turn.cwd, path, source);
+      yield { type: 'tool-output-available', toolCallId: id, output: 'ok' };
+    }
+  });
+  await writeUi4aFile(cwd, path, 'export default () => <p>A B</p>');
+  const stream = await (await post('/api/chat', { id: session.id, messages: [message('edit-user', 'Update both findings')] })).text();
+  const artifacts = stream.split('\n').filter(line => line.startsWith('data: {')).map(line => JSON.parse(line.slice(6)) as ChatChunk).filter(chunk => chunk.type === 'data-artifact').map(chunk => chunk.data);
+  expect(artifacts.find(artifact => artifact.toolCallId === 'second')).toMatchObject({ source: 'export default () => <p>AA BB</p>', streaming: true });
+  expect(artifacts.at(-1)).toMatchObject({ source: 'export default () => <p>AA BB</p>', streaming: false });
+});
 test('forwards every native delta and replays a long detached turn without losing its prefix', async () => {
   let release!: () => void, reached!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<void>(resolve => { reached = resolve; });

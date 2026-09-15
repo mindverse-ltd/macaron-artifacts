@@ -84,8 +84,8 @@ export class ActiveConversation {
           }, approve };
           for await (const chunk of this.adapter.run(turn)) {
             if (nativeCheckpoint) { await nativeCheckpoint; nativeCheckpoint = undefined; }
-            artifacts.accept(chunk); emit(chunk);
-            if (chunk.type === 'tool-output-available') void artifacts.refresh().catch(() => {});
+            const reconciliation = artifacts.accept(chunk); emit(chunk);
+            if (reconciliation) await reconciliation;
           }
           if (nativeCheckpoint) await nativeCheckpoint;
           await artifacts.finish();
@@ -96,6 +96,8 @@ export class ActiveConversation {
           writer.write({ type: 'finish', finishReason: 'stop' });
         } catch (error) {
           failure = error; this.mainSettled = true;
+          // Interrupted or rejected writes must leave the preview at the actual disk revision, too.
+          await artifacts.finish().catch(() => {});
           emit({ type: 'error', errorText: safeProfileError(error, this.profile) });
           writer.write({ type: 'finish', finishReason: 'error', messageMetadata: { interrupted: true } });
         } finally { await artifacts.close(); }

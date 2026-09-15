@@ -117,6 +117,11 @@ export class WorkspaceStore {
       const current = revisions.get(part.data.path);
       if (current !== undefined && current > part.data.revision) return;
       revisions.set(part.data.path, part.data.revision);
+      if (part.data.deleted) {
+        files.delete(part.data.path);
+        if (this.selectedArtifacts.get(id) === part.data.path) this.selectedArtifacts.delete(id);
+        this.publish(); return;
+      }
       files.set(part.data.path, part.data);
       // A new file opens the panel. Closing the panel during its stream remains respected.
       if (!this.selectedArtifacts.has(id) && this.dismissed.get(id) !== part.data.path) this.selectedArtifacts.set(id, part.data.path);

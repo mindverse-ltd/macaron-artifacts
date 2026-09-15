@@ -5,8 +5,7 @@
 .reasoning-examples-playback { display: flex; gap: 4px; }
 .reasoning-examples-playback button { min-width: 44px; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
 .reasoning-examples-playback button:hover { background: var(--surface-3); }
-.reasoning-examples-progress { display: flex; align-items: center; flex: 1; min-width: 100px; max-width: 200px; }
-.reasoning-examples-progress input { width: 100%; accent-color: var(--accent); }
+.reasoning-examples-progress { flex: 1; min-width: 100px; max-width: 200px; gap: 0; }
 .reasoning-examples :focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 3px; }
 .reasoning-examples-conversation { width: min(100% - 48px, 760px); margin: 64px auto; }
 .reasoning-examples-user { width: fit-content; max-width: 88%; margin-left: auto; margin-bottom: 36px; padding: 12px 16px; border-radius: 8px; background: var(--surface-2); font-size: 14px; line-height: 1.7; }

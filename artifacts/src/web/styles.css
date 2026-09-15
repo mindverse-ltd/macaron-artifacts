@@ -1,5 +1,6 @@
 /* Wind4 already supplies its reset before utilities. A second reset here overrides button utility backgrounds. */
 @import "./theme/tokens.css";
+@import "./theme/native-numeric.css";
 /* streamdown 的逐词淡入只输出 `animation: sd-fadeIn`，keyframes 在它自己这个文件里 ——
    不引就是指向一个不存在的动画，CSS 静默忽略，文字直接蹦出来，看不出任何异常 */
 @import "streamdown/styles.css";

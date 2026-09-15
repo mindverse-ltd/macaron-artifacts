@@ -1,0 +1,25 @@
+.ui4a-slider, .ui4a-number { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.ui4a-numeric-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.ui4a-numeric-label, .ui4a-numeric-hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ui4a-numeric-label { font-weight: 500; }
+.ui4a-numeric-value { color: var(--fg); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ui4a-slider-control { display: flex; align-items: center; height: 28px; margin-inline: 8px; touch-action: pan-y; user-select: none; }
+.ui4a-slider-track { position: relative; width: 100%; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 24%, var(--surface)); }
+.ui4a-slider-fill { border-radius: inherit; background: var(--accent); }
+.ui4a-slider-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--input-fg, var(--fg)); transition: scale 140ms ease-out; }
+.ui4a-slider-thumb::after { content: ''; position: absolute; inset: -7px; }
+.ui4a-slider-thumb[data-dragging] { scale: 1.14; }
+.ui4a-slider-thumb:has(:focus-visible), .ui4a-number-group:has(.ui4a-number-input:focus-visible) { outline: 2px solid var(--input-focus, var(--accent)); outline-offset: 3px; }
+.ui4a-number-group { display: flex; min-width: 0; height: 36px; border: 1px solid var(--input-border, transparent); border-radius: 8px; background: var(--input-bg, var(--surface-2)); color: var(--input-fg, var(--fg)); }
+.ui4a-number-input { width: 100%; min-width: 0; border: 0; border-radius: inherit; padding: 0 4px; background: transparent; color: inherit; outline: none; font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; text-align: center; }
+.ui4a-number-input::placeholder { color: var(--input-placeholder, var(--muted)); }
+.ui4a-number-step { display: grid; flex: 0 0 34px; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; transition: background-color 140ms ease-out; }
+.ui4a-number-step svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; }
+.ui4a-number-step:focus-visible { outline: 2px solid var(--input-focus, var(--accent)); outline-offset: 2px; }
+.ui4a-number-step:is(:disabled, [aria-disabled="true"]) { cursor: default; opacity: .4; }
+.ui4a-number[data-readonly] .ui4a-number-step { visibility: hidden; }
+.ui4a-slider[data-disabled], .ui4a-number[data-disabled] { opacity: .5; }
+@media (hover: hover) { .ui4a-number-step:hover:not(:disabled, [aria-disabled="true"]) { background: color-mix(in srgb, currentColor 8%, transparent); } .ui4a-slider:not([data-disabled]) .ui4a-slider-thumb:hover { scale: 1.14; } }
+@media (pointer: coarse) { .ui4a-slider-control, .ui4a-number-group { min-height: 44px; } .ui4a-number-step { flex-basis: 44px; } .ui4a-slider-thumb::after { inset: -15px; } }
+@media (prefers-reduced-motion: reduce) { .ui4a-slider-thumb, .ui4a-number-step { transition: none; } }
+@media (forced-colors: active) { .ui4a-slider-track { background: GrayText; } .ui4a-slider-fill, .ui4a-slider-thumb { background: Highlight; forced-color-adjust: none; } .ui4a-number-group { border-color: ButtonText; } }

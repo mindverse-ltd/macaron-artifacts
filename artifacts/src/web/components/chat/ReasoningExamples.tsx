@@ -5,6 +5,7 @@ import { Button, Field, Label, Select } from '@headlessui/react';
 import type { ReasoningUIPart } from 'ai';
 import { Reasoning } from './Reasoning';
 import './ReasoningExamples.css';
+import { Slider } from '../NumericControls';
 
 const CASES = [
   ['summary-titles', 'GPT · 连续摘要标题'], ['summary-description', 'GPT · 标题和说明'], ['long', '开源模型 · 长思考'],
@@ -98,7 +99,7 @@ export function ReasoningExamples({ initialCase, initialState, initialStep, init
     <header className="reasoning-examples-toolbar">
       <Field className="reasoning-examples-field"><Label>场景</Label><Select value={example} onChange={event => choose(event.target.value)}>{CASES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select></Field>
       <div className="reasoning-examples-playback"><Button onClick={state === 'finished' ? replay : () => setPlaying(value => !value)}>{state === 'playing' ? '暂停' : '播放'}</Button><Button onClick={replay}>重播</Button></div>
-      <label className="reasoning-examples-progress"><span className="reasoning-examples-sr-only">播放进度</span><input type="range" min={0} max={frames.length - 1} value={cursor} onChange={event => { setCursor(Number(event.target.value)); setPlaying(false); }} /></label>
+      <Slider className="reasoning-examples-progress" label={<span className="reasoning-examples-sr-only">播放进度</span>} showValue={false} min={0} max={frames.length - 1} value={cursor} onValueChange={value => { setCursor(value); setPlaying(false); }} />
       {themeControl ?? <Field className="reasoning-examples-field"><Label>外观</Label><Select value={theme} onChange={event => setTheme(event.target.value)}><option value="light">浅色</option><option value="dark">深色</option></Select></Field>}
     </header>
     <div className="reasoning-examples-conversation">

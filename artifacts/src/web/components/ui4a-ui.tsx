@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { Button as HeadlessButton, Field as HeadlessField, Input, Label, Description, Disclosure as HeadlessDisclosure, DisclosureButton, DisclosurePanel, Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/react';
 import { Icon } from './Icon';
+export { Slider, NumberField } from './NumericControls';
 
 const variants = { primary: 'bg-accent text-accent-fg hover:bg-accent-hover', secondary: 'border border-secondary-border-rest bg-secondary text-secondary-fg hover:bg-secondary-hover hover:text-secondary-fg', ghost: 'text-muted hover:bg-surface-3 hover:text-hover-fg', danger: 'bg-danger-bg text-danger-fg hover:bg-danger-hover' };
 // Generated content can contain stacked labels; retain the normal control size without clipping taller children.
@@ -12,7 +13,7 @@ export function Button({ variant = 'primary', size = 'md', className = '', type 
 }
 
 export function Field({ label, hint, className = '', ...props }: ComponentProps<'input'> & { label: string; hint?: string }) {
-  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`interactive w-full min-w-0 rounded-lg border border-input-border bg-input-bg px-3 py-2 text-sm text-input-fg placeholder:text-input-placeholder focus:border-input-focus focus:outline-none data-[disabled]:opacity-50 ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
+  return <HeadlessField className="flex flex-col gap-1.5"><Label className="text-xs font-medium text-muted">{label}</Label><Input className={`${props.type === 'range' ? 'w-full' : 'interactive w-full min-w-0 rounded-lg border border-input-border bg-input-bg px-3 py-2 text-sm text-input-fg placeholder:text-input-placeholder focus:border-input-focus focus:outline-none data-[disabled]:opacity-50'} ${className}`} {...props} />{hint ? <Description className="text-xs text-muted">{hint}</Description> : null}</HeadlessField>;
 }
 
 export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl bg-surface-2 p-4 ${className}`} {...props} />; }

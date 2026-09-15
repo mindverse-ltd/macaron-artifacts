@@ -1,0 +1,14 @@
+/* Base UI form-validation inputs can be siblings of the visible root: exclude aria-hidden, not only descendants. */
+/* Older generated UI keeps native input semantics, but inherits the host palette. Keep vendor pseudos separate: Chromium rejects a selector list containing ::-moz-*. */
+:where(input[type="range"]:not(.ui4a-slider input)) { appearance: none; -webkit-appearance: none; width: 100%; height: 28px; margin: 0; padding: 0; border: 0; background: transparent; accent-color: var(--accent); cursor: pointer; }
+:where(input[type="range"]:not(.ui4a-slider input))::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 24%, var(--surface)); }
+:where(input[type="range"]:not(.ui4a-slider input))::-moz-range-track { height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 24%, var(--surface)); }
+:where(input[type="range"]:not(.ui4a-slider input))::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: var(--input-fg, var(--fg)); }
+:where(input[type="range"]:not(.ui4a-slider input))::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--input-fg, var(--fg)); }
+:where(input[type="number"]:not([aria-hidden="true"], .ui4a-number input)) { appearance: textfield; min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--input-border, transparent); border-radius: 8px; background: var(--input-bg, var(--surface-2)); color: var(--input-fg, var(--fg)); font: inherit; font-variant-numeric: tabular-nums; }
+:where(input[type="number"]:not([aria-hidden="true"], .ui4a-number input))::-webkit-inner-spin-button { appearance: none; margin: 0; }
+:where(input[type="number"]:not([aria-hidden="true"], .ui4a-number input))::-webkit-outer-spin-button { appearance: none; margin: 0; }
+:where(input[type="number"]:not([aria-hidden="true"], .ui4a-number input))::placeholder { color: var(--input-placeholder, var(--muted)); }
+:where(input:is([type="range"], [type="number"]):not([aria-hidden="true"], .ui4a-slider input, .ui4a-number input)):focus-visible { outline: 2px solid var(--input-focus, var(--accent)); outline-offset: 3px; }
+:where(input:is([type="range"], [type="number"]):disabled) { opacity: .5; cursor: default; }
+@media (pointer: coarse) { :where(input:is([type="range"], [type="number"]):not([aria-hidden="true"], .ui4a-slider input, .ui4a-number input)) { min-height: 44px; } }

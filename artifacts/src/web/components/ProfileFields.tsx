@@ -3,7 +3,7 @@ import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HarnessId } from '../../shared/types';
 import { claudeEnvironmentOptions, type ProfileConfig, type ProfileInput, type ProfileOptions } from '../../shared/profiles';
 import { Icon } from './Icon';
-import { Button, Field } from './ui4a-ui';
+import { Button, Field, NumberField } from './ui4a-ui';
 
 type Option = { value: string; label: string; detail?: string };
 type ProfileFieldsProps = { harness: HarnessId; config: ProfileConfig; onChange(config: ProfileConfig): void; options: ProfileOptions; credentials: ProfileInput['credentials']; configured: { apiKey: boolean; authToken: boolean }; onCredentialsChange(next: ProfileInput['credentials']): void; disabled: boolean };
@@ -88,7 +88,7 @@ function ClaudeEnvironmentFields({ config, onChange, disabled }: Pick<ProfileFie
     onChange({ ...config, environment: Object.keys(environment).length ? environment : undefined });
   };
   return <Advanced title="上下文与运行参数"><div className="grid gap-4 sm:grid-cols-2">{claudeEnvironmentOptions.map(option => option.type === 'integer'
-    ? <Field key={option.name} label={option.label} type="number" inputMode="numeric" min={option.min} max={option.max} step={1} value={config.environment?.[option.name] ?? ''} onChange={event => update(option.name, event.target.value)} placeholder="继承本机配置" disabled={disabled} />
+    ? <NumberField key={option.name} label={option.label} inputMode="numeric" min={option.min} max={option.max} step={1} smallStep={1} value={config.environment?.[option.name] ? Number(config.environment[option.name]) : null} onValueChange={value => update(option.name, value === null ? '' : String(value))} placeholder="继承本机配置" disabled={disabled} />
     : <Choice key={option.name} label={option.label} value={config.environment?.[option.name] ?? ''} options={[inherit, { value: '1', label: '开启' }, { value: '0', label: '关闭' }]} onChange={value => update(option.name, value)} disabled={disabled} />
   )}</div></Advanced>;
 }

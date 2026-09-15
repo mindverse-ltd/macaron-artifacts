@@ -1,0 +1,11 @@
+/* The grid track follows the real card height; a fixed max-height would delay the visible collapse. */
+.approval-slot { display: grid; align-items: start; min-width: 0; }
+.approval-slot > * { grid-area: 1 / 1; }
+.approval-presence { display: grid; grid-template-rows: 1fr; opacity: 1; transform: translateY(0); transition: grid-template-rows 200ms cubic-bezier(.23,1,.32,1), opacity 200ms cubic-bezier(.23,1,.32,1), transform 200ms cubic-bezier(.23,1,.32,1); }
+.approval-presence[data-closed] { grid-template-rows: 0fr; opacity: 0; transform: translateY(-4px); }
+.approval-presence[data-leave] { transition-duration: 150ms; }
+.approval-card :where(.approval-title, button, [role='button']) { user-select: none; -webkit-user-select: none; }
+.approval-title, .approval-status { overflow-wrap: anywhere; }
+.approval-status { opacity: 1; transform: translateY(0); transition: opacity 150ms cubic-bezier(.23,1,.32,1), transform 150ms cubic-bezier(.23,1,.32,1); }
+.approval-status[aria-hidden='true'] { visibility: hidden; opacity: 0; transform: translateY(-2px); }
+@media (prefers-reduced-motion: reduce) { .approval-presence, .approval-status { transition: none; } }

@@ -10,7 +10,7 @@
 .ui4a-math-block { display: block; min-width: 0; }
 .ui4a-math-block .katex-display { margin: 0; }
 .ui4a-chart { color: var(--muted); font-size: 12px; }
-.ui4a-chart .recharts-cartesian-axis-tick text { fill: var(--muted); }
+.ui4a-chart .recharts-cartesian-axis-tick text, .ui4a-chart .recharts-cartesian-axis-tick-value { fill: var(--muted); }
 .ui4a-chart .recharts-cartesian-grid line { stroke: var(--border); }
 .ui4a-chart .recharts-default-tooltip { background: var(--surface) !important; border-color: var(--border) !important; border-radius: 6px; color: var(--fg); }
 .ui4a-chart .recharts-tooltip-label { color: var(--fg); }

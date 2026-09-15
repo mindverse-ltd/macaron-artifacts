@@ -3,7 +3,20 @@ import { useGenUIRenderContext } from 'partial-react/render-context';
 import { dequal } from 'dequal';
 import * as Recharts from 'recharts';
 
-export { CartesianGrid, Cell, Legend, ReferenceDot, ReferenceLine, Tooltip } from 'recharts';
+export { CartesianGrid, Cell, ReferenceDot, ReferenceLine } from 'recharts';
+
+const legendLabel: NonNullable<ComponentProps<typeof Recharts.Legend>['formatter']> = value => <span style={{ color: 'var(--fg)' }}>{value}</span>;
+export function Legend(props: ComponentProps<typeof Recharts.Legend>) {
+  // Recharts colors labels from each series by default; keep series color on the marker only.
+  return <Recharts.Legend {...props} formatter={props.formatter ?? (props.content || props.labelStyle?.color ? undefined : legendLabel)} />;
+}
+Legend.displayName = Recharts.Legend.displayName;
+
+export function Tooltip(props: ComponentProps<typeof Recharts.Tooltip>) {
+  const color = props.contentStyle?.color || props.wrapperStyle?.color || 'var(--fg)';
+  return <Recharts.Tooltip {...props} contentStyle={props.content ? props.contentStyle : { backgroundColor: 'var(--surface)', color, borderColor: 'var(--border)', ...props.contentStyle }} itemStyle={props.content ? props.itemStyle : { color, ...props.itemStyle }} />;
+}
+Tooltip.displayName = 'Tooltip';
 
 const snapshots = new Map<string, ReactElement>();
 const dataSnapshots = new Map<string, unknown>();

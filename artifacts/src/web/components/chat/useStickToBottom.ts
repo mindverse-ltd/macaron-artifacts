@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BOTTOM_SCROLL_SLACK, bottomScrollTarget, bottomSpringSettled, createBottomSpring, stepBottomSpring, type BottomSpring } from "./bottom-spring";
+import { BOTTOM_SCROLL_SLACK, bottomScrollTarget, bottomSpringSettled, createBottomSpring, stepBottomSpring, stepBottomSpringClock, type BottomSpring } from "./bottom-spring";
 
 type Options = { enabled?: boolean; resetKey?: string | number | null; slack?: number; initial?: 'start' | 'end' };
 export const PAUSE_BOTTOM_FOLLOW = 'ui4a:pause-bottom-follow';
@@ -30,7 +30,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
     const readTop = () => Math.min(readWall(), Math.max(0, element.scrollTop));
     const bouncing = () => element.scrollTop < 0 || element.scrollTop > readWall();
     let lastTop = readTop(), lastTime = 0, frame = 0, userScrollUntil = 0, touchY = 0, pointerScrolling = false;
-    let lastWrittenTop = lastTop;
+    let lastWrittenTop = lastTop, startup = 0;
     let followReady = enabledRef.current;
     let spring: BottomSpring | null = null;
     const writeTop = (position: number, wall: number) => {
@@ -38,7 +38,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
       element.scrollTop = lastTop;
       lastTop = lastWrittenTop = element.scrollTop;
     };
-    const stop = () => { cancelAnimationFrame(frame); frame = 0; spring = null; };
+    const stop = () => { cancelAnimationFrame(frame); frame = 0; spring = null; startup = 0; };
     const release = () => { setStuckBoth(false); stop(); };
     const pauseReading = () => { userScrollUntil = 0; release(); };
     const tick = (time: number) => {
@@ -46,13 +46,14 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
       if (!stuckRef.current || !followReady) return;
       // Safari's elastic offsets belong to its native gesture. A write here would cancel that motion.
       const wall = readWall(), top = element.scrollTop, target = bottomScrollTarget(wall, slack);
-      if (top < 0 || top > wall) { spring = null; return; }
-      if (reducedMotion.matches) { spring = createBottomSpring(target, wall, slack); writeTop(target, wall); return; }
+      if (top < 0 || top > wall) { spring = null; startup = 0; return; }
+      if (reducedMotion.matches) { spring = createBottomSpring(target, wall, slack); startup = 0; writeTop(target, wall); return; }
       // Compare DOM readbacks, not the fractional spring, so even tiny native advances are kept without feeding rounding back into the solver.
       if (spring && top > lastWrittenTop) spring = { ...spring, position: Math.min(top, target) };
-      spring = stepBottomSpring(spring ?? createBottomSpring(top, wall, slack), wall, time - lastTime, slack);
+      const clock = stepBottomSpringClock(startup, time - lastTime); startup = clock.elapsed;
+      spring = stepBottomSpring(spring ?? createBottomSpring(top, wall, slack), wall, clock.delta, slack);
       lastTime = time;
-      if (bottomSpringSettled(spring)) { spring = createBottomSpring(target, wall, slack); writeTop(target, wall); return; }
+      if (bottomSpringSettled(spring)) { spring = createBottomSpring(target, wall, slack); startup = 0; writeTop(target, wall); return; }
       writeTop(spring.position, wall);
       frame = requestAnimationFrame(tick);
     };
@@ -64,7 +65,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
     const scroll = (behavior: ScrollBehavior) => {
       followReady = true;
       if (behavior === 'instant' || reducedMotion.matches) {
-        cancelAnimationFrame(frame); frame = 0;
+        stop();
         const wall = readWall(), target = bottomScrollTarget(wall, slack);
         spring = createBottomSpring(target, wall, slack); writeTop(target, wall);
       } else wake();

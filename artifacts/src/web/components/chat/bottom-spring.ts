@@ -1,6 +1,7 @@
 // Gallery's card-growth model: macaron-genui-demo@d2503903, src/components/gallery/gallerySpringMotion.ts:218–269.
 export const BOTTOM_SCROLL_SLACK = 0;
-const W = 2 * Math.PI * 1.6;
+// Large card mounts need a gentler follow speed to keep text legible under 2× frame blending.
+const W = 2 * Math.PI * 1.0;
 export type BottomSpring = { position: number; velocity: number; target: number };
 export const bottomScrollTarget = (wall: number, slack = BOTTOM_SCROLL_SLACK) => Math.max(0, wall - slack);
 export const createBottomSpring = (position: number, wall: number, slack = BOTTOM_SCROLL_SLACK): BottomSpring => {
@@ -26,3 +27,16 @@ export function stepBottomSpring(state: BottomSpring, wall: number, elapsedMs: n
 
 // Velocity survives between streamed lines; only stop once both motion and the remaining distance are negligible.
 export const bottomSpringSettled = (state: BottomSpring) => Math.abs(state.position - state.target) < 0.25 && Math.abs(state.velocity) < 0.5;
+
+export const BOTTOM_SPRING_STARTUP_MS = 250;
+const startupTime = (elapsed: number) => {
+  const u = Math.min(1, elapsed / BOTTOM_SPRING_STARTUP_MS);
+  return BOTTOM_SPRING_STARTUP_MS * (u ** 3 - u ** 4 / 2) + Math.max(0, elapsed - BOTTOM_SPRING_STARTUP_MS);
+};
+
+// Integrate a 0→1 smoothstep clock, rather than easing the target or resetting momentum on each token.
+// Nonnegative clock speed preserves the spring's monotonic/no-overshoot proof. Reset elapsed only at rest or on interruption.
+export function stepBottomSpringClock(elapsed: number, frameMs: number) {
+  const next = elapsed + Math.min(1000 / 30, Math.max(0, frameMs));
+  return { elapsed: Math.min(BOTTOM_SPRING_STARTUP_MS, next), delta: startupTime(next) - startupTime(elapsed) };
+}

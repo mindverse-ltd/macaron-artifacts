@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { BOTTOM_SCROLL_SLACK, bottomScrollTarget, bottomSpringSettled, createBottomSpring, stepBottomSpring } from './bottom-spring';
+import { BOTTOM_SCROLL_SLACK, BOTTOM_SPRING_STARTUP_MS, bottomScrollTarget, bottomSpringSettled, createBottomSpring, stepBottomSpring, stepBottomSpringClock } from './bottom-spring';
 
 const grow = (hz: number) => {
   let state = createBottomSpring(0, BOTTOM_SCROLL_SLACK);
@@ -151,5 +151,63 @@ describe('streaming bottom spring', () => {
       expect(Number.isFinite(next.velocity)).toBe(true);
       state = next;
     }
+  });
+});
+
+describe('bottom spring startup clock', () => {
+  const run = (hz: number, target = 800) => {
+    let state = createBottomSpring(0, target), startup = 0;
+    const samples = [];
+    for (let frame = 1; frame <= hz * 2; frame++) {
+      const clock = stepBottomSpringClock(startup, 1000 / hz); startup = clock.elapsed;
+      const next = stepBottomSpring(state, target, clock.delta), u = startup / BOTTOM_SPRING_STARTUP_MS;
+      samples.push({ time: frame / hz * 1000, position: next.position, velocity: next.velocity * u * u * (3 - 2 * u) });
+      expect(next.position).toBeGreaterThanOrEqual(state.position);
+      expect(next.position).toBeLessThanOrEqual(target);
+      state = next;
+    }
+    return samples;
+  };
+
+  test('extends the visible ease-in while preserving the same no-overshoot trajectory', () => {
+    const samples = run(120);
+    const at = (ms: number) => samples.find(sample => Math.abs(sample.time - ms) < 0.01)!;
+    expect(at(50).position).toBeLessThan(1);
+    expect(at(100).position).toBeLessThan(25);
+    expect(at(50).velocity).toBeLessThan(at(100).velocity);
+    expect(at(100).velocity).toBeLessThan(at(150).velocity);
+    expect(at(150).velocity).toBeLessThan(at(200).velocity);
+    // A 1Hz spring peaks after startup; the hook finishes at its settling thresholds, not at the asymptotic limit.
+    expect(at(350).velocity).toBeLessThan(at(300).velocity);
+    expect(bottomSpringSettled({ ...at(2000), target: 800 })).toBe(true);
+  });
+
+  test('integrated startup agrees across display refresh rates', () => {
+    const samples = [30, 60, 120, 240].map(hz => run(hz).filter(sample => Math.abs(sample.time % 100) < 0.001));
+    for (const run of samples.slice(1)) for (let i = 0; i < samples[0].length; i++) {
+      expect(run[i].position).toBeCloseTo(samples[0][i].position, 8);
+      expect(run[i].velocity).toBeCloseTo(samples[0][i].velocity, 8);
+    }
+  });
+
+  test('duplicate and delayed frames neither skip the ramp nor advance backward', () => {
+    expect(stepBottomSpringClock(0, -10)).toEqual({ elapsed: 0, delta: 0 });
+    expect(stepBottomSpringClock(100, 0)).toEqual({ elapsed: 100, delta: 0 });
+    expect(stepBottomSpringClock(0, 10_000)).toEqual(stepBottomSpringClock(0, 1000 / 30));
+    expect(stepBottomSpringClock(250, 1000 / 60).delta).toBeCloseTo(1000 / 60, 10);
+  });
+
+  test('streamed growth retains the startup clock and momentum instead of restarting per token', () => {
+    let state = createBottomSpring(0, 0), startup = 0, target = 0;
+    for (let frame = 0; frame < 360; frame++) {
+      if (frame % 6 === 0) target += 24;
+      const clock = stepBottomSpringClock(startup, 1000 / 60); startup = clock.elapsed;
+      const next = stepBottomSpring(state, target, clock.delta);
+      expect(next.position).toBeGreaterThanOrEqual(state.position);
+      expect(next.position).toBeLessThanOrEqual(target);
+      if (frame > 120) expect(next.velocity).toBeGreaterThan(210);
+      state = next;
+    }
+    expect(startup).toBe(BOTTOM_SPRING_STARTUP_MS);
   });
 });

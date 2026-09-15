@@ -130,6 +130,52 @@ describe('OpenCode lifecycle', () => {
     await expect(result).rejects.toMatchObject({ name: 'AbortError' });
     expect(connection.calls.slice(-2)).toEqual([{ method: 'abort', value: 'native' }, { method: 'close' }]);
   });
+  test('forwards verified descendant approvals without exposing child text or finishing on child idle', async () => {
+    const connection = new FakeConnection(), approved: string[] = [];
+    connection.getSession = async id => session(id, { parentID: id === 'grandchild' ? 'child' : 'native' });
+    connection.replyPermission = async (id, approved) => { connection.calls.push({ method: 'reply', value: { id, approved } }); };
+    connection.rejectQuestion = async id => { connection.calls.push({ method: 'question-reject', value: id }); };
+    const finish = connection.onPrompt;
+    connection.onPrompt = id => {
+      connection.emit(id, 'session.status', { status: { type: 'busy' } });
+      connection.emit('child', 'permission.asked', { id: 'read-child', permission: 'external_directory' });
+      connection.emit('grandchild', 'permission.asked', { id: 'read-grandchild', permission: 'external_directory' });
+      connection.emit('grandchild', 'question.asked', { id: 'question' });
+      connection.emit('child', 'message.updated', { info: { id: 'hidden', role: 'assistant' } });
+      connection.emit('child', 'message.part.updated', { part: { id: 'hidden-part', messageID: 'hidden', type: 'text', text: 'private child output' } });
+      connection.emit('child', 'session.idle');
+      connection.emit('grandchild', 'session.status', { status: { type: 'idle' } });
+      finish(id);
+    };
+    const chunks = await collect(makeTurn({ approve: async request => { approved.push(request.id); return request.id === 'read-child'; } }), connection);
+    expect(approved).toEqual(['read-child', 'read-grandchild']);
+    expect(connection.calls.filter(call => call.method === 'reply' || call.method === 'question-reject')).toEqual([
+      { method: 'reply', value: { id: 'read-child', approved: true } }, { method: 'reply', value: { id: 'read-grandchild', approved: false } }, { method: 'question-reject', value: 'question' },
+    ]);
+    expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['hello']);
+  });
+  test('ignores unrelated, missing and cyclic session requests', async () => {
+    const connection = new FakeConnection();
+    connection.getSession = async id => { if (id === 'missing') throw Error('Not found'); return session(id, { parentID: id === 'cycle' ? 'cycle' : undefined }); };
+    const finish = connection.onPrompt;
+    connection.onPrompt = id => {
+      for (const other of ['unrelated', 'missing', 'cycle']) for (const type of ['permission.asked', 'question.asked']) connection.emit(other, type, { id: other, permission: 'bash' });
+      finish(id);
+    };
+    await collect(makeTurn({ approve: async () => { throw Error('Must not prompt for unrelated sessions'); } }), connection);
+    expect(connection.calls.some(call => call.method === 'reply' || call.method === 'question-reject')).toBe(false);
+  });
+  test('cancellation interrupts descendant lookup and descendant approval', async () => {
+    for (const waitingOn of ['lookup', 'approval']) {
+      const connection = new FakeConnection(), controller = new AbortController(), waiting = Promise.withResolvers<void>();
+      connection.getSession = async id => { if (waitingOn === 'lookup') { waiting.resolve(); return new Promise(() => {}); } return session(id, { parentID: 'native' }); };
+      connection.onPrompt = () => connection.emit('child', 'permission.asked', { id: 'read', permission: 'external_directory' });
+      const result = collect(makeTurn({ signal: controller.signal, approve: async () => { waiting.resolve(); return new Promise(() => {}); } }), connection);
+      await waiting.promise; controller.abort();
+      await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+      expect(connection.calls.slice(-2)).toEqual([{ method: 'abort', value: 'native' }, { method: 'close' }]);
+    }
+  });
   test('native errors and event disconnection abort the running session and close transport', async () => {
     for (const mode of ['error', 'disconnect']) {
       const connection = new FakeConnection();

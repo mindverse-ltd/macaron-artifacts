@@ -36,22 +36,41 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
       // Native fork copies messages but drops session permissions; restore them without filtering tools.
       if (original?.permission) await connection.copyPermissions(nativeID, original.permission, signal);
     } else turn.onNativeSession(nativeID);
+    const belongsToTurn = async (id: string): Promise<boolean> => {
+      const visited = new Set<string>();
+      while (id && id !== nativeID && !visited.has(id)) {
+        visited.add(id);
+        try {
+          const session = await abortable(connection.getSession(id, signal), signal);
+          if (session.id !== id) return false;
+          id = session.parentID ?? '';
+        } catch (error) { if (signal.aborted) throw error; return false; }
+      }
+      return id === nativeID;
+    };
     pump = (async () => {
       for await (const raw of connection.events(signal)) {
         const event = record(raw), properties = record(event.properties);
         if (event.type === 'server.connected') { resolveReady(); continue; }
         const eventSessionID = properties.sessionID ?? record(properties.info).sessionID ?? record(properties.part).sessionID;
-        if (!started || eventSessionID !== nativeID) continue;
+        if (!started) continue;
+        // Native tasks can wait for a child's approval. Verify ancestry before forwarding it;
+        // child messages and idle events must still stay outside the root conversation.
+        if (event.type === 'permission.asked' || event.type === 'question.asked') {
+          if (typeof eventSessionID !== 'string' || !await belongsToTurn(eventSessionID)) continue;
+          if (event.type === 'permission.asked') {
+            const approved = !turn.enrichment && await abortable(turn.approve({ id: string(properties.id), tool: string(properties.permission), input: properties }), signal);
+            await connection.replyPermission(string(properties.id), approved, signal);
+          } else {
+            // The shared approval surface cannot answer free-form native questionnaires.
+            await connection.rejectQuestion(string(properties.id), signal);
+          }
+          continue;
+        }
+        if (eventSessionID !== nativeID) continue;
         if (event.type === 'session.status' && record(properties.status).type !== 'idle') active = true;
         const info = record(properties.info), assistant = event.type === 'message.updated' && info.role === 'assistant';
         if (assistant) { active = true; assistantIDs.add(string(info.id)); }
-        if (event.type === 'permission.asked') {
-          const approved = !turn.enrichment && await abortable(turn.approve({ id: string(properties.id), tool: string(properties.permission), input: properties }), signal);
-          await connection.replyPermission(string(properties.id), approved, signal);
-        } else if (event.type === 'question.asked') {
-          // The shared approval surface cannot answer free-form native questionnaires.
-          await connection.rejectQuestion(string(properties.id), signal);
-        }
         const nativeError = event.type === 'session.error' ? properties.error : assistant ? info.error : undefined;
         if (nativeError || event.type === 'session.error') {
           const error = new Error(safeError(record(record(nativeError).data).message || record(nativeError).name || 'OpenCode turn failed'));

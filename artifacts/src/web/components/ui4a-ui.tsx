@@ -3,7 +3,8 @@ import { Button as HeadlessButton, Field as HeadlessField, Input, Label, Descrip
 import { Icon } from './Icon';
 
 const variants = { primary: 'bg-accent text-accent-fg hover:bg-accent-hover', secondary: 'border border-secondary-border-rest bg-secondary text-secondary-fg hover:bg-secondary-hover hover:text-secondary-fg', ghost: 'text-muted hover:bg-surface-3 hover:text-hover-fg', danger: 'bg-danger-bg text-danger-fg hover:bg-danger-hover' };
-const sizes = { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4 text-sm' };
+// Generated content can contain stacked labels; retain the normal control size without clipping taller children.
+const sizes = { sm: 'min-h-8 px-3 py-1.5 text-xs', md: 'min-h-9 px-4 py-1.5 text-sm' };
 const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 
 export function Button({ variant = 'primary', size = 'md', className = '', type = 'button', ...props }: ComponentProps<'button'> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; size?: 'sm' | 'md' }) {
@@ -15,13 +16,14 @@ export function Field({ label, hint, className = '', ...props }: ComponentProps<
 }
 
 export function Card({ className = '', ...props }: ComponentProps<'div'>) { return <div className={`@container rounded-xl bg-surface-2 p-4 ${className}`} {...props} />; }
-export function Badge({ className = '', ...props }: ComponentProps<'span'>) { return <span className={`inline-flex items-center rounded-full bg-status px-2 py-0.5 text-xs text-status-fg ${className}`} {...props} />; }
+export function Badge({ className = '', ...props }: ComponentProps<'span'>) { return <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-status px-2 py-0.5 text-xs text-status-fg ${className}`} {...props} />; }
 
 export function Tabs({ items, value, onChange }: { items: { id: string; label: ReactNode; children: ReactNode }[]; value?: string; onChange?: (id: string) => void }) {
   const index = value === undefined ? undefined : Math.max(0, items.findIndex(item => item.id === value));
-  return <TabGroup selectedIndex={index} onChange={next => { const item = items[next]; if (item) onChange?.(item.id); }}><TabList className="flex gap-1 rounded-lg bg-surface-2 p-1">{items.map(item => <Tab key={item.id} className={`interactive flex-1 rounded-md px-3 py-1.5 text-sm text-muted data-[selected]:bg-tab-active data-[selected]:text-tab-active-fg ${focus}`}>{item.label}</Tab>)}</TabList><TabPanels className="mt-3">{items.map(item => <TabPanel key={item.id}>{item.children}</TabPanel>)}</TabPanels></TabGroup>;
+  // Native focus can leave a partially visible tab clipped; reveal the full label without changing keyboard selection.
+  return <TabGroup className="min-w-0" selectedIndex={index} onChange={next => { const item = items[next]; if (item) onChange?.(item.id); }}><TabList className="scroll-x flex gap-2 rounded-lg bg-surface-2 p-1">{items.map(item => <Tab key={item.id} onFocus={event => event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })} className={`interactive h-9 shrink-0 whitespace-nowrap rounded-md px-3 text-sm text-muted data-[selected]:bg-tab-active data-[selected]:text-tab-active-fg ${focus}`}>{item.label}</Tab>)}</TabList><TabPanels className="mt-5">{items.map(item => <TabPanel key={item.id}>{item.children}</TabPanel>)}</TabPanels></TabGroup>;
 }
 
 export function Disclosure({ title, children, defaultOpen }: { title: ReactNode; children: ReactNode; defaultOpen?: boolean }) {
-  return <HeadlessDisclosure defaultOpen={defaultOpen}>{({ open }) => <div className="overflow-clip rounded-lg bg-surface-2"><DisclosureButton className={`interactive flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-3 hover:text-hover-fg ${focus}`}>{title}<Icon name="chevronRight" className={`size-4 shrink-0 ${open ? 'rotate-90' : ''}`} /></DisclosureButton><DisclosurePanel static hidden={!open} className="px-3 py-3 text-sm">{children}</DisclosurePanel></div>}</HeadlessDisclosure>;
+  return <HeadlessDisclosure defaultOpen={defaultOpen}>{({ open }) => <div className="overflow-clip rounded-lg bg-surface-2"><DisclosureButton className={`interactive flex w-full items-center justify-between gap-2 rounded-lg px-4 py-3 text-left text-sm hover:bg-surface-3 hover:text-hover-fg ${focus}`}>{title}<Icon name="chevronRight" className={`size-4 shrink-0 ${open ? 'rotate-90' : ''}`} /></DisclosureButton><DisclosurePanel static hidden={!open} className="p-4 text-sm">{children}</DisclosurePanel></div>}</HeadlessDisclosure>;
 }

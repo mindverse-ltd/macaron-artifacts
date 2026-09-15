@@ -18,13 +18,29 @@ The manifest in `artifacts/src/web/ui4a/manifest.ts` is the source of truth for 
 
 SVG labels use `fill="var(--fg)"` (or `fill="currentColor"` with a semantic text color); inheriting CSS `color` alone does not override SVG `fill`. Pair node backgrounds and labels, such as `surface-2` with `fg` or `accent` with `accent-fg`. Series colors distinguish diagram marks and connectors; they are not a blanket foreground for small labels. Generated diagrams follow the same light/dark tokens as the host.
 
+The generation guidance treats color as information: existing evidence levels use short labeled Badges with consistent color markers, while categories use labeled chart-series colors. A weak level keeps fully readable text; it is not a disabled state or an error. The default Badge retains its paired foreground/background, with a small colored mark inside it.
+
+Built-in chart legends keep series colors on their markers and use the host foreground for default labels. Default tooltips also pair their surface and text colors. Explicit custom formatter, content and color styles remain available; the generated UI must check contrast for those overrides.
+
+Pair each label with its immediate background. Fixed palettes, `dark:` alternatives, text-bearing gradients, and arbitrary translucent token mixtures can diverge from the host mode or break contrast. The guidance asks for computed checks of actual composited colors when preview tools are available: normal text at least 4.5:1, large text and meaningful non-text marks at least 3:1, across narrow chat/sidebar widths and both host modes. Without preview tools, it uses the known paired tokens and does not claim unperformed validation.
+
+Design principles are included directly in the injected UI4A guidance; generated responses do not need an external design skill. Harness-specific widget references and HTML attachments do not substitute for the host's `ui4a/tsx` fences or `.ui4a.tsx` canvases.
+
 The skill also asks the harness to check labels, headings, legends, and control states in both modes, keeping small text opaque. These generation instructions guide future output; they do not automatically recolor existing artifacts.
 
-The guidance favors compact inline demonstrations alongside technical explanations and follow-up replies. Necessary clarification controls send the selected answer as a visible user turn; reading controls such as tabs and diagram selections stay local. Mermaid fences are not rendered by this host, so diagrams use inline React/SVG. Diagrams must fit their container, and changing a mode must update its affected labels, structure, and formulas together. These are presentation choices, not a requirement to add an interface to every reply.
+The guidance makes a focused inline explorer the default primary explanation for multi-stage mechanisms and comparisons across shared criteria, with brief surrounding prose. Direct facts and standalone values stay concise prose. Explicitly requested visuals and delivery surfaces remain separate obligations: updating a canvas does not replace a requested inline chart. Necessary clarification controls send the selected answer as a visible user turn; reading controls such as tabs and diagram selections stay local. Mermaid fences are not rendered by this host, so diagrams use inline React/SVG. Diagrams must fit their container, and changing a mode must update its affected labels, structure, and formulas together.
+
+When a canvas patch does not match, the guidance asks the harness to read its current contents, then retry or rewrite the revised module while preserving unrelated content. Successful Write/Edit feedback confirms the current saved state; another read is needed only after a failed edit or external change. Browser rendering still needs its own check. An independent inline request remains due while the canvas is repaired.
+
+The response format is reconsidered for each turn: direct facts and standalone formulas stay prose, while a meaningful stage selection or case comparison can use one focused inline demonstration. Missing values required for a calculation should be collected through a short, initially empty form and one explicit submission. These are generation instructions; passing a renderer test alone does not demonstrate that a model chose the appropriate format.
+
+Quantities, proportions, scaling and savings favor a compact chart with explicit baselines and units. Chart values come from cited facts or stated formulas, with theoretical examples distinguished from measurements. Branching mechanisms retain a connected overview; tabs containing only prose do not replace the visual relationships. Each view answers one question without inventing experimental data.
+
+Quantitative views derive their formulas, labels, relationships and ratios from one data model. Unit changes transform the plotted dataset before the axes, tooltip and summary format it; changing a suffix alone does not convert a quantity. The harness is asked to check a sample in each unit, preserve operation order and dimensions, and distinguish direct behavioral evidence from inference. A view carries its requested explanation, with at most two takeaway sentences around it. Personal distress or interpreting a newly reported symptom or test result stays in prose, including clarification, unless an interactive calculation is explicitly requested.
 
 | Module | Purpose |
 | --- | --- |
-| `$ui4a/ui` | Button, Field, Card, Badge, Tabs, and Disclosure |
+| `$ui4a/ui` | Button, Field, Slider, NumberField, Card, Badge, Tabs, and Disclosure |
 | `$ui4a/ui/katex` | LaTeX and MathBlock with stable formula rendering |
 | `$ui4a/ui/charts` | Responsive Recharts components with streaming snapshots and stable data/axes |
 | `$ui4a/chat` | Send a visible user message after an explicit user action |
@@ -32,6 +48,8 @@ The guidance favors compact inline demonstrations alongside technical explanatio
 | `$ui4a/fs` | Read and write files below `.artifacts` |
 
 Native HTML and Wind4 utilities handle layout, and Headless UI can be imported for additional controls. Prefer the bundled chart and formula modules for mathematical explanations: combine a formula, a restrained line chart and numeric sliders driven by the same state. UI4A code runs as trusted local React in the host page; it is not an isolation sandbox for arbitrary third-party code.
+
+Components own control spacing: Tabs keep labels on one scrolling row, reveal keyboard focus, and separate content by 20px; Disclosure content has 16px padding; buttons use minimum heights so taller children can fit. Generated layouts own section gaps, report insets, table cells and diagram labels. The skill uses a 4px spacing scale, recommends 16-24px between controls and content and 24-32px between sections, and favors readable stacked comparison rows in narrow panels. Process diagrams use HTML labels and a selected-stage detail area instead of shrinking text or stacking every explanation. Component updates affect existing surfaces; generation guidance applies when an artifact is created or edited and does not rewrite old layouts.
 
 ## Authoring rules
 

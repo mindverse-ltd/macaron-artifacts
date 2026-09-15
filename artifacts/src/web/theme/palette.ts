@@ -98,6 +98,8 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
   const fg = readable(baseFg, [surface, surface2]);
   const foreground = (value: unknown, minimum = 4.5) => readable(composite(value, surface), [surface, surface2], minimum, fg);
   const muted = foreground(pick(colors.descriptionForeground, mix(surface, fg, .66)));
+  // Some themes alias descriptions to primary text. Reasoning needs a quieter role without dimming its whole subtree.
+  const reasoning = [colors.descriptionForeground, colors['editorCodeLens.foreground']].filter(value => pick(value)).map(value => foreground(value)).find(value => contrastRatio(value, surface) <= contrastRatio(fg, surface) * .8) ?? foreground(mix(surface, fg, .66));
   const contrast = decoration(colors.contrastBorder), contrastActive = decoration(colors.contrastActiveBorder, colors.contrastBorder);
   const focus = (background: string, ink: string) => readable(composite(pick(colors.focusBorder, colors.contrastActiveBorder, colors['textLink.foreground'], ink), background), [background], 3, ink);
   const pair = (background: unknown, ink: unknown, parent = surface, fallback = fg) => {
@@ -135,7 +137,7 @@ export function themePalette(theme: ThemeRegistration, dark: boolean): Record<st
   const danger = foreground(pick(colors.errorForeground, colors['editorError.foreground'], colors['terminal.ansiRed'], dark ? '#ff6b83' : '#d9435f'));
   const dangerBg = readable(danger, [WHITE]);
   const palette: Record<string, string> = {
-    surface, 'surface-2': surface2, 'surface-3': hover.bg, 'hover-fg': hover.fg, fg, muted,
+    surface, 'surface-2': surface2, 'surface-3': hover.bg, 'hover-fg': hover.fg, fg, muted, 'reasoning-fg': reasoning,
     // panel.border is a structural pane boundary, not a universal outline for every card and row.
     border: decoration(colors.contrastBorder, mix(surface, fg, .12)), contrast, 'contrast-active': contrastActive,
     'control-border': decoration(colors['radio.inactiveBorder'], colors['button.secondaryBorder'], colors.contrastBorder, mix(surface, fg, .15)),

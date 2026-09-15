@@ -1,7 +1,7 @@
 @property --reasoning-fade-top { syntax: '<number>'; inherits: true; initial-value: 0; }
 @property --reasoning-fade-bottom { syntax: '<number>'; inherits: true; initial-value: 0; }
 
-.reasoning { min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.reasoning { min-width: 0; color: var(--reasoning-fg, var(--muted)); font-size: 13px; line-height: 1.7; }
 .reasoning-main { min-width: 0; }
 .reasoning-viewport { max-height: min(14rem, 36svh); overflow: auto; overscroll-behavior: contain; transition: --reasoning-fade-top 140ms ease, --reasoning-fade-bottom 140ms ease; mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(1 - var(--reasoning-fade-top))) 0, #000 16px, #000 calc(100% - 16px), rgb(0 0 0 / calc(1 - var(--reasoning-fade-bottom))) 100%); }
 .reasoning[data-reasoning-kind='summary'] .reasoning-viewport { max-height: min(10rem, 30svh); }
@@ -11,9 +11,9 @@
 .reasoning-content [data-reasoning-streaming='false'] [data-sd-animate] { animation: none; }
 .reasoning-content :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) { margin: 0; font-size: inherit; }
 .reasoning-content :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) + :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) { margin-top: .5rem; }
-.reasoning-content :where(strong, [data-streamdown='strong'], h1, h2, h3, h4, h5, h6) { color: var(--fg); font-weight: 500; }
+/* Emphasis stays within the secondary text tier, including title-only summaries. */
+.reasoning-content :where(strong, [data-streamdown='strong'], h1, h2, h3, h4, h5, h6) { color: inherit; font-weight: 500; }
 .reasoning-content [data-reasoning-latest='false'] :where(strong, [data-streamdown='strong']) { color: inherit; font-weight: 400; }
-.reasoning-content [data-reasoning-latest='true'] :where(strong, [data-streamdown='strong']) { font-weight: 600; }
 .reasoning-content :where(ul, ol) { padding-left: 1.25rem; }
 .reasoning-content [data-streamdown='unordered-list'] { list-style: disc; }
 .reasoning-content [data-streamdown='ordered-list'] { list-style: decimal; }
@@ -24,7 +24,7 @@
 .reasoning-content [data-streamdown='code-block-header'] { display: none; }
 .reasoning-content [data-streamdown='code-block-body'] { padding: 0; }
 .reasoning-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin-top: .25rem; min-height: 24px; }
-.reasoning-action { display: inline-flex; align-items: center; gap: .25rem; min-height: 24px; padding: 0 .125rem; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.reasoning-action { display: inline-flex; align-items: center; gap: .25rem; min-height: 24px; padding: 0 .125rem; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
 .reasoning-action-icon { width: 14px; height: 14px; flex: none; }
 .reasoning-action[data-open] .reasoning-action-icon { transform: rotate(180deg); }
 .reasoning-resume { margin-left: auto; }

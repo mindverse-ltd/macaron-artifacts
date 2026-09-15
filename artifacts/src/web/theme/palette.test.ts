@@ -4,7 +4,7 @@ import { contrastRatio, themePalette } from './palette';
 
 const CONTEXTS = ['titlebar', 'sidebar', 'panel', 'widget', 'menu'];
 const PAIRS = [
-  ['surface', 'fg'], ['surface-2', 'fg'], ['surface-3', 'hover-fg'], ['code', 'code-fg'], ['code-block', 'code-block-fg'], ['inline-code', 'inline-code-fg'], ['bubble', 'bubble-fg'],
+  ['surface', 'fg'], ['surface', 'reasoning-fg'], ['surface-2', 'reasoning-fg'], ['surface-2', 'fg'], ['surface-3', 'hover-fg'], ['code', 'code-fg'], ['code-block', 'code-block-fg'], ['inline-code', 'inline-code-fg'], ['bubble', 'bubble-fg'],
   ['bubble', 'bubble-muted'], ['bubble', 'bubble-link'], ['status', 'status-fg'], ['secondary', 'secondary-fg'], ['secondary-hover', 'secondary-fg'], ['tab-active', 'tab-active-fg'],
   ['input-bg', 'input-fg'], ['input-bg', 'input-placeholder'], ['dropdown-bg', 'dropdown-fg'], ['accent', 'accent-fg'], ['accent-hover', 'accent-fg'],
   ['danger-bg', 'danger-fg'], ['danger-hover', 'danger-fg'], ['sidebar-selection', 'sidebar-selection-fg'],
@@ -52,6 +52,24 @@ test('GitHub Light retains its white button label and green background', async (
   expect(palette['accent-fg']).toBe('#ffffff');
   const [red, green, blue] = [1, 3, 5].map(index => Number.parseInt(palette.accent.slice(index, index + 2), 16));
   expect(green).toBeGreaterThan(red); expect(green).toBeGreaterThan(blue);
+});
+
+test('reasoning preserves readable native secondary colors without changing shared descriptions', async () => {
+  for (const id of ['github-light', 'github-dark'] as const) {
+    const theme = (await bundledThemes[id]()).default, palette = themePalette(theme, theme.type === 'dark');
+    expect(palette['reasoning-fg']).toBe(theme.colors!.descriptionForeground);
+  }
+  const palette = themePalette({ colors: { 'editor.background': '#111111', 'editor.foreground': '#eeeeee', descriptionForeground: '#eeeeee', 'editorCodeLens.foreground': '#888888' } }, true);
+  expect(palette.muted).toBe('#eeeeee'); expect(palette['reasoning-fg']).toBe('#888888');
+});
+
+test('themes that reuse primary text for descriptions still separate reasoning from the answer', async () => {
+  for (const id of ['catppuccin-latte', 'catppuccin-mocha', 'one-dark-pro'] as const) {
+    const theme = (await bundledThemes[id]()).default, palette = themePalette(theme, theme.type === 'dark');
+    expect(palette.muted).toBe(palette.fg);
+    expect(contrastRatio(palette['reasoning-fg'], palette.surface)).toBeLessThan(contrastRatio(palette.fg, palette.surface) * .8);
+    readablePair(palette, 'surface', 'reasoning-fg');
+  }
 });
 
 test('syntax keeps its editor background while Markdown code containers retain their own token', async () => {

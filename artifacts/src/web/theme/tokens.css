@@ -8,6 +8,7 @@
   --border: #e2e2e6;
   --fg: #16161a;
   --muted: #6b6b76;
+  --reasoning-fg: var(--muted);
   --accent: #1a1a1f;
   --accent-fg: #ffffff;
   --accent-hover: #35353b;

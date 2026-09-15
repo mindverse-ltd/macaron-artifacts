@@ -12,9 +12,8 @@
 .tool-disclosure-panel { min-width: 0; }
 @media (hover: hover) { .tool-disclosure-trigger:hover { background: var(--surface-3); color: var(--hover-fg, var(--fg)); } }
 
-/* One content axis for prose, reasoning and tools; status icons occupy the shared gutter. */
-.chat-message-content { --chat-gutter: 22px; min-width: 0; padding-inline-start: var(--chat-gutter); }
-.chat-message-content > .reasoning, .chat-message-content > .tool-group { margin-inline-start: calc(-1 * var(--chat-gutter)); }
+/* Prose, inline UI and reasoning share the same edge; tool icons stay inside their own row. */
+.chat-message-content { min-width: 0; }
 .tool-group { overflow: visible; border-radius: 0; background: transparent; font-size: 13px; }
 .tool-group > .tool-disclosure-heading { position: static; border-radius: 4px; background: transparent; }
 .tool-group .tool-disclosure-trigger { min-height: 32px; padding: 4px 0; border-radius: 4px; background: transparent; }

@@ -85,7 +85,8 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
 
   return <div className={UI4A_CLASS} data-ui4a-ready={painted && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0 }}>
     <div ref={host} data-ui4a-render-host="" />
-    {!painted && source ? <CodeBlock code={source} /> : null}
+    {/* Keep incomplete source from pushing the conversation away; the rendered surface retains its natural height. */}
+    {!painted && source ? <CodeBlock code={source} className="max-h-[min(20rem,40dvh)] overflow-y-auto overscroll-contain" /> : null}
     {error ? <div role="alert" className="mt-2 rounded border border-danger/30 p-3 text-sm text-danger">{error}</div> : null}
   </div>;
 }

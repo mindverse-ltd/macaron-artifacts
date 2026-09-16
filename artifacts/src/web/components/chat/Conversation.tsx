@@ -24,12 +24,13 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const openArtifact = useCallback((path: string) => store.openArtifact(session.id, path), [session.id, store]);
   const approve = useCallback((id: string, approved: boolean) => store.approve(session.id, id, approved), [session.id, store]);
   const last = chat.messages.at(-1);
+  const lastVisibleMessage = chat.messages.findLastIndex(message => conversationParts(message.parts, false).entries.length > 0);
   const suggestions = session.suggestions;
   const queued = store.queue(session.id);
   return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
     {/* Content padding supplies the tail inset; the spring targets the actual scroll bottom. */}
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto" style={{ overflowAnchor: 'none' }}><div ref={content} data-chat-content className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-4 pb-16">
-      {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
+      {chat.messages.map((message, index) => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} followed={index < lastVisibleMessage} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
       {chat.status === 'submitted' ? <p className="flex items-center gap-2 text-xs text-muted" role="status"><span className="size-1.5 animate-pulse rounded-full bg-accent" />正在连接…</p> : null}
       {chat.error || session.status === 'error' ? <div role="alert" className="flex items-center gap-3 rounded-xl border border-danger/40 px-3 py-2 text-xs text-danger"><span className="min-w-0 flex-1 break-words">{chat.error?.message ?? session.error ?? '这轮没有跑完'}</span><Button data-export-control size="sm" variant="ghost" onClick={() => void store.retry(session.id)}>重试</Button></div> : null}
     </div></div>
@@ -47,7 +48,7 @@ function SessionComposer({ store, sessionId, busy, onSend, scrolledAway, onScrol
   return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={false} busy={busy} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} scrolledAway={scrolledAway} onScrollToBottom={onScrollToBottom} />;
 }
 
-const Message = memo(function Message({ message, streaming, sessionId, cwd, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {
+const Message = memo(function Message({ message, streaming, followed, sessionId, cwd, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; followed: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {
   const { entries, outputs } = conversationParts(message.parts, streaming);
   return <article data-message-role={message.role} className={message.role === 'user' ? 'theme-bubble max-w-[85%] self-end rounded-2xl px-4 py-2 text-sm' : 'chat-message-content flex flex-col gap-3'}>
     {groupToolEntries(entries).map(row => {
@@ -56,7 +57,7 @@ const Message = memo(function Message({ message, streaming, sessionId, cwd, onSe
       if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={message.role === 'assistant' && streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
       if (part.type === 'reasoning') {
         const parts = reasoningRunAt(message.parts, index);
-        return parts ? <Reasoning key={index} parts={parts} live={streaming && index + parts.length === message.parts.length} /> : null;
+        return parts ? <Reasoning key={index} parts={parts} live={streaming && index + parts.length === message.parts.length} superseded={followed || index < entries.at(-1)!.index} /> : null;
       }
       if (part.type === 'data-approval') return <ApprovalCard key={part.data.id} approval={part.data} onDecide={approved => onApprove(part.data.id, approved)} />;
       if (part.type === 'file' && part.mediaType.startsWith('image/')) return <img key={index} src={part.url} alt={part.filename ?? ''} className="max-h-60 rounded-lg border border-contrast object-contain" />;

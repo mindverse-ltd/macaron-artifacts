@@ -40,11 +40,12 @@ export type Ui4aSurfaceProps = {
   sessionId: string;
   filename?: string;
   revision?: string | number;
+  sourceLayout?: 'bounded' | 'full';
   onSend?: (text: string) => void;
   onError?: (message: string) => void;
 };
 
-export function Ui4aSurface({ source, streaming, scope, sessionId, filename, revision, onSend, onError }: Ui4aSurfaceProps) {
+export function Ui4aSurface({ source, streaming, scope, sessionId, filename, revision, sourceLayout = 'bounded', onSend, onError }: Ui4aSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
   const delivery = useRef<SurfaceDelivery | null>(null);
   const styles = useRef<ReturnType<typeof createSurfaceStyles> | null>(null);
@@ -126,8 +127,8 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
   return <div className={UI4A_CLASS} data-ui4a-ready={painted && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0, position: "relative" }}>
     {/* Measure the first real UI without briefly stacking its height on top of the source fallback. */}
     <div ref={host} data-ui4a-render-host="" inert={!painted} style={painted ? undefined : { position: "absolute", insetInline: 0, top: 0, opacity: 0, pointerEvents: "none" }} />
-    {/* Keep incomplete source from pushing the conversation away; the rendered surface retains its natural height. */}
-    {!painted && source ? <CodeBlock code={source} className="max-h-[min(20rem,40dvh)] overflow-y-auto overscroll-contain" /> : null}
+    {/* Inline source stays bounded; Canvas owns its viewport and follows the full source with the shared spring. */}
+    {!painted && source ? <CodeBlock code={source} className={sourceLayout === 'bounded' ? 'max-h-[min(20rem,40dvh)] overflow-y-auto overscroll-contain' : ''} /> : null}
     {error ? <div role="alert" className="mt-2 rounded border border-danger/30 p-3 text-sm text-danger">{error}</div> : null}
   </div>;
 }

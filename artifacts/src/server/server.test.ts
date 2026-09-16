@@ -23,6 +23,13 @@ async function setup(run: (turn: HarnessTurn) => AsyncIterable<ChatChunk>) {
   const session = await (await post('/api/sessions', { cwd, harness: 'claude-code' })).json() as Session;
   return { app, base, post, session, cwd };
 }
+test('preserves submitted whitespace in both the harness prompt and saved user message', async () => {
+  const prompts: string[] = [], original = '\n\n| MLA projection |\n| --- |\n  q_a_proj  \n';
+  const { app, post, session } = await setup(async function* (turn) { if (!turn.enrichment) prompts.push(turn.prompt); });
+  await (await post('/api/chat', { id: session.id, messages: [message('verbatim', original)] })).text();
+  expect(prompts).toEqual([original]); expect(app.store.sessions.get(session.id)?.messages[0]?.parts).toEqual([{ type: 'text', text: original }]);
+  const empty = await post('/api/chat', { id: session.id, messages: [message('blank', ' \n\t ')] }); expect(empty.status).toBe(400); expect(prompts).toHaveLength(1);
+});
 test('consecutive native Edits stream from the previous tool’s committed file', async () => {
   const path = '.artifacts/canvases/research.ui4a.tsx';
   const { post, session, cwd } = await setup(async function* (turn) {

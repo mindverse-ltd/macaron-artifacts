@@ -190,8 +190,9 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (!adapter) return json(res, { error: 'This harness is unavailable.' }, 400);
         const messages = Array.isArray(input.messages) ? input.messages as ChatMessage[] : [];
         const user = messages.findLast(message => message.role === 'user');
-        const prompt = user?.parts?.filter(part => part.type === 'text').map(part => part.text).join('\n').trim();
-        if (!user || !prompt) return json(res, { error: 'A user message is required.' }, 400);
+        const prompt = user?.parts?.filter(part => part.type === 'text').map(part => part.text).join('\n');
+        // Whitespace can be meaningful in pasted code/tables and exact replay inputs; trim only to reject an empty submission.
+        if (!user || !prompt?.trim()) return json(res, { error: 'A user message is required.' }, 400);
         const retry = session.status === 'error' && session.messages.some(message => message.id === user.id);
         if (session.messages.some(message => message.id === user.id) && !retry) return json(res, { error: 'This message was already submitted.' }, 409);
         // Claim before the first await. Two simultaneous POSTs must never both

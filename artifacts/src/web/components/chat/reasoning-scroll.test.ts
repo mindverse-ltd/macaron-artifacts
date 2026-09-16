@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { attachReasoningScroll, reasoningScrollTop, type ReasoningScrollStatus } from './reasoning-scroll';
 
-let now = 0, nextFrame = 0;
+let now = 0, nextFrame = 0, page: EventTarget & { hidden: boolean };
 const frames = new Map<number, FrameRequestCallback>(), observers = new Set<() => void>(), pendingScroll = new Set<FakeViewport>();
 class FakeElement extends EventTarget { closest() { return null; } }
 class FakeViewport extends FakeElement {
+  get ownerDocument() { return page; }
   private top = 0;
   private height: number;
   writes: number[] = [];
@@ -39,6 +40,7 @@ const replaceGlobal = (key: string, value: unknown) => {
 };
 beforeEach(() => {
   now = nextFrame = 0; media = new FakeMedia();
+  page = Object.assign(new EventTarget(), { hidden: false });
   replaceGlobal('performance', { now: () => now });
   replaceGlobal('Element', FakeElement);
   replaceGlobal('matchMedia', () => media);
@@ -95,6 +97,22 @@ test('streamed content updates keep momentum instead of restarting the ramp', ()
   expect(view.scrollTop).toBeGreaterThan(650);
   expect(statuses).toEqual([{ following: true, overflowing: true }]);
   expect(view.writes.every((value, i, writes) => value >= (writes[i - 1] ?? 0))).toBe(true);
+});
+
+test('slow foreground frames retain elapsed time and hidden time preserves pending momentum', () => {
+  const { view, controller } = setup();
+  frame(10, 50);
+  const before = view.scrollTop;
+  expect(before).toBeGreaterThan(540);
+  page.hidden = true; page.dispatchEvent(new Event('visibilitychange'));
+  view.scrollHeight += 24; controller.update(true); resize(); frame(10, 1000);
+  expect(view.scrollTop).toBe(before);
+  expect(frames.size).toBe(0);
+  page.hidden = false; page.dispatchEvent(new Event('visibilitychange')); frame();
+  expect(view.scrollTop - before).toBeGreaterThan(10);
+  expect(view.scrollTop - before).toBeLessThan(30);
+  controller.destroy(); page.dispatchEvent(new Event('visibilitychange'));
+  expect(frames.size).toBe(0);
 });
 
 test.each(['wheel', 'ArrowUp', 'PageUp', 'Home', 'ShiftSpace', 'touch'])('%s interrupts pending motion and explicit resume starts softly at the reader position', gesture => {

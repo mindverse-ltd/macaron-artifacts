@@ -51,7 +51,7 @@ describe('streaming bottom spring', () => {
     expect(bottomSpringSettled({ ...idle, velocity: 20 })).toBe(false);
   });
 
-  test('duplicate timestamps preserve position without falsely settling; a background pause cannot amplify momentum', () => {
+  test('duplicate timestamps preserve position without falsely settling; long steps remain stable', () => {
     const initial = createBottomSpring(200, 200);
     expect(stepBottomSpring(initial, 200, 0)).toBe(initial);
     const paused = stepBottomSpring(initial, 400, 0);
@@ -59,10 +59,9 @@ describe('streaming bottom spring', () => {
     expect(bottomSpringSettled(paused)).toBe(false);
     expect(stepBottomSpring(initial, 400, -10)).toEqual(paused);
     const resumed = stepBottomSpring(initial, 400, 10_000);
-    expect(resumed).toEqual(stepBottomSpring(initial, 400, 1000 / 30));
     expect(Number.isFinite(resumed.position)).toBe(true);
-    expect(resumed.position).toBeGreaterThan(200);
-    expect(resumed.position).toBeLessThan(248);
+    expect(resumed.position).toBe(400);
+    expect(resumed.velocity).toBeCloseTo(0, 8);
   });
 
   test('content collapse clamps stale position and clears outgoing momentum', () => {
@@ -129,8 +128,8 @@ describe('streaming bottom spring', () => {
     expect(createBottomSpring(1000, 1000).position).toBe(1000);
   });
 
-  test('fixed-target motion agrees at 30, 60, 120 and 240 Hz', () => {
-    const states = [30, 60, 120, 240].map(hz => {
+  test('fixed-target motion agrees across fast and slow foreground frames', () => {
+    const states = [10, 20, 30, 60, 120, 240].map(hz => {
       let state = createBottomSpring(0, 1000);
       for (let frame = 0; frame < hz / 2; frame++) state = stepBottomSpring(state, 1000, 1000 / hz);
       return state;
@@ -183,17 +182,18 @@ describe('bottom spring startup clock', () => {
   });
 
   test('integrated startup agrees across display refresh rates', () => {
-    const samples = [30, 60, 120, 240].map(hz => run(hz).filter(sample => Math.abs(sample.time % 100) < 0.001));
+    const samples = [10, 20, 30, 60, 120, 240].map(hz => run(hz).filter(sample => Math.abs(sample.time % 100) < 0.001));
     for (const run of samples.slice(1)) for (let i = 0; i < samples[0].length; i++) {
       expect(run[i].position).toBeCloseTo(samples[0][i].position, 8);
       expect(run[i].velocity).toBeCloseTo(samples[0][i].velocity, 8);
     }
   });
 
-  test('duplicate and delayed frames neither skip the ramp nor advance backward', () => {
+  test('duplicate timestamps stay still and delayed frames retain elapsed foreground time', () => {
     expect(stepBottomSpringClock(0, -10)).toEqual({ elapsed: 0, delta: 0 });
     expect(stepBottomSpringClock(100, 0)).toEqual({ elapsed: 100, delta: 0 });
-    expect(stepBottomSpringClock(0, 10_000)).toEqual(stepBottomSpringClock(0, 1000 / 30));
+    expect(stepBottomSpringClock(0, 100).delta).toBeCloseTo(12.8, 8);
+    expect(stepBottomSpringClock(0, 10_000)).toEqual({ elapsed: 250, delta: 9875 });
     expect(stepBottomSpringClock(250, 1000 / 60).delta).toBeCloseTo(1000 / 60, 10);
   });
 

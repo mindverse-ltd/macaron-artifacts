@@ -58,10 +58,12 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
       frame = requestAnimationFrame(tick);
     };
     const wake = () => {
-      if (!stuckRef.current || !followReady || frame || bouncing()) return;
+      if (!stuckRef.current || !followReady || frame || bouncing() || document.hidden) return;
       spring ??= createBottomSpring(readTop(), readWall(), slack);
       lastTime = performance.now(); frame = requestAnimationFrame(tick);
     };
+    // Keep spring velocity across tab switches, but exclude time spent hidden from its clock.
+    const onVisibility = () => { cancelAnimationFrame(frame); frame = 0; wake(); };
     const scroll = (behavior: ScrollBehavior) => {
       followReady = true;
       if (behavior === 'instant' || reducedMotion.matches) {
@@ -136,6 +138,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
     box.addEventListener('focusin', onFocus);
     box.addEventListener('load', wake, true);
     reducedMotion.addEventListener('change', wake);
+    document.addEventListener('visibilitychange', onVisibility);
     // ResizeObserver catches line wraps, inline UI mounts and viewport changes; rAF reads the live target every frame.
     const observer = new ResizeObserver(wake);
     observer.observe(box); observer.observe(element);
@@ -155,6 +158,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>({
       box.removeEventListener('click', onInspect, true); box.removeEventListener('keydown', onInspect, true);
       box.removeEventListener('focusin', onFocus); box.removeEventListener('load', wake, true);
       reducedMotion.removeEventListener('change', wake); observer.disconnect(); mutations?.disconnect();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [setStuckBoth, resetKey, slack, initial]);
 

@@ -7,6 +7,7 @@ export const reasoningScrollTop = (element: ScrollViewport) => Math.min(Math.max
 
 /** Own only the DOM animation; React is notified when a visible control actually changes. */
 export function attachReasoningScroll(element: HTMLElement, content: HTMLElement, initialLive: boolean, onStatus: (status: ReasoningScrollStatus) => void) {
+  const page = element.ownerDocument;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const wall = () => Math.max(0, element.scrollHeight - element.clientHeight);
   const bouncing = () => element.scrollTop < 0 || element.scrollTop > wall();
@@ -50,7 +51,9 @@ export function attachReasoningScroll(element: HTMLElement, content: HTMLElement
     report();
     if (moving) frame = requestAnimationFrame(measure);
   };
-  const wake = () => { if (!frame) { lastTime = performance.now(); frame = requestAnimationFrame(measure); } };
+  const wake = () => { if (!frame && !page.hidden) { lastTime = performance.now(); frame = requestAnimationFrame(measure); } };
+  // Suspend elapsed time, not momentum: returning to the tab must not integrate the entire hidden interval.
+  const onVisibility = () => { cancelAnimationFrame(frame); frame = 0; wake(); };
   const pause = () => { following = false; forced = false; stop(); report(); wake(); };
   const resume = (instant = false) => {
     following = true; forced = true; stop(); userScrollUntil = 0;
@@ -86,6 +89,7 @@ export function attachReasoningScroll(element: HTMLElement, content: HTMLElement
   element.addEventListener('scroll', onScroll, { passive: true }); element.addEventListener('wheel', onWheel, { passive: true });
   element.addEventListener('touchstart', onTouchStart, { passive: true }); element.addEventListener('touchmove', onTouchMove, { passive: true });
   element.addEventListener('keydown', onKeyDown); content.addEventListener('load', wake, true); reducedMotion.addEventListener('change', wake);
+  page.addEventListener('visibilitychange', onVisibility);
   wake();
   return {
     resume,
@@ -99,6 +103,7 @@ export function attachReasoningScroll(element: HTMLElement, content: HTMLElement
       element.removeEventListener('scroll', onScroll); element.removeEventListener('wheel', onWheel);
       element.removeEventListener('touchstart', onTouchStart); element.removeEventListener('touchmove', onTouchMove);
       element.removeEventListener('keydown', onKeyDown); content.removeEventListener('load', wake, true); reducedMotion.removeEventListener('change', wake);
+      page.removeEventListener('visibilitychange', onVisibility);
     },
   };
 }

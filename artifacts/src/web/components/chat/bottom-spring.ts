@@ -18,10 +18,10 @@ export function stepBottomSpring(state: BottomSpring, wall: number, elapsedMs: n
   const velocity = Math.min(Math.max(0, state.velocity), W * gap);
   // A repeated timestamp still updates the destination, or the caller could mistake the previous destination for a settled spring.
   if (!(rawDt > 0)) return target === state.target && velocity === state.velocity ? state : { ...state, velocity, target };
-  const dt = Math.min(rawDt, 1 / 30), c = W * gap - velocity, decay = Math.exp(-W * dt);
+  const dt = rawDt, c = W * gap - velocity, decay = Math.exp(-W * dt);
   // Exact critical damping: gap(t)=(gap+c*t)e^-Wt, v(t)=(v+W*c*t)e^-Wt. Both stay nonnegative; Euler steps need not.
   const position = Math.min(target, Math.max(state.position, target - (gap + c * dt) * decay));
-  // The bounds absorb floating-point roundoff; the elapsed-time cap preserves continuity after a background pause.
+  // The exact solution stays stable on slow frames. Capping dt loses foreground time and makes busy streams slow the motion; callers pause the clock while hidden.
   return { position, velocity: Math.min(W * (target - position), Math.max(0, (velocity + W * c * dt) * decay)), target };
 }
 
@@ -37,6 +37,6 @@ const startupTime = (elapsed: number) => {
 // Integrate a 0→1 smoothstep clock, rather than easing the target or resetting momentum on each token.
 // Nonnegative clock speed preserves the spring's monotonic/no-overshoot proof. Reset elapsed only at rest or on interruption.
 export function stepBottomSpringClock(elapsed: number, frameMs: number) {
-  const next = elapsed + Math.min(1000 / 30, Math.max(0, frameMs));
+  const next = elapsed + Math.max(0, frameMs);
   return { elapsed: Math.min(BOTTOM_SPRING_STARTUP_MS, next), delta: startupTime(next) - startupTime(elapsed) };
 }

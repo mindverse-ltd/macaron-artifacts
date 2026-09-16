@@ -21,9 +21,10 @@ function scrollEdges(element: HTMLElement, range: number) {
  * 用弹簧而不是 `scroll-behavior: smooth`：流式每帧都在改目标，smooth 每次赋值都重启一段动画，
  * 叠起来是一顿一顿的；弹簧只有一个持续积分的状态，目标变了也不会打断，看着是一条连续的位移。
  */
-export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: number, range: number) {
+export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: number, range: number, streaming?: boolean) {
   const [edges, setEdges] = useState({ top: 0, bottom: 0 });
   const following = useRef(false);
+  const hasFollowed = useRef(false);
   const paused = useRef(false);
   /** 上次量到的内容高度。`0` = 还没量过 —— 内容一次到位（刷新、翻历史消息）不算「长出来」，那种该停在开头。 */
   const seen = useRef(0);
@@ -35,21 +36,19 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    let previousScrollTop = element.scrollTop;
     const measure = () => {
       // Once all content fits again there is no hidden history to protect from future growth.
       if (element.scrollHeight <= element.clientHeight) paused.current = false;
       const { start: top, end: trailing } = scrollEdges(element, range);
-      // 滚到底就重新挂上跟随。但内容还没撑开时（scrollHeight === clientHeight）不算 ——
-      // 那是「还没有东西」，不是「已经看到底了」
-      if (!paused.current && !trailing && element.scrollHeight > element.clientHeight) following.current = true;
-      // 跟随中底边一律不糊：弹簧总是落后于正在长高的内容一小段，按距离算的话渐隐带会一直挂在那儿，
-      // 糊的正好是刚写出来的那一行 —— 而那一段「还没追上」在语义上不是被截断的内容，是马上就到的
-      const bottom = following.current ? 0 : trailing;
+      // Mask actual overflow, including content the spring has not reached yet; arrival naturally clears it.
+      const bottom = trailing;
       setEdges((previous) => (previous.top === top && previous.bottom === bottom ? previous : { top, bottom }));
     };
     // 用户一动手就脱离跟随。scroll 事件分不出是谁滚的（弹簧自己也在写 scrollTop），
     // wheel / touch / 按键才是人的意图
     const release = () => {
+      previousScrollTop = element.scrollTop;
       paused.current = element.scrollHeight > element.clientHeight;
       following.current = false;
       cancelAnimationFrame(frame.current);
@@ -57,13 +56,14 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
       velocity.current = 0;
     };
     const onScroll = () => {
-      if (!scrollEdges(element, range).end && element.scrollHeight > element.clientHeight) paused.current = false;
+      // The first upward frame can still round to the bottom. Resume only when moving back down to it.
+      if (element.scrollTop > previousScrollTop && !scrollEdges(element, range).end && element.scrollHeight > element.clientHeight) { paused.current = false; following.current = hasFollowed.current; }
+      previousScrollTop = element.scrollTop;
       measure();
     };
     element.addEventListener("scroll", onScroll, { passive: true });
-    // 内容高度变了也要重量：`measure` 只挂在 scroll 上的话，一次到位的内容（刷新、翻历史、
-    // 手动点开源码）永远不会触发它 —— 首帧量的时候 scrollHeight 还等于 clientHeight，
-    // `!trailing` 把它当成「已经滚到底」挂上了跟随，于是底边一直不糊，几百行代码看着像到此为止
+    // Async highlighting can change static source height without scrolling. Resize updates its masks only;
+    // being at the bottom must not turn history into a live follower.
     const resize = new ResizeObserver(measure);
     resize.observe(element);
     if (element.firstElementChild) resize.observe(element.firstElementChild);
@@ -85,11 +85,12 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const grew = seen.current > 0 && height > seen.current;
+    const grew = height > seen.current && (seen.current > 0 || streaming === true);
     seen.current = height;
-    // New output must not override a reader who paused following; scrolling back to the end resumes it.
-    if (!grew || paused.current) return;
+    // A final chunk can lay out after streaming ends. Let an existing follower settle, but never arm static history.
+    if (!grew || (streaming === false && !following.current) || paused.current) return;
     following.current = true;
+    hasFollowed.current = true;
     const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
     // Even reduced-motion jumps read geometry in the next frame, after the new content has laid out.
     // 已经在跑就不重启：目标是每帧现取的，长出来的新内容自然被追上 ——
@@ -115,7 +116,7 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
       frame.current = requestAnimationFrame(step);
     };
     frame.current = requestAnimationFrame(step);
-  }, [height, ref]);
+  }, [height, ref, streaming]);
 
   return edges;
 }

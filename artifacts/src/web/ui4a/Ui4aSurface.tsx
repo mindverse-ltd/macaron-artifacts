@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "re
 import { GenUIRenderer } from "partial-react";
 import { createTsxCompiler } from "partial-react/compiler";
 import { CodeBlock } from "../components/code/CodeBlock";
+import { Collapsible } from "../components/code/Collapsible";
 import { SurfaceDelivery, type SurfaceFrame } from "./delivery";
 import { createSurfaceImports } from "./imports";
 import { createSurfaceModules } from "./modules";
@@ -128,7 +129,7 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
     {/* Measure the first real UI without briefly stacking its height on top of the source fallback. */}
     <div ref={host} data-ui4a-render-host="" inert={!painted} style={painted ? undefined : { position: "absolute", insetInline: 0, top: 0, opacity: 0, pointerEvents: "none" }} />
     {/* Inline source stays bounded; Canvas owns its viewport and follows the full source with the shared spring. */}
-    {!painted && source ? <CodeBlock code={source} className={sourceLayout === 'bounded' ? 'max-h-[min(20rem,40dvh)] overflow-y-auto overscroll-contain' : ''} /> : null}
+    {!painted && source ? sourceLayout === 'bounded' ? <Collapsible streaming={streaming} className="theme-code overflow-clip rounded-xl"><CodeBlock code={source} /></Collapsible> : <CodeBlock code={source} /> : null}
     {error ? <div role="alert" className="mt-2 rounded border border-danger/30 p-3 text-sm text-danger">{error}</div> : null}
   </div>;
 }

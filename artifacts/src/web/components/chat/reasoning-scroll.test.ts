@@ -234,3 +234,28 @@ test('destroy removes observers, scheduled animation and input listeners', () =>
   expect(frames.size).toBe(0);
   expect(observers.size).toBe(0);
 });
+
+test('a source preview follows final asynchronous highlighting even when it arrives after EOF settlement', () => {
+  const view = new FakeViewport(320, 320), content = new FakeElement(), measurements: number[][] = [];
+  const controller = attachReasoningScroll(view as unknown as HTMLElement, content as unknown as HTMLElement, true, () => {}, { followAfterCompletion: true, onMeasure: (top, bottom) => measurements.push([top, bottom]) });
+  controllers.push(controller);
+  for (let i = 0; i < 120; i++) { if (i % 6 === 0) view.scrollHeight += 20; controller.update(true); resize(); frame(); }
+  const before = view.scrollTop;
+  controller.update(false); view.scrollHeight += 40; resize(); frame(120);
+  expect(view.scrollTop).toBe(440);
+  expect(view.scrollTop).toBeGreaterThan(before);
+  expect(measurements.at(-1)).toEqual([440, 0]);
+  view.scrollHeight += 200; resize(); frame(120);
+  expect(view.scrollTop).toBe(640);
+});
+
+test.each([false, true])('source settlement never takes ownership from static history or a paused reader (paused=%s)', paused => {
+  const view = new FakeViewport(), content = new FakeElement();
+  const controller = attachReasoningScroll(view as unknown as HTMLElement, content as unknown as HTMLElement, paused, () => {}, { followAfterCompletion: true });
+  controllers.push(controller);
+  if (paused) { frame(12); view.emit('wheel', { deltaY: -20 }); }
+  controller.update(false);
+  const before = view.scrollTop;
+  view.scrollHeight += 200; resize(); frame(120);
+  expect(view.scrollTop).toBe(before);
+});

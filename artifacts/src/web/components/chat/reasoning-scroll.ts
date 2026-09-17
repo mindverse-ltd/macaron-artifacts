@@ -6,12 +6,12 @@ const EDGE_RAMP = 24, BOTTOM_TOLERANCE = 2;
 export const reasoningScrollTop = (element: ScrollViewport) => Math.min(Math.max(0, element.scrollHeight - element.clientHeight), Math.max(0, element.scrollTop));
 
 /** Own only the DOM animation; React is notified when a visible control actually changes. */
-export function attachReasoningScroll(element: HTMLElement, content: HTMLElement, initialLive: boolean, onStatus: (status: ReasoningScrollStatus) => void) {
+export function attachReasoningScroll(element: HTMLElement, content: HTMLElement, initialLive: boolean, onStatus: (status: ReasoningScrollStatus) => void, options: { followAfterCompletion?: boolean; onMeasure?: (top: number, bottom: number) => void } = {}) {
   const page = element.ownerDocument;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const wall = () => Math.max(0, element.scrollHeight - element.clientHeight);
   const bouncing = () => element.scrollTop < 0 || element.scrollTop > wall();
-  let live = initialLive, following = true, overflowing = false, forced = false;
+  let live = initialLive, following = true, overflowing = false, forced = false, completedFollow = false;
   let frame = 0, lastTime = 0, startup = 0, userScrollUntil = 0, touchY = 0;
   let lastTop = reasoningScrollTop(element), lastWrittenTop = lastTop, lastHeight = element.scrollHeight, wasBouncing = bouncing();
   let spring: BottomSpring | null = null;
@@ -29,7 +29,7 @@ export function attachReasoningScroll(element: HTMLElement, content: HTMLElement
     frame = 0;
     const target = wall(), rawTop = element.scrollTop;
     let moving = false;
-    if ((live && following || forced) && !bouncing()) {
+    if (((live || completedFollow) && following || forced) && !bouncing()) {
       if (reducedMotion.matches) { writeTop(target); stop(); forced = false; }
       else {
         // Native downward advances use DOM readbacks; rounding must never pull the solver backward.
@@ -43,18 +43,19 @@ export function attachReasoningScroll(element: HTMLElement, content: HTMLElement
     lastTime = time;
     const top = reasoningScrollTop(element), bottom = target - top;
     // A growing gap is animation lag, not reading intent. Finished/history content never auto-follows.
-    if (!live && !forced && bottom > BOTTOM_TOLERANCE) following = false;
+    if (!live && !completedFollow && !forced && bottom > BOTTOM_TOLERANCE) following = false;
     overflowing = target > BOTTOM_TOLERANCE;
     lastTop = top; lastHeight = element.scrollHeight;
     element.style.setProperty('--reasoning-fade-top', String(Math.min(1, top / EDGE_RAMP)));
     element.style.setProperty('--reasoning-fade-bottom', String(Math.min(1, bottom / EDGE_RAMP)));
+    options.onMeasure?.(top, bottom);
     report();
     if (moving) frame = requestAnimationFrame(measure);
   };
   const wake = () => { if (!frame && !page.hidden) { lastTime = performance.now(); frame = requestAnimationFrame(measure); } };
   // Suspend elapsed time, not momentum: returning to the tab must not integrate the entire hidden interval.
   const onVisibility = () => { cancelAnimationFrame(frame); frame = 0; wake(); };
-  const pause = () => { following = false; forced = false; stop(); report(); wake(); };
+  const pause = () => { following = false; forced = false; completedFollow = false; stop(); report(); wake(); };
   const resume = (instant = false) => {
     following = true; forced = true; stop(); userScrollUntil = 0;
     // Only an explicit command may take ownership of Safari's elastic offset.
@@ -94,8 +95,9 @@ export function attachReasoningScroll(element: HTMLElement, content: HTMLElement
   return {
     resume,
     update(nextLive: boolean) {
-      // Ending or opening history interrupts immediately, even while the spring still trails the final line.
-      if (live && !nextLive) { forced = false; stop(); }
+      // Source previews may finish highlighting after EOF. Only a live follower can settle that final growth; opening history never arms it.
+      if (live && !nextLive) { completedFollow = Boolean(options.followAfterCompletion && following); forced = false; if (!completedFollow) stop(); }
+      if (nextLive) completedFollow = false;
       live = nextLive; wake();
     },
     destroy() {

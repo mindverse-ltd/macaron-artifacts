@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useEffect, useId, useRef, type ComponentProps, type ComponentType, type ReactElement } from 'react';
+import { createContext, isValidElement, memo, useContext, useEffect, useId, useRef, type ComponentProps, type ComponentType, type ReactElement } from 'react';
 import { useGenUIRenderContext } from 'partial-react/render-context';
 import { dequal } from 'dequal';
 import * as Recharts from 'recharts';
@@ -39,18 +39,20 @@ export function ChartContainer({ id, children, height = 240, className = '', sty
   </div></ChartKey.Provider>;
 }
 
-function streamingChart<P extends object>(Component: ComponentType<P>, series = false) {
+function streamingChart<P extends object>(Component: ComponentType<P>, series = false, neutralOutsideLabels = false) {
   const name = Component.displayName ?? Component.name;
   const Chart = memo(function StreamingChart(props: P) {
     const fallback = useId(), container = useContext(ChartKey);
     const { rendererScope, streamingPartialFrame, nextStreamingRenderKey } = useGenUIRenderContext();
-    const supplied = props as P & { id?: string; data?: unknown; isAnimationActive?: boolean };
+    const supplied = props as P & { id?: string; data?: unknown; isAnimationActive?: boolean; label?: ComponentProps<typeof Recharts.Bar>['label'] };
     const key = `${container ?? rendererScope}:${name}:${supplied.id ?? nextStreamingRenderKey?.() ?? fallback}`;
     const mounted = useRef(false), previous = dataSnapshots.get(key);
     const replay = streamingPartialFrame && !mounted.current && previous !== undefined;
     const data = replay || dequal(previous, supplied.data) ? previous : supplied.data;
     useEffect(() => { mounted.current = true; if (supplied.data !== undefined) remember(dataSnapshots, key, replay ? supplied.data : data); }, [data, supplied.data, key, replay]);
-    return <Component {...props} {...('data' in props || replay ? { data } : {})} {...(series ? { isAnimationActive: !streamingPartialFrame && (supplied.isAnimationActive ?? false) } : {})} />;
+    // Outside values sit on the chart surface; inheriting a Cell's series fill can make them unreadable across themes.
+    const label = supplied.label, outside = neutralOutsideLabels && label && typeof label === 'object' && !isValidElement(label) && !label.content && ['top', 'bottom', 'left', 'right', 'outside'].includes(String(label.position));
+    return <Component {...props} {...(outside ? { label: { ...label, fill: label.fill ?? 'var(--fg)' } } : {})} {...('data' in props || replay ? { data } : {})} {...(series ? { isAnimationActive: !streamingPartialFrame && (supplied.isAnimationActive ?? false) } : {})} />;
   });
   // Recharts still uses displayName to recognize certain child primitives.
   Chart.displayName = name;
@@ -64,7 +66,7 @@ export const ComposedChart = streamingChart(Recharts.ComposedChart);
 export const PieChart = streamingChart(Recharts.PieChart);
 export const Line = streamingChart(Recharts.Line, true);
 export const Area = streamingChart(Recharts.Area, true);
-export const Bar = streamingChart(Recharts.Bar, true);
+export const Bar = streamingChart(Recharts.Bar, true, true);
 export const Pie = streamingChart(Recharts.Pie, true);
 
 function streamingAxis<P extends object>(Component: ComponentType<P>) {

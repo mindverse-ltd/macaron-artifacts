@@ -37,6 +37,7 @@ function hasVisibleContent(target: HTMLElement) {
 export type Ui4aSurfaceProps = {
   source: string;
   streaming: boolean;
+  partial?: false;
   scope: string;
   sessionId: string;
   filename?: string;
@@ -46,11 +47,11 @@ export type Ui4aSurfaceProps = {
   onError?: (message: string) => void;
 };
 
-export function Ui4aSurface({ source, streaming, scope, sessionId, filename, revision, sourceLayout = 'bounded', onSend, onError }: Ui4aSurfaceProps) {
+export function Ui4aSurface({ source, streaming, partial, scope, sessionId, filename, revision, sourceLayout = 'bounded', onSend, onError }: Ui4aSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
   const delivery = useRef<SurfaceDelivery | null>(null);
   const styles = useRef<ReturnType<typeof createSurfaceStyles> | null>(null);
-  const latest = useRef<SurfaceFrame>({ source, streaming, filename, revision });
+  const latest = useRef<SurfaceFrame>({ source, streaming, partial, filename, revision });
   const [error, setError] = useState<string | null>(null);
   const [painted, setPainted] = useState(false);
   const send = useEffectEvent((text: string) => { if (!onSend) throw new Error("This preview cannot send messages"); onSend(text); });
@@ -62,12 +63,12 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
   });
 
   useLayoutEffect(() => {
-    latest.current = { source, streaming, filename, revision };
+    latest.current = { source, streaming, partial, filename, revision };
     setError(null);
     if (!source.trim()) setPainted(false);
     delivery.current?.update(latest.current);
     void styles.current?.update(source, streaming);
-  }, [source, streaming, filename, revision]);
+  }, [source, streaming, partial, filename, revision]);
 
   useEffect(() => {
     const target = host.current;

@@ -40,6 +40,15 @@ describe("surface delivery", () => {
     expect(calls.at(-1)).toEqual(["render", source]);
   });
 
+  test("Edit drafts compile whole modules, revalidate at EOF, and resume Write repair with a fresh buffer", () => {
+    const { renderer, calls } = recorder();
+    const edit: SurfaceFrame = { source: 'export default () => <main><<p>Kept</p></main>', streaming: true, partial: false };
+    deliverFrame(renderer, edit, null);
+    deliverFrame(renderer, { ...edit, streaming: false }, edit);
+    deliverFrame(renderer, frame(edit.source + ' '), edit);
+    expect(calls).toEqual([["render", edit.source], ["finish", edit.source], ["clear", { preserveVisualState: true }], ["push", edit.source + ' ']]);
+  });
+
   test("late obsolete maps and unmounted resolutions cannot roll back the visible frame", async () => {
     const { renderer, calls } = recorder();
     const resolves: ((value: PreparedImports) => void)[] = [];

@@ -67,7 +67,7 @@ export class ArtifactObserver {
   private names = new Map<string, string>();
   private sources = new Map<string, string>();
   private published = new Map<string, Artifact>();
-  private previews = new Map<string, { path: string; source: string }>();
+  private previews = new Map<string, { path: string; source: string; partial?: false }>();
   private bases = new Map<string, string>();
   private watchers: FSWatcher[] = [];
   private revision = Date.now();
@@ -118,7 +118,7 @@ export class ArtifactObserver {
       const path = this.previews.get(chunk.toolCallId)?.path;
       this.previews.delete(chunk.toolCallId); this.inputs.delete(chunk.toolCallId); this.names.delete(chunk.toolCallId); this.bases.delete(chunk.toolCallId);
       const active = path && [...this.previews].findLast(([, preview]) => preview.path === path);
-      if (active) this.publish(active[1].path, active[1].source, true, active[0]);
+      if (active) this.publish(active[1].path, active[1].source, true, active[0], active[1].partial);
       // The caller must await reconciliation before accepting the next tool's Edit base.
       return this.refresh();
     }
@@ -149,13 +149,15 @@ export class ArtifactObserver {
       }
       if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_BYTES) return;
       // Reinsert on every update so a rejected owner restores the most recently updated active preview.
-      this.previews.delete(id); this.previews.set(id, { path: rel, source }); this.publish(rel, source, true, id);
+      // Edit splices retain an old suffix: they are not source prefixes. Repairing an unfinished tag at that seam can turn it into visible text.
+      const partial = edit ? false : undefined;
+      this.previews.delete(id); this.previews.set(id, { path: rel, source, partial }); this.publish(rel, source, true, id, partial);
     } catch { /* Partial JSON and paths are expected while the native tool input is streaming. */ }
   }
-  private publish(path: string, source: string, streaming: boolean, toolCallId?: string) {
+  private publish(path: string, source: string, streaming: boolean, toolCallId?: string, partial?: false) {
     const prior = this.published.get(path);
-    if (prior?.source === source && prior.streaming === streaming && prior.toolCallId === toolCallId) return;
-    const data = { path, source, streaming, revision: ++this.revision, ...(toolCallId ? { toolCallId } : {}) };
+    if (prior?.source === source && prior.streaming === streaming && prior.toolCallId === toolCallId && prior.partial === partial) return;
+    const data = { path, source, streaming, revision: ++this.revision, ...(toolCallId ? { toolCallId } : {}), ...(partial === false ? { partial } : {}) };
     this.published.set(path, data); this.emit({ type: 'data-artifact', id: path, data });
   }
   async finish() {

@@ -1,18 +1,19 @@
 import type { RendererImportMap } from "partial-react/import-map";
 import { importSignature, type ImportRequest, type PreparedImports } from "./imports";
 
-export type SurfaceFrame = ImportRequest & { streaming: boolean };
+export type SurfaceFrame = ImportRequest & { streaming: boolean; partial?: false };
 export type RendererPort = { pushCode: (delta: string, serial?: number) => void; render: (source: string, serial?: number) => void; finish: (source: string, serial?: number) => void; clear: (options?: { preserveVisualState: boolean }) => void; setImportMap: (map: RendererImportMap) => unknown };
 
-export function deliverFrame(renderer: RendererPort, frame: SurfaceFrame, previous: { source: string; streaming: boolean } | null, force = false, serial?: number): boolean {
-  if (!frame.streaming) {
+export function deliverFrame(renderer: RendererPort, frame: SurfaceFrame, previous: Pick<SurfaceFrame, 'source' | 'streaming' | 'partial'> | null, force = false, serial?: number): boolean {
+  if (!frame.streaming || frame.partial === false) {
+    // Spliced Edit drafts must parse as whole modules; failed drafts keep the renderer's last good UI while their source continues streaming.
     // Always finish a streaming buffer, even when its bytes did not change: final syntax errors and render context must settle.
     if (previous?.streaming) renderer.finish(frame.source, serial);
     else if (force || frame.source !== previous?.source) renderer.render(frame.source, serial);
     else return false;
     return true;
   }
-  if (!force && previous && frame.source.startsWith(previous.source)) {
+  if (!force && previous && previous.partial !== false && frame.source.startsWith(previous.source)) {
     const delta = frame.source.slice(previous.source.length);
     if (!delta) return false;
     renderer.pushCode(delta, serial);

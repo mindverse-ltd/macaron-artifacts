@@ -54,6 +54,20 @@ test('partial or ambiguous old_string never edits the wrong part of a module', a
   await observer.finish(); expect(frames().at(-1)?.streaming).toBe(false);
 });
 
+test('Edit drafts retain raw splice bytes and strict parsing when another preview is rejected', async () => {
+  const { observer, start, delta, frames } = await fixture('export default () => <main>Outline<Card>Kept</Card></main>');
+  start('Edit', 'edit'); delta(`{"file_path":"${path}","old_string":"Outline","new_string":"<`, 'edit');
+  expect(frames().at(-1)).toMatchObject({ source: 'export default () => <main><<Card>Kept</Card></main>', streaming: true, partial: false });
+  observer.accept({ type: 'tool-input-available', toolCallId: 'other', toolName: 'Write', input: { file_path: path, content: 'export default () => <p>Other' } });
+  expect(frames().at(-1)?.partial).toBeUndefined();
+  await observer.accept({ type: 'tool-output-denied', toolCallId: 'other' });
+  expect(frames().at(-1)).toMatchObject({ toolCallId: 'edit', partial: false });
+  delta('h2>Evidence</h2>"}', 'edit');
+  expect(frames().at(-1)).toMatchObject({ source: 'export default () => <main><h2>Evidence</h2><Card>Kept</Card></main>', partial: false });
+  await observer.accept({ type: 'tool-output-error', toolCallId: 'edit', errorText: 'Rejected' });
+  expect(frames().at(-1)?.partial).toBeUndefined();
+});
+
 test('complete-only tool inputs produce one pending snapshot without invented deltas', async () => {
   const { observer, frames } = await fixture();
   observer.accept({ type: 'tool-input-available', toolCallId: 'complete', toolName: 'Write', input: { file_path: path, content: 'export default () => null' } });

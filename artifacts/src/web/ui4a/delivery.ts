@@ -4,16 +4,15 @@ import { importSignature, type ImportRequest, type PreparedImports } from "./imp
 export type SurfaceFrame = ImportRequest & { streaming: boolean; partial?: false };
 export type RendererPort = { pushCode: (delta: string, serial?: number) => void; render: (source: string, serial?: number) => void; finish: (source: string, serial?: number) => void; clear: (options?: { preserveVisualState: boolean }) => void; setImportMap: (map: RendererImportMap) => unknown };
 
-export function deliverFrame(renderer: RendererPort, frame: SurfaceFrame, previous: Pick<SurfaceFrame, 'source' | 'streaming' | 'partial'> | null, force = false, serial?: number): boolean {
-  if (!frame.streaming || frame.partial === false) {
-    // Spliced Edit drafts must parse as whole modules; failed drafts keep the renderer's last good UI while their source continues streaming.
+export function deliverFrame(renderer: RendererPort, frame: SurfaceFrame, previous: { source: string; streaming: boolean } | null, force = false, serial?: number): boolean {
+  if (!frame.streaming) {
     // Always finish a streaming buffer, even when its bytes did not change: final syntax errors and render context must settle.
     if (previous?.streaming) renderer.finish(frame.source, serial);
     else if (force || frame.source !== previous?.source) renderer.render(frame.source, serial);
     else return false;
     return true;
   }
-  if (!force && previous && previous.partial !== false && frame.source.startsWith(previous.source)) {
+  if (!force && previous && frame.source.startsWith(previous.source)) {
     const delta = frame.source.slice(previous.source.length);
     if (!delta) return false;
     renderer.pushCode(delta, serial);
@@ -38,7 +37,7 @@ export class SurfaceDelivery {
   private committedSerial = 0;
   private committed: PreparedImports | null = null;
   private leases = new Set<PreparedImports>();
-  private submissions = new Map<number, { imports: PreparedImports; source: string; stage: "pending" | "compiling" | "ready" }>();
+  private submissions = new Map<number, { imports: PreparedImports; source: string; partial?: false; stage: "pending" | "compiling" | "ready" }>();
 
   constructor(private renderer: RendererPort, private resolve: (request: ImportRequest) => Promise<PreparedImports>, private onError: (error: Error) => void) {}
 
@@ -83,21 +82,23 @@ export class SurfaceDelivery {
     if (!this.latest || !this.prepared) return;
     const frame = { ...this.latest, source: this.prepared.rewrite(this.latest.source) };
     const serial = ++this.serial;
-    this.submissions.set(serial, { imports: this.prepared, source: frame.source, stage: "pending" });
-    if (deliverFrame(this.renderer, frame, this.delivered, force, serial)) {
-      this.delivered = frame;
+    this.submissions.set(serial, { imports: this.prepared, source: frame.source, partial: frame.partial, stage: "pending" });
+    if (deliverFrame(this.renderer, frame, this.delivered, force || frame.partial !== this.delivered?.partial, serial)) {
       // The renderer compiles single-flight and coalesces queued frames. Only the latest unstarted frame can run.
       for (const [id, submission] of this.submissions) if (id < serial && submission.stage === "pending") this.submissions.delete(id);
     } else this.submissions.delete(serial);
+    this.delivered = frame; // An empty streaming delta still starts a stream that must be finished at EOF.
     this.collect();
   }
 
   compiling(source: string) {
+    let partial: false | undefined;
     for (const [id, submission] of this.submissions) {
       if (submission.stage === "compiling") this.submissions.delete(id);
-      else if (submission.stage === "pending" && submission.source === source) submission.stage = "compiling";
+      else if (submission.stage === "pending" && submission.source === source) { submission.stage = "compiling"; partial = submission.partial; }
     }
     this.collect();
+    return partial;
   }
 
   ready(source: string) { for (const submission of this.submissions.values()) if (submission.stage === "compiling" && submission.source === source) submission.stage = "ready"; }
@@ -110,6 +111,7 @@ export class SurfaceDelivery {
     this.committedSerial = serial;
     for (const id of this.submissions.keys()) if (id <= serial) this.submissions.delete(id);
     this.collect();
+    return serial === this.serial && !this.latest?.streaming;
   }
 
   failed(source: string | undefined, phase: "transform" | "compile" | "render") {

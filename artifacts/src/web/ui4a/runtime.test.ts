@@ -40,13 +40,16 @@ describe("surface delivery", () => {
     expect(calls.at(-1)).toEqual(["render", source]);
   });
 
-  test("Edit drafts compile whole modules, revalidate at EOF, and resume Write repair with a fresh buffer", () => {
+  test("Edit parser policy follows the submitted source without prematurely finishing its stream", async () => {
     const { renderer, calls } = recorder();
+    const delivery = new SurfaceDelivery(renderer, async () => prepared(), () => {});
     const edit: SurfaceFrame = { source: 'export default () => <main><<p>Kept</p></main>', streaming: true, partial: false };
-    deliverFrame(renderer, edit, null);
-    deliverFrame(renderer, { ...edit, streaming: false }, edit);
-    deliverFrame(renderer, frame(edit.source + ' '), edit);
-    expect(calls).toEqual([["render", edit.source], ["finish", edit.source], ["clear", { preserveVisualState: true }], ["push", edit.source + ' ']]);
+    delivery.update(edit); await tick(); expect(delivery.compiling(edit.source)).toBe(false);
+    delivery.update({ ...edit, streaming: false });
+    delivery.update(frame(edit.source));
+    expect(delivery.compiling(edit.source)).toBeUndefined();
+    expect(calls.filter(([name]) => name !== 'map')).toEqual([["push", edit.source], ["finish", edit.source], ["clear", { preserveVisualState: true }], ["push", edit.source]]);
+    delivery.dispose();
   });
 
   test("late obsolete maps and unmounted resolutions cannot roll back the visible frame", async () => {
@@ -65,6 +68,24 @@ describe("surface delivery", () => {
     resolves[2]!(prepared("c"));
     await tick();
     expect(calls.at(-1)).toEqual(["push", 'import "b";']);
+  });
+
+  test("only the latest successful final submission is ready, including an unchanged stream", async () => {
+    const { renderer, calls } = recorder();
+    let serial = 0;
+    renderer.render = (_source, value) => { serial = value!; };
+    renderer.finish = (_source, value) => { serial = value!; };
+    const delivery = new SurfaceDelivery(renderer, async () => prepared(), () => {});
+    delivery.update(frame('source', false)); await tick(); const prior = serial;
+    expect(delivery.rendered(serial)).toBe(true);
+    delivery.update(frame('source')); // No new bytes; EOF still requires a real final render.
+    expect(delivery.rendered(prior)).toBeUndefined();
+    delivery.update(frame('source', false));
+    expect(serial).toBeGreaterThan(prior);
+    expect(delivery.rendered(serial)).toBe(true);
+    delivery.update(frame('broken', false)); delivery.compiling('broken'); delivery.ready('broken'); delivery.failed('broken', 'render');
+    expect(delivery.rendered(serial)).toBeUndefined();
+    delivery.dispose();
   });
 
   test("retains importing and last-good graphs while releasing coalesced and failed revisions", async () => {

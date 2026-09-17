@@ -54,6 +54,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
   const latest = useRef<SurfaceFrame>({ source, streaming, partial, filename, revision });
   const [error, setError] = useState<string | null>(null);
   const [painted, setPainted] = useState(false);
+  const [settled, setSettled] = useState(false);
   const send = useEffectEvent((text: string) => { if (!onSend) throw new Error("This preview cannot send messages"); onSend(text); });
   const report = useEffectEvent((problem: unknown) => {
     if (latest.current.streaming) return;
@@ -65,6 +66,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
   useLayoutEffect(() => {
     latest.current = { source, streaming, partial, filename, revision };
     setError(null);
+    setSettled(false);
     if (!source.trim()) setPainted(false);
     delivery.current?.update(latest.current);
     void styles.current?.update(source, streaming);
@@ -92,6 +94,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     if (!target) return;
     let disposed = false;
     setPainted(false);
+    setSettled(false);
     let renderer: GenUIRenderer | null = null;
     let surfaceDelivery: SurfaceDelivery | null = null;
     let compilingSource: string | undefined, readySource: string | undefined;
@@ -103,11 +106,17 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     void surfaceStyles.update(latest.current.source, latest.current.streaming);
     void GenUIRenderer.create(target, {
       filename, importmap: { imports: modules.imports }, preserveStateOnUpdate: true, flushMode: "immediate",
-      compiler: { compile: (code, options) => { compilingSource = code; surfaceDelivery?.compiling(code); return compiler.compile(code, options); } },
+      // Disable prefix repair for Edit splices without ending the renderer's stream: EOF must still retry suppressed render errors and settle charts.
+      compiler: { compile: async (code, options) => {
+        compilingSource = code;
+        const partial = surfaceDelivery?.compiling(code), result = await compiler.compile(code, partial === false ? { ...options, partial: false } : options);
+        // A failed streaming render can roll the component slot back without resetting compiled code. EOF must reselect the actual final module.
+        return options?.partial ? result : { ...result, changed: true };
+      } },
       callbacks: {
         onReady: (_component, _url, code) => { readySource = code; if (code !== undefined) surfaceDelivery?.ready(code); },
         onError: (error, phase) => { if (!disposed) { surfaceDelivery?.failed(phase === "render" ? readySource : compilingSource, phase); report(error); } },
-        onRendered: (_component, _code, serial) => { if (!disposed) surfaceDelivery?.rendered(serial); },
+        onRendered: (_component, _code, serial) => { if (!disposed && surfaceDelivery?.rendered(serial)) setSettled(true); },
       },
     }).then((created) => {
       if (disposed) { created.detach(); return; }
@@ -126,7 +135,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     };
   }, [sessionId, scope, filename]);
 
-  return <div className={UI4A_CLASS} data-ui4a-ready={painted && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0, position: "relative" }}>
+  return <div className={UI4A_CLASS} data-ui4a-ready={painted && settled && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0, position: "relative" }}>
     {/* Measure the first real UI without briefly stacking its height on top of the source fallback. */}
     <div ref={host} data-ui4a-render-host="" inert={!painted} style={painted ? undefined : { position: "absolute", insetInline: 0, top: 0, opacity: 0, pointerEvents: "none" }} />
     {/* Inline source stays bounded; Canvas owns its viewport and follows the full source with the shared spring. */}

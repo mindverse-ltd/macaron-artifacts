@@ -51,6 +51,9 @@ export class SurfaceDelivery {
       this.prepared = null;
       this.delivered = null;
       this.renderer.clear();
+      this.submissions.clear();
+      this.committed = null;
+      this.collect();
       return;
     }
     const signature = importSignature(frame);

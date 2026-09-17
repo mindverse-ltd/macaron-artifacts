@@ -111,6 +111,20 @@ describe("surface delivery", () => {
     expect(released).toEqual(["coalesced", "second", "first", "latest"]);
   });
 
+  test("revision-only updates revalidate, and clearing releases graphs and rejects stale callbacks", async () => {
+    const { renderer } = recorder(), released: number[] = [];
+    let serial = 0, revision = 0;
+    renderer.render = (_source, value) => { serial = value!; };
+    const delivery = new SurfaceDelivery(renderer, async () => { const id = ++revision; return { ...prepared(), release: () => released.push(id) }; }, () => {});
+    delivery.update({ ...frame('same', false), revision: 1 }); await tick();
+    expect(delivery.rendered(serial)).toBe(true); const first = serial;
+    delivery.update({ ...frame('same', false), revision: 2 }); await tick();
+    expect(serial).toBeGreaterThan(first); expect(delivery.rendered(serial)).toBe(true);
+    delivery.update(frame('', false));
+    expect(released).toEqual([1, 2]); expect(delivery.rendered(serial)).toBeUndefined();
+    delivery.dispose();
+  });
+
   test("failed imports leave the committed graph retained and stale leases release immediately", async () => {
     const released: string[] = [];
     const resolves: ((value: PreparedImports) => void)[] = [];

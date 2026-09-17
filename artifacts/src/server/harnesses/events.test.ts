@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { readUIMessageStream } from 'ai';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessTurn } from './types.js';
@@ -77,6 +80,25 @@ describe('Claude native deltas', () => {
     const options = claudeOptions(turn({ nativeId: 'main', retry: true }), new AbortController());
     expect(options.continue).toBe(true);
     expect(options.resume).toBeUndefined();
+  });
+
+  test('rejects fuzzy canvas edits before native quote conversion while preserving exact edits', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'claude-canvas-edit-')), path = '.artifacts/report.ui4a.tsx', source = 'export default () => <p>“demo”</p>;';
+    try {
+      await mkdir(join(cwd, '.artifacts')); await writeFile(join(cwd, path), source);
+      const hook = claudeOptions(turn({ cwd }), new AbortController()).hooks!.PreToolUse![0]!.hooks[0]!;
+      const invoke = (tool: string, file: string, old: string) => hook({ hook_event_name: 'PreToolUse', session_id: 'main', transcript_path: '', cwd, tool_name: tool, tool_input: { file_path: file, old_string: old, new_string: 'export default () => <p className="text-fg">Done</p>;' }, tool_use_id: 'edit' }, 'edit', { signal: new AbortController().signal });
+      expect(await invoke('Edit', path, source.replace(/[“”]/g, '"'))).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('exact old_string') } });
+      expect(await invoke('Edit', join(cwd, path), source.replace(/[“”]/g, '"'))).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+      expect(await readFile(join(cwd, path), 'utf8')).toBe(source);
+      expect(await invoke('Edit', join(cwd, path), source)).toEqual({});
+      expect(await invoke('Edit', path, '')).toEqual({});
+      expect(await invoke('Write', path, 'different')).toEqual({});
+      await writeFile(join(cwd, '.artifacts/note.md'), source);
+      expect(await invoke('Edit', '.artifacts/note.md', 'different')).toEqual({});
+      await writeFile(join(cwd, path), source + '\r\n// note\r\n');
+      expect(await invoke('Edit', path, source + '\n// note\n')).toEqual({});
+    } finally { await rm(cwd, { recursive: true, force: true }); }
   });
 });
 

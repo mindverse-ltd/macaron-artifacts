@@ -1,6 +1,7 @@
 import type { Options, Query } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
+import { readUi4aFile } from '../artifacts.js';
 import { abortable, abortError, executableVersion, record, safeError, safeProfileError, string } from './common.js';
 import { claudeProfileOptions, prepareClaudeProfile, type PreparedClaudeProfile } from './claude-profile.js';
 
@@ -115,7 +116,17 @@ export function claudeOptions(turn: HarnessTurn, abortController: AbortControlle
     ...(turn.enrichment ? { forkSession: true, persistSession: false, maxTurns: 1 } : {}),
     ...(turn.retry ? { continue: true } : {}),
     // Always register the same callbacks, including for forks. Removing tools or interactive callbacks changes the cached prompt prefix.
-    hooks: { PreToolUse: [{ hooks: [async () => turn.enrichment ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Metadata generation cannot execute tools' } } : {}] }] },
+    hooks: { PreToolUse: [{ hooks: [async (event) => {
+      const deny = (reason: string) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const, permissionDecisionReason: reason } });
+      if (turn.enrichment) return deny('Metadata generation cannot execute tools');
+      if (event.hook_event_name !== 'PreToolUse' || event.tool_name !== 'Edit') return {};
+      const input = record(event.tool_input), path = string(input.file_path), old = string(input.old_string);
+      if (!path.endsWith('.ui4a.tsx') || !old) return {};
+      const source = await readUi4aFile(turn.cwd, path).catch(() => undefined);
+      // Claude's fuzzy quote matching can turn every new code quote into a prose quote. Reject before native Edit writes it; never repair generated source afterward.
+      if (source !== undefined && !source.replace(/\r\n/g, '\n').includes(old)) return deny('Canvas Edit requires an exact old_string match, including quote characters. Read the file and copy the original text exactly before retrying; fuzzy quote matching can corrupt TSX syntax.');
+      return {};
+    }] }] },
     canUseTool: async (tool, input, context) => {
       if (turn.enrichment) return { behavior: 'deny', message: 'Metadata generation cannot execute tools', interrupt: true };
       const approved = await abortable(turn.approve({ id: context.requestId || context.toolUseID, tool, input }), context.signal);

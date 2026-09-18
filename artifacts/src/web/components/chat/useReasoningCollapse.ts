@@ -1,16 +1,16 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
 /** Reserve the open geometry in the same commit that closes native details, before the browser can clamp scrollTop. */
-export function useReasoningCollapse(collapsed: boolean, automatic: boolean) {
+export function useReasoningCollapse(collapsed: boolean, automatic: boolean, trackHeight: boolean) {
   const disclosure = useRef<HTMLDetailsElement>(null);
   const [openHeight, setOpenHeight] = useState(0);
   useLayoutEffect(() => {
     const element = disclosure.current;
-    if (!element || collapsed) return;
+    if (!element || collapsed || !trackHeight) return;
     const measure = () => setOpenHeight(element.getBoundingClientRect().height);
     const observer = new ResizeObserver(measure); observer.observe(element); measure();
     return () => observer.disconnect();
-  }, [collapsed]);
+  }, [collapsed, trackHeight]);
   useLayoutEffect(() => {
     const element = disclosure.current;
     if (!element || !collapsed || !automatic || !openHeight) return;

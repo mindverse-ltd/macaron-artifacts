@@ -38,6 +38,7 @@ function ReasoningView({ presentation, active, historyOpen, superseded }: { pres
   const { viewport, content, following, overflowing, resume } = useReasoningScroll(contentKey, active && !historyOpen);
   const [multiline, setMultiline] = useState(false), [userOpen, setUserOpen] = useState<boolean | null>(null), [inspecting, setInspecting] = useState(false);
   const [initiallySuperseded] = useState(superseded);
+  // A coalesced final delta must be measured before paint; waiting for resize delivery can flash it expanded for a frame.
   useLayoutEffect(() => {
     const body = content.current, panel = viewport.current?.parentElement;
     if (!body || !panel) return;
@@ -49,10 +50,11 @@ function ReasoningView({ presentation, active, historyOpen, superseded }: { pres
     };
     const observer = new ResizeObserver(measure); observer.observe(body); measure();
     return () => observer.disconnect();
-  }, [content, viewport]);
+  }, [active, content, superseded, viewport]);
   const collapsible = superseded && !active && multiline, collapsed = collapsible && (userOpen === false || (userOpen === null && !historyOpen && !inspecting));
   // Backfilled history was never visibly expanded; only animate a live block handing off to its successor.
-  const { disclosure, minHeight } = useReasoningCollapse(collapsed, userOpen === null && !initiallySuperseded);
+  // A coalesced final reasoning delta must not enlarge the reservation after the next block has already arrived.
+  const { disclosure, minHeight } = useReasoningCollapse(collapsed, userOpen === null && !initiallySuperseded, !superseded || inspecting || historyOpen || userOpen === true);
   useLayoutEffect(() => {
     const panel = viewport.current?.parentElement;
     if (!panel || collapsed || userOpen !== null) return;

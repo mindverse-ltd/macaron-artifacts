@@ -10,7 +10,17 @@ The only published package and CLI is `macaron-artifacts`. Choose Claude Code, C
 bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
-Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port` and `--data-dir`.
+Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`; CLI options override their environment variables.
+
+## Password protection and remote access
+
+Set `MACARON_PASSWORD` or pass `--password` to require a shared password before accessing sessions, Profiles, streams, or workspace files. The login screen uses an HttpOnly, SameSite=Strict cookie that expires after 24 hours; restarting the server or logging out invalidates that login. The password grants access to the whole service, not an individual workspace or user account. An unset password preserves the default local behavior. CLI passwords can appear in shell history and process arguments.
+
+For an SSH machine, start the server there with a configured password, then use `ssh -N -L 43860:127.0.0.1:43860 user@host` on your computer and open `http://127.0.0.1:43860`. Loopback access still requires the configured password. See the [root guide](../README.md#password-protection-and-remote-access) for hidden-input environment and CLI examples.
+
+`--host` or `MACARON_HOST` changes the default `127.0.0.1` bind. Non-loopback listening requires a non-empty password. For an HTTPS reverse proxy, use `--public-origin` or `MACARON_PUBLIC_ORIGIN` for the exact browser origin and preserve its `Host` header; a non-loopback public origin requires a password even when the backend binds to loopback. The server does not infer trust from `X-Forwarded-*` headers. HTTPS public origins use Secure cookies. Use HTTPS or SSH forwarding to keep the password and session traffic encrypted.
+
+`--pair` remains available for the hosted WebUI. Its origin-bound Bearer grants authorize the paired connection independently of the password, but do not authorize password endpoints or management of pairing grants. Password login and pairing administration remain same-origin operations.
 
 ## Development
 
@@ -93,7 +103,7 @@ OpenCode's native question dialogs and pi prompts that require a terminal UI are
 
 - Inline: a fenced `ui4a/tsx` module renders in the conversation while its text arrives.
 - Canvas: `.artifacts/canvases/<name>.ui4a.tsx` opens in the right panel. Relative TypeScript, TSX and JSON modules resolve inside `.artifacts`.
-- Both use `partial-react@0.0.6`, `pushCode`/`finish`, last-good-frame preservation and a shared React instance.
+- Both use `partial-react`, `pushCode`/`finish`, last-good-frame preservation and a shared React instance.
 - This application's small `$ui4a/ui` library contains Button, Field, Card, Badge, Tabs and Disclosure. Compose layouts with native HTML and UnoCSS Wind4 utilities; use `@headlessui/react` for additional controls. `$ui4a/ui/charts` provides responsive Recharts components with streaming snapshots, stable data/axes and restrained animation; `$ui4a/ui/katex` provides `LaTeX` and `MathBlock`. Both are bundled locally. Combine formulas, line charts and numeric sliders in `ui4a/tsx` to explore parameter changes. `$ui4a/chat`, `$ui4a/state` and `$ui4a/fs` are separate host capabilities.
 - Chat and reasoning render `\(...\)` inline math, `\[...\]` display math, and `$$` math with KaTeX. Code and link destinations stay literal, and single dollar signs remain ordinary currency text. Long display formulas scroll within their container.
 - The module manifest generates `skills/ui4a/SKILL.md`; a test checks that the guidance matches the runtime. No theme name is added to the model prompt.
@@ -102,7 +112,7 @@ OpenCode's native question dialogs and pi prompts that require a terminal UI are
 - Workbench regions keep their own foreground/background pairs: `sideBar.*`, `titleBar.*`, `editorWidget.*`, `menu.*` and list selection colors. Alpha colors composite against the owning region, including controls inside dialogs. Optional borders and `widget.shadow` retain explicit transparency; `panel.border` is reserved for pane boundaries. A supplied `contrastBorder` remains an accessibility fallback when a component border is absent.
 - Tool and reasoning rows use spacing and expanded content instead of repeated frames. The small UI4A Card and Disclosure components follow the same restrained defaults. Shiki syntax stays on `editor.background`; `textCodeBlock.background` belongs to the surrounding Markdown container. Insufficient syntax foreground contrast receives a minimal tonal correction in the highlighter's copy of the theme; original workbench colors stay intact.
 
-Generated code runs as trusted local React code in the host page, as in the reference playground; this is not an isolation sandbox for untrusted third-party code. File bridge access is restricted to the selected workspace's `.artifacts` tree, including symlink checks. The local API accepts loopback hosts and same-origin browser requests.
+Generated code runs as trusted React code in the host page, as in the reference playground; this is not an isolation sandbox for untrusted third-party code. File bridge access is restricted to the selected workspace's `.artifacts` tree, including symlink checks. The API accepts same-origin browser requests and requires a login whenever a password is configured.
 
 ## Validation
 
@@ -116,7 +126,7 @@ MACARON_PACKAGE_SOURCE=https://pkg.pr.new/MindLab-Research/macaron-artifacts/mac
 
 Tests exercise harness event conversion, real JSONL RPC framing, approval/cancellation, >4,000-event replay, crash recovery, metadata isolation, scoped capabilities and incremental rendering. Browser acceptance uses the real built application for inline and file previews, state retention, relative imports, theme switching and narrow layouts.
 
-`test:package` builds and installs the package into an empty consumer directory, then starts its CLI and checks the harness catalog and all client assets. `MACARON_PACKAGE_SOURCE` runs the same acceptance checks against a published preview URL or an existing tarball.
+`test:package` builds and installs the package into an empty consumer directory, then starts its CLI and checks the harness catalog, all client assets, and password-protected login/logout and restart behavior. It also checks that non-loopback configurations refuse to start without a password. `MACARON_PACKAGE_SOURCE` runs the same acceptance checks against a published preview URL or an existing tarball.
 
 The root package publishes only the unified application. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Native session-history migration, attachments, and the old administrative panels are outside this adapter slice.
 

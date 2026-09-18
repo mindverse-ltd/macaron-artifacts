@@ -28,6 +28,26 @@ macaron-artifacts --port 43860 --data-dir /path/to/session-data
 macaron-artifacts --help
 ```
 
+### Password protection and remote access
+
+Set `MACARON_PASSWORD` or pass `--password` on the machine running the agents. To read the password without echoing or putting it in shell history:
+
+```sh
+printf 'Artifacts password: '
+read -r -s MACARON_PASSWORD
+printf '\n'
+export MACARON_PASSWORD
+macaron-artifacts
+```
+
+You can also run `macaron-artifacts --password "$MACARON_PASSWORD"`. CLI passwords can appear in shell history and process arguments.
+
+For an SSH machine, forward the port from your computer with `ssh -N -L 43860:127.0.0.1:43860 user@host`, open `http://127.0.0.1:43860`, and enter the password. Agents, workspace files, and credentials stay on the remote machine. Password protection applies to loopback requests too; the default local server remains password-free when no password is configured.
+
+For direct browser access through an HTTPS reverse proxy, pass `--public-origin https://artifacts.example.com` or set `MACARON_PUBLIC_ORIGIN=https://artifacts.example.com`, and preserve the browser's `Host` header when proxying to `127.0.0.1:43860`. Use `--host 0.0.0.0` (or `MACARON_HOST`) only when the server needs to listen beyond loopback. A non-loopback bind or public origin requires a non-empty password. Use HTTPS or SSH forwarding to encrypt the connection; a password alone does not encrypt HTTP.
+
+Login uses an HttpOnly, SameSite=Strict cookie valid for 24 hours; HTTPS public origins also use Secure cookies. Restarting the server invalidates logins. The shared password grants access to the whole service, including its workspaces and Profile settings. Hosted `--pair` connections keep their separate origin-bound Bearer grants; they cannot manage password logins or other pairing grants.
+
 There is one published package and one launcher. The old `mcc`, `mcx`, and `mkx` distributions are discontinued; harness selection belongs inside the unified application.
 
 The previous WebUI, plugin launchers, and replay tools are archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0).
@@ -47,9 +67,14 @@ Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are supported. Hermes use
 
 ## Configuration
 
+CLI options override their environment variables.
+
 | Setting | Purpose |
 | --- | --- |
 | `MACARON_PORT` | UI and API port, default `43860` |
+| `MACARON_HOST` | Listen address, default `127.0.0.1`; also accepted as `--host` |
+| `MACARON_PASSWORD` | Shared service password; also accepted as `--password`; required for non-loopback listening or public origins |
+| `MACARON_PUBLIC_ORIGIN` | Exact browser origin behind a reverse proxy, for example `https://artifacts.example.com`; also accepted as `--public-origin` |
 | `MACARON_DATA_DIR` | App conversation storage, default `~/.macaron-artifacts/sessions` |
 | `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
 | `MACARON_ALLOWED_ORIGINS` | Comma-separated hosted WebUI origins, default `https://artifacts.macaron.im` when pairing is enabled |
@@ -62,7 +87,7 @@ Open **Profiles** in the sidebar to configure models, reasoning effort, service 
 
 You can also inherit your CLI's configuration. For Claude gateways, that includes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`. Variables injected only by a shell alias do not reach a separately launched app.
 
-Workspace files remain in each conversation's selected directory. Deleting an app conversation does not delete those files. The API always binds to loopback; normal local UI requests are same-origin, while `--pair` adds an origin-bound Bearer connection for the hosted WebUI. Generated React runs in the host page; use it with trusted local code.
+Workspace files remain in each conversation's selected directory. Deleting an app conversation does not delete those files. The API binds to loopback by default; password-protected remote access uses the same WebUI, while `--pair` adds an origin-bound Bearer connection for the hosted WebUI. Generated React runs in the host page; use it with trusted code.
 
 ## Development
 

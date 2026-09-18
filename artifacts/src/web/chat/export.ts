@@ -2,6 +2,7 @@ import { snapshotDocument } from '../ui4a/export';
 import { highlighter } from '../theme/themes';
 import { initializeChatExport } from './export-runtime';
 import { defaultUrlTransform } from 'streamdown';
+import { randomUUID } from '../uuid';
 
 export async function chatHtml(transcript: HTMLElement, title: string): Promise<string> {
   const output = snapshotDocument(transcript, title, 'chat');
@@ -36,7 +37,7 @@ export async function chatHtml(transcript: HTMLElement, title: string): Promise<
     }
   }
   // Only this fixed transcript controller may execute; generated cards remain static and have no host bridge.
-  const nonce = crypto.randomUUID();
+  const nonce = randomUUID();
   output.querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy"]')!.content = `script-src 'nonce-${nonce}'; object-src 'none'; base-uri 'none'; form-action 'none'`;
   const script = output.createElement('script'); script.setAttribute('nonce', nonce); script.textContent = `(${initializeChatExport.toString()})();`; output.body.append(script);
   return `<!doctype html>\n${output.documentElement.outerHTML}`;

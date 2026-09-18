@@ -13,7 +13,7 @@ The package contains the launcher, the prebuilt `artifacts/dist` server and WebU
 bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
-Use a SHA from a successful package preview build. The launcher serves UI and API on `http://127.0.0.1:43860` and accepts `--port`, `--data-dir`, and `--pair`.
+Use a SHA from a successful package preview build. The launcher serves UI and API on `http://127.0.0.1:43860` by default and accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`. CLI options override their environment variables. Set `MACARON_PASSWORD` or pass `--password` for password protection; non-loopback listening or a non-loopback public origin requires it. See [remote access](/docs/usage#password-protection-and-remote-access) for SSH forwarding and HTTPS reverse proxy configuration.
 
 ## Runtime boundary
 

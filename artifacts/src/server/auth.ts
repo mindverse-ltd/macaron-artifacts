@@ -18,18 +18,21 @@ export function normalizeOrigin(value: string | undefined): string | undefined {
 export class AccessPolicy {
   readonly host: string;
   readonly publicOrigin?: string;
+  private readonly publicProtocol?: string;
+  private readonly publicHost?: string;
   constructor(options: { host?: string; publicOrigin?: string; password?: string }) {
     this.host = options.host ?? '127.0.0.1';
     if (!this.host || !(isIP(this.host) || /^(?=.{1,253}$)[a-z\d](?:[a-z\d.-]*[a-z\d])?$/i.test(this.host))) throw new Error('MACARON_HOST must be a hostname or IP address, without a port.');
     this.publicOrigin = normalizeOrigin(options.publicOrigin);
     if (options.publicOrigin !== undefined && !this.publicOrigin) throw new Error('MACARON_PUBLIC_ORIGIN must be an HTTP(S) origin without a path.');
+    if (this.publicOrigin) { const url = new URL(this.publicOrigin); this.publicProtocol = url.protocol; this.publicHost = url.host; }
     if (options.password !== undefined && (!options.password.trim() || Buffer.byteLength(options.password) > 1024)) throw new Error('MACARON_PASSWORD must contain 1–1024 bytes and cannot be blank.');
-    if ((!isLoopbackHost(isIP(this.host) === 6 ? `[${this.host}]` : this.host) || this.publicOrigin && !isLoopbackHost(new URL(this.publicOrigin).host)) && !options.password) throw new Error('Set MACARON_PASSWORD before listening outside loopback or using a public origin.');
+    if ((!isLoopbackHost(isIP(this.host) === 6 ? `[${this.host}]` : this.host) || this.publicHost && !isLoopbackHost(this.publicHost)) && !options.password) throw new Error('Set MACARON_PASSWORD before listening outside loopback or using a public origin.');
   }
 
   request(req: IncomingMessage, passwordEnabled: boolean) {
     const rawHost = req.headers.host, origin = normalizeOrigin(rawHost ? `http://${rawHost}` : undefined), host = origin ? new URL(origin).host : undefined;
-    const loopback = isLoopbackHost(host), publicRequest = Boolean(this.publicOrigin && normalizeOrigin(`${new URL(this.publicOrigin).protocol}//${rawHost}`) === this.publicOrigin);
+    const loopback = isLoopbackHost(host), publicRequest = Boolean(this.publicOrigin && normalizeOrigin(`${this.publicProtocol}//${rawHost}`) === this.publicOrigin);
     const allowed = Boolean(host && (passwordEnabled ? !this.publicOrigin || loopback || publicRequest : loopback && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '')));
     // Forwarded headers are untrusted. HTTPS proxies must preserve Host and declare their browser origin explicitly.
     const expectedOrigin = publicRequest ? this.publicOrigin : origin;

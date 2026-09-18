@@ -252,13 +252,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const root = resolve(dirname(fileURLToPath(import.meta.url)), import.meta.url.endsWith('/src/server/index.ts') ? '../..' : '..');
   const instructions = await readFile(join(root, 'skills/ui4a/SKILL.md'), 'utf8');
   const pairing = /^(1|true|yes)$/i.test(process.env.MACARON_PAIR || '') ? { enabled: true, allowedOrigins: (process.env.MACARON_ALLOWED_ORIGINS || 'https://artifacts.macaron.im').split(',').map(value => value.trim()).filter(Boolean) } : undefined;
-  const host = process.env.MACARON_HOST ?? '127.0.0.1', password = process.env.MACARON_PASSWORD;
+  const host = process.env.MACARON_HOST ?? '127.0.0.1', password = process.env.MACARON_PASSWORD, publicOrigin = process.env.MACARON_PUBLIC_ORIGIN;
   // Agent tools inherit this process's environment; the WebUI credential must never reach them.
   delete process.env.MACARON_PASSWORD;
-  const app = await createArtifactsServer({ directory: process.env.MACARON_DATA_DIR || join(homedir(), '.macaron-artifacts/sessions'), instructions, webRoot: join(root, 'dist/web'), pairing, host, password, publicOrigin: process.env.MACARON_PUBLIC_ORIGIN });
+  const app = await createArtifactsServer({ directory: process.env.MACARON_DATA_DIR || join(homedir(), '.macaron-artifacts/sessions'), instructions, webRoot: join(root, 'dist/web'), pairing, host, password, publicOrigin });
   const port = Number(process.env.MACARON_PORT || 43860);
   app.server.listen(port, host, () => {
-    console.log(`Macaron Artifacts: ${process.env.MACARON_PUBLIC_ORIGIN || `http://${host.includes(':') ? `[${host}]` : host}:${port}`}`);
+    console.log(`Macaron Artifacts: ${publicOrigin || `http://${host.includes(':') ? `[${host}]` : host}:${port}`}`);
     if (password !== undefined) console.log('Password protection: enabled');
     if (app.pairing.enabled) {
       console.log(`Connect: https://artifacts.macaron.im/connect?server=${encodeURIComponent(`http://127.0.0.1:${port}`)}`);

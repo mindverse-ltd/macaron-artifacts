@@ -24,6 +24,28 @@ macaron-artifacts
 
 Open [http://127.0.0.1:43860](http://127.0.0.1:43860). The commands are pinned to this documentation build's commit; use a commit with a successful package preview build.
 
+### Password protection and remote access
+
+On the machine running your coding agents, read a password without echoing it or adding it to shell history:
+
+```sh
+printf 'Artifacts password: '
+read -r -s MACARON_PASSWORD
+printf '\n'
+export MACARON_PASSWORD
+macaron-artifacts
+```
+
+For an SSH machine, run this command on your computer, then open `http://127.0.0.1:43860` and enter the password:
+
+```sh
+ssh -N -L 43860:127.0.0.1:43860 user@host
+```
+
+The agents, their credentials, and workspace files stay on the server. A configured password applies to loopback access too. Without one, the default local-only launch behaves as before. Login lasts 24 hours in an HttpOnly, SameSite=Strict cookie; signing out or restarting the server invalidates it. The shared password grants access to the whole service, including all conversations, workspaces, and Profile settings.
+
+For direct access through an HTTPS reverse proxy, set `MACARON_PUBLIC_ORIGIN=https://artifacts.example.com`, proxy to `127.0.0.1:43860`, and preserve the browser's `Host` header. The server ignores `X-Forwarded-*` headers for trust and uses Secure cookies for that HTTPS origin. If the backend needs to listen on a network interface, use `--host 0.0.0.0` or `MACARON_HOST`. A non-loopback listen address or public origin requires a non-empty password. Use HTTPS or SSH forwarding to encrypt the connection; password protection alone does not encrypt HTTP.
+
 ### Connect from the website
 
 Run `macaron-artifacts --pair` on the machine that has your coding agents installed. On [the connect page](/connect), enter `http://127.0.0.1:43860` and the one-time code printed by the command. The code expires after ten minutes and is consumed once; credentials stay in the browser tab and the agent machine.
@@ -35,6 +57,8 @@ ssh -N -L 43860:127.0.0.1:43860 user@host
 ```
 
 Then use the forwarded `http://127.0.0.1:43860` address in the connect form. The website never needs direct network access to the remote machine.
+
+Pairing is a separate authorization method: an origin-bound Bearer grant allows the paired WebUI to use the service without a password cookie. It cannot access password endpoints or manage other pairing grants. When password protection is enabled, the same-origin WebUI must log in before managing pairing codes or connections.
 
 <Callout title="One package, one launcher">
   `macaron-artifacts` is the only package and CLI. Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are selected inside the app. OpenClaw metadata enrichment requires the Macaron metadata-gate plugin and fails closed without it.
@@ -72,6 +96,9 @@ macaron-artifacts --help
 | Variable | Purpose |
 | --- | --- |
 | `MACARON_PORT` | UI and API port, default `43860` |
+| `MACARON_HOST` | Listen address, default `127.0.0.1`; also accepted as `--host` |
+| `MACARON_PASSWORD` | Shared service password; required for non-loopback listening or public origins |
+| `MACARON_PUBLIC_ORIGIN` | Exact browser origin behind a reverse proxy, for example `https://artifacts.example.com` |
 | `MACARON_DATA_DIR` | Conversation storage, default `~/.macaron-artifacts/sessions` |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |
@@ -86,7 +113,7 @@ macaron-artifacts --help
 
 For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Environment variables set only inside a shell alias do not reach a separately launched app.
 
-The API binds to loopback and accepts same-origin browser requests. Generated React runs in the host page; use it with trusted local code.
+The API binds to loopback by default and accepts same-origin browser requests. A configured password protects the API even on loopback. Generated React runs in the host page; use it with trusted code.
 
 ## Update
 

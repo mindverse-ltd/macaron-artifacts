@@ -1,6 +1,6 @@
 ---
 title: Server
-description: The local Node server that owns sessions, Profiles, pairing, artifacts, and native harness turns.
+description: The Node server that owns sessions, Profiles, password access, pairing, artifacts, and native harness turns.
 ---
 
 `createArtifactsServer` in `artifacts/src/server/index.ts` creates the single local HTTP server. The default launcher binds the UI and API to `127.0.0.1:43860`; development uses a separate Vite port and production serves the built WebUI from the same process.
@@ -13,7 +13,8 @@ description: The local Node server that owns sessions, Profiles, pairing, artifa
 - `ProfileStore` keeps private credentials and harness configuration locally, returns only redacted public settings, and resolves configuration at turn start.
 - `MetadataTasks` generates titles and follow-up suggestions on disposable native branches after the main response.
 - `ArtifactObserver` watches `.artifacts` files and serves Canvas source and relative modules inside the selected workspace.
-- `PairingManager` issues one-time hosted-WebUI grants while keeping the native API loopback-only.
+- Password sessions protect service access when `MACARON_PASSWORD` is set, including requests received on loopback.
+- `PairingManager` issues one-time, origin-bound hosted-WebUI grants independently of password sessions.
 
 ## Request flow
 
@@ -21,8 +22,14 @@ The browser uses JSON endpoints for sessions, Profiles, harness discovery, artif
 
 Every turn captures its resolved Profile before the first native call. Editing a Profile takes effect on the next turn; the current turn and its metadata fork retain the captured configuration. Session-level model overrides affect only that conversation.
 
-## Pairing and security
+## Password access and pairing
 
-The server accepts same-origin local requests on loopback. `--pair` enables a hosted WebUI origin to claim a short-lived, one-time code and receive an origin-bound Bearer grant. Pairing does not expose an arbitrary remote bind; for an SSH host, forward the loopback port with OpenSSH and pair the forwarded address.
+The default server accepts same-origin local requests on loopback without a password. `MACARON_PASSWORD` enables a login gate for the API, streams, and workspace files on every interface. A non-loopback `--host`/`MACARON_HOST` or `MACARON_PUBLIC_ORIGIN` requires a non-empty password before the server starts.
+
+`GET /api/auth` reports whether password protection is enabled and the browser is authenticated. `POST /api/auth/login` accepts the password and creates a 24-hour HttpOnly, SameSite=Strict cookie. Invalid passwords return 401; rate-limited attempts return 429 with `Retry-After`. `POST /api/auth/logout` revokes that session and closes its event streams. Sessions are held in memory and are invalidated by server restart. `/api/health` remains public and returns only a health flag.
+
+`MACARON_PUBLIC_ORIGIN` fixes the browser origin for a reverse proxy, which must preserve its `Host` header. The server does not trust `X-Forwarded-*` headers; HTTPS public origins use Secure cookies. Otherwise, use an SSH loopback tunnel for remote access or HTTPS for a network-facing deployment. Authentication does not encrypt HTTP traffic.
+
+`--pair` enables an allowed hosted WebUI origin to claim a short-lived, one-time code and receive an origin-bound Bearer grant. That grant authorizes its API connection independently of the password. Password endpoints and pairing management remain same-origin; paired clients cannot manage other grants. When password protection is enabled, pairing management also requires a password session. An SSH host can keep its loopback bind and pair through an OpenSSH forwarded address.
 
 Generated React is trusted local code. File capabilities are restricted to `.artifacts` below the selected workspace, with path normalization and symlink checks. Credentials stay in the local Profile store and never enter browser preferences, conversation files, or stream journals.

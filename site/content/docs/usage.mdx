@@ -26,7 +26,7 @@ Open [http://127.0.0.1:43860](http://127.0.0.1:43860). The commands are pinned t
 
 ### Password protection and remote access
 
-On the machine running your coding agents, read a password without echoing it or adding it to shell history:
+Use `MACARON_PASSWORD` or `--password` on the machine running your coding agents. To read a password without echoing it or adding it to shell history:
 
 ```sh
 printf 'Artifacts password: '
@@ -36,6 +36,8 @@ export MACARON_PASSWORD
 macaron-artifacts
 ```
 
+You can also run `macaron-artifacts --password "$MACARON_PASSWORD"`. CLI passwords can appear in shell history and process arguments.
+
 For an SSH machine, run this command on your computer, then open `http://127.0.0.1:43860` and enter the password:
 
 ```sh
@@ -44,7 +46,7 @@ ssh -N -L 43860:127.0.0.1:43860 user@host
 
 The agents, their credentials, and workspace files stay on the server. A configured password applies to loopback access too. Without one, the default local-only launch behaves as before. Login lasts 24 hours in an HttpOnly, SameSite=Strict cookie; signing out or restarting the server invalidates it. The shared password grants access to the whole service, including all conversations, workspaces, and Profile settings.
 
-For direct access through an HTTPS reverse proxy, set `MACARON_PUBLIC_ORIGIN=https://artifacts.example.com`, proxy to `127.0.0.1:43860`, and preserve the browser's `Host` header. The server ignores `X-Forwarded-*` headers for trust and uses Secure cookies for that HTTPS origin. If the backend needs to listen on a network interface, use `--host 0.0.0.0` or `MACARON_HOST`. A non-loopback listen address or public origin requires a non-empty password. Use HTTPS or SSH forwarding to encrypt the connection; password protection alone does not encrypt HTTP.
+For direct access through an HTTPS reverse proxy, pass `--public-origin https://artifacts.example.com` or set `MACARON_PUBLIC_ORIGIN=https://artifacts.example.com`, proxy to `127.0.0.1:43860`, and preserve the browser's `Host` header. The server ignores `X-Forwarded-*` headers for trust and uses Secure cookies for that HTTPS origin. If the backend needs to listen on a network interface, use `--host 0.0.0.0` or `MACARON_HOST`. A non-loopback listen address or public origin requires a non-empty password. Use HTTPS or SSH forwarding to encrypt the connection; password protection alone does not encrypt HTTP.
 
 ### Connect from the website
 
@@ -93,12 +95,14 @@ macaron-artifacts --port 43860 --data-dir /path/to/session-data
 macaron-artifacts --help
 ```
 
+CLI options override their environment variables.
+
 | Variable | Purpose |
 | --- | --- |
 | `MACARON_PORT` | UI and API port, default `43860` |
 | `MACARON_HOST` | Listen address, default `127.0.0.1`; also accepted as `--host` |
-| `MACARON_PASSWORD` | Shared service password; required for non-loopback listening or public origins |
-| `MACARON_PUBLIC_ORIGIN` | Exact browser origin behind a reverse proxy, for example `https://artifacts.example.com` |
+| `MACARON_PASSWORD` | Shared service password; also accepted as `--password`; required for non-loopback listening or public origins |
+| `MACARON_PUBLIC_ORIGIN` | Exact browser origin behind a reverse proxy, for example `https://artifacts.example.com`; also accepted as `--public-origin` |
 | `MACARON_DATA_DIR` | Conversation storage, default `~/.macaron-artifacts/sessions` |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |

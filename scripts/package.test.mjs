@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -60,7 +61,7 @@ async function start(bin, consumer, env, dataDirectory, args = []) {
     try {
       const deadline = Date.now() + 20_000;
       while (!exited && !spawnError && Date.now() < deadline) {
-        const health = output.includes(`:${port}`) ? await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) }).catch(() => undefined) : undefined;
+        const health = output.includes('Macaron Artifacts:') ? await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) }).catch(() => undefined) : undefined;
         if (health?.ok && (await health.json()).ok === true) return { base, stop };
         await delay(50);
       }
@@ -127,7 +128,7 @@ test('the single published package installs in isolation and serves six harnesse
   for (const legacy of ['mcc', 'mcx', 'mkx']) await assert.rejects(access(join(consumer, 'node_modules', '.bin', legacy)), { code: 'ENOENT' });
   const help = await run(process.execPath, [bin, '--help'], consumer, env);
   assert.match(help, /Usage: macaron-artifacts/); assert.match(help, /Claude Code.*Codex.*OpenCode.*pi/);
-  for (const option of ['--host', 'MACARON_HOST', 'MACARON_PASSWORD', 'MACARON_PUBLIC_ORIGIN']) assert.ok(help.includes(option), `Installed launcher must document ${option}`);
+  for (const option of ['--host', '--password', '--public-origin', 'MACARON_HOST', 'MACARON_PASSWORD', 'MACARON_PUBLIC_ORIGIN']) assert.ok(help.includes(option), `Installed launcher must document ${option}`);
 
   // CLI availability uses --version stubs; pi availability only imports its bundled
   // SDK. Creating app sessions below does not start a native turn or call a provider.
@@ -192,7 +193,16 @@ test('the single published package installs in isolation and serves six harnesse
   assert.equal(relogin.status, 200);
   const previousCookie = relogin.headers.get('set-cookie').split(';', 1)[0];
   await app.stop(); app = undefined;
-  app = await start(bin, consumer, protectedEnv, protectedData);
+  const cliPassword = 'CLI password with spaces 中文';
+  app = await start(bin, consumer, { ...protectedEnv, MACARON_PUBLIC_ORIGIN: 'https://ignored.example' }, protectedData, ['--password', cliPassword, '--public-origin', 'https://artifacts.example']);
   assert.equal((await fetch(`${app.base}/api/sessions`, { headers: { cookie: previousCookie } })).status, 401, 'Restart must invalidate existing browser sessions');
-  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, six harnesses, OpenCode/pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files, password login/logout, restart invalidation, required remote password`);
+  assert.equal((await login(protectedEnv.MACARON_PASSWORD)).status, 401, 'The command-line password must override the environment');
+  // Node fetch rewrites Host, so use http.request to reproduce a proxy preserving the browser's Host.
+  const proxyLogin = await new Promise((resolveLogin, reject) => {
+    const req = request(`${app.base}/api/auth/login`, { method: 'POST', headers: { host: 'artifacts.example', origin: 'https://artifacts.example', 'content-type': 'application/json' } }, res => { res.resume(); res.once('end', () => resolveLogin(res)); });
+    req.on('error', reject); req.end(JSON.stringify({ password: cliPassword }));
+  });
+  assert.equal(proxyLogin.statusCode, 200, 'The command-line public origin must override the environment');
+  assert.match(proxyLogin.headers['set-cookie'][0], /; Secure/);
+  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, six harnesses, OpenCode/pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files, password login/logout, restart invalidation, required remote password, CLI/environment precedence`);
 });

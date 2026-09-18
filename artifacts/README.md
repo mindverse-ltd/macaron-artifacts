@@ -10,15 +10,15 @@ The only published package and CLI is `macaron-artifacts`. Choose Claude Code, C
 bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
-Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port`, `--data-dir`, `--host`, and `--pair`.
+Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`; CLI options override their environment variables.
 
 ## Password protection and remote access
 
-Set `MACARON_PASSWORD` to require a shared password before accessing sessions, Profiles, streams, or workspace files. The login screen uses an HttpOnly, SameSite=Strict cookie that expires after 24 hours; restarting the server or logging out invalidates that login. The password grants access to the whole service, not an individual workspace or user account. An unset password preserves the default local behavior.
+Set `MACARON_PASSWORD` or pass `--password` to require a shared password before accessing sessions, Profiles, streams, or workspace files. The login screen uses an HttpOnly, SameSite=Strict cookie that expires after 24 hours; restarting the server or logging out invalidates that login. The password grants access to the whole service, not an individual workspace or user account. An unset password preserves the default local behavior. CLI passwords can appear in shell history and process arguments.
 
-For an SSH machine, start the server there with the password in its environment, then use `ssh -N -L 43860:127.0.0.1:43860 user@host` on your computer and open `http://127.0.0.1:43860`. Loopback access still requires the configured password. See the [root guide](../README.md#password-protection-and-remote-access) for a hidden-input shell example.
+For an SSH machine, start the server there with a configured password, then use `ssh -N -L 43860:127.0.0.1:43860 user@host` on your computer and open `http://127.0.0.1:43860`. Loopback access still requires the configured password. See the [root guide](../README.md#password-protection-and-remote-access) for hidden-input environment and CLI examples.
 
-`--host` or `MACARON_HOST` changes the default `127.0.0.1` bind. Non-loopback listening requires a non-empty `MACARON_PASSWORD`. For an HTTPS reverse proxy, set `MACARON_PUBLIC_ORIGIN` to the exact browser origin and preserve its `Host` header; a non-loopback public origin requires a password even when the backend binds to loopback. The server does not infer trust from `X-Forwarded-*` headers. HTTPS public origins use Secure cookies. Use HTTPS or SSH forwarding to keep the password and session traffic encrypted.
+`--host` or `MACARON_HOST` changes the default `127.0.0.1` bind. Non-loopback listening requires a non-empty password. For an HTTPS reverse proxy, use `--public-origin` or `MACARON_PUBLIC_ORIGIN` for the exact browser origin and preserve its `Host` header; a non-loopback public origin requires a password even when the backend binds to loopback. The server does not infer trust from `X-Forwarded-*` headers. HTTPS public origins use Secure cookies. Use HTTPS or SSH forwarding to keep the password and session traffic encrypted.
 
 `--pair` remains available for the hosted WebUI. Its origin-bound Bearer grants authorize the paired connection independently of the password, but do not authorize password endpoints or management of pairing grants. Password login and pairing administration remain same-origin operations.
 

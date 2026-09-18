@@ -18,7 +18,8 @@ export function conversationParts(parts: ChatMessage['parts'], streaming: boolea
       : [];
     if (part.type === 'reasoning') {
       const run = reasoningRunAt(parts, index);
-      return run && (run.some(item => item.text.trim()) || streaming && index + run.length === parts.length) ? [{ part, index }] : [];
+      // A start event alone is not a visible block: its placeholder would disappear and merge tool groups if no text follows.
+      return run?.some(item => item.text.trim()) ? [{ part, index }] : [];
     }
     if (isToolPart(part) || part.type === 'data-approval' || part.type === 'text' && part.text.trim() || part.type === 'file' && part.mediaType.startsWith('image/')) return [{ part, index }];
     return [];

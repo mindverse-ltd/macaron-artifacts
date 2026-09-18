@@ -77,4 +77,13 @@ describe('conversation parts', () => {
     expect(groupToolEntries(result.entries).map(group => group.kind)).toEqual(['tools', 'part', 'tools']);
     expect(result.entries[1].part).toBe(approval);
   });
+
+  test('empty reasoning never introduces a temporary boundary between tools', () => {
+    const first = tool('first'), second = tool('second'), empty: Part = { type: 'reasoning', text: '', state: 'streaming' };
+    expect(conversationParts([first, empty], true).entries).toEqual([{ part: first, index: 0 }]);
+    const complete = groupToolEntries(conversationParts([first, { ...empty, state: 'done' }, second], true).entries);
+    expect(complete).toHaveLength(1);
+    expect(complete[0]).toMatchObject({ kind: 'tools', parts: [first, second], index: 0 });
+    expect(groupToolEntries(conversationParts([first, { ...empty, text: 'Check the next source.' }, second], true).entries).map(row => row.kind)).toEqual(['tools', 'part', 'tools']);
+  });
 });

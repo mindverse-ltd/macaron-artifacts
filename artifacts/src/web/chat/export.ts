@@ -5,6 +5,8 @@ import { defaultUrlTransform } from 'streamdown';
 
 export async function chatHtml(transcript: HTMLElement, title: string): Promise<string> {
   const output = snapshotDocument(transcript, title, 'chat');
+  // A snapshot has no running collapse animation to release its temporary height reservation.
+  for (const disclosure of output.querySelectorAll<HTMLElement>('.reasoning-disclosure')) if (!disclosure.closest('.ui4a-surface')) disclosure.style.removeProperty('min-height');
   for (const wrapper of output.querySelectorAll<HTMLElement>('[data-export-link]')) {
     const button = wrapper.querySelector('button[data-streamdown="link"]');
     if (!button) continue;

@@ -11,6 +11,7 @@ import { Icon } from '../Icon';
 import { STREAMING_ANIMATION, StreamingSpan } from './streaming-animation';
 import { analyzeReasoning } from './reasoning-model';
 import { useReasoningScroll } from './useReasoningScroll';
+import { useReasoningCollapse } from './useReasoningCollapse';
 import { exportRehypePlugins } from '../../chat/export-links';
 import './Reasoning.css';
 
@@ -36,6 +37,7 @@ function ReasoningView({ presentation, active, historyOpen, superseded }: { pres
   const contentKey = `${historyOpen}:${visible.map(entry => `${entry.key}:${entry.text}`).join('\n')}`;
   const { viewport, content, following, overflowing, resume } = useReasoningScroll(contentKey, active && !historyOpen);
   const [multiline, setMultiline] = useState(false), [userOpen, setUserOpen] = useState<boolean | null>(null), [inspecting, setInspecting] = useState(false);
+  const [initiallySuperseded] = useState(superseded);
   useLayoutEffect(() => {
     const body = content.current, panel = viewport.current?.parentElement;
     if (!body || !panel) return;
@@ -49,6 +51,8 @@ function ReasoningView({ presentation, active, historyOpen, superseded }: { pres
     return () => observer.disconnect();
   }, [content, viewport]);
   const collapsible = superseded && !active && multiline, collapsed = collapsible && (userOpen === false || (userOpen === null && !historyOpen && !inspecting));
+  // Backfilled history was never visibly expanded; only animate a live block handing off to its successor.
+  const { disclosure, minHeight } = useReasoningCollapse(collapsed, userOpen === null && !initiallySuperseded);
   useLayoutEffect(() => {
     const panel = viewport.current?.parentElement;
     if (!panel || collapsed || userOpen !== null) return;
@@ -62,7 +66,7 @@ function ReasoningView({ presentation, active, historyOpen, superseded }: { pres
     return () => { panel.removeEventListener('focusin', inspect); panel.removeEventListener('focusout', inspect); document.removeEventListener('selectionchange', inspect); };
   }, [collapsed, userOpen, viewport]);
   const preview = entries.at(-1)?.text.split('\n').find(line => line.trim())?.replace(/^\s*(?:#{1,6}\s+|\*\*|__|>\s*)|(?:\*\*|__)\s*$/g, '').trim() || '思考过程';
-  return <details className="reasoning-disclosure" open={!collapsed}>
+  return <details ref={disclosure} className="reasoning-disclosure" open={!collapsed} style={{ minHeight }}>
     {/* Native details also works in downloaded transcripts; the full Markdown and its scroll controller stay mounted. */}
     <summary hidden={!collapsible} className="reasoning-summary" aria-controls={`${regionId}-panel`} onClick={event => { event.preventDefault(); event.currentTarget.focus(); setUserOpen(collapsed); }}><Icon name="chevronDown" className="reasoning-action-icon" /><span className="reasoning-summary-label">思考过程</span><span className="reasoning-summary-preview">{preview}</span></summary>
     <div id={`${regionId}-panel`} className="reasoning-main">

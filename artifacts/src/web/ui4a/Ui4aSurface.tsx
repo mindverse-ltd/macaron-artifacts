@@ -55,6 +55,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
   const [error, setError] = useState<string | null>(null);
   const [painted, setPainted] = useState(false);
   const [settled, setSettled] = useState(false);
+  const [handoffHeight, setHandoffHeight] = useState(0);
   const send = useEffectEvent((text: string) => { if (!onSend) throw new Error("This preview cannot send messages"); onSend(text); });
   const report = useEffectEvent((problem: unknown) => {
     if (latest.current.streaming) return;
@@ -67,7 +68,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     latest.current = { source, streaming, partial, filename, revision };
     setError(null);
     setSettled(false);
-    if (!source.trim()) setPainted(false);
+    if (!source.trim()) { setPainted(false); setHandoffHeight(0); }
     delivery.current?.update(latest.current);
     void styles.current?.update(source, streaming);
   }, [source, streaming, partial, filename, revision]);
@@ -79,7 +80,11 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     const check = () => {
       frame = 0;
       // A successful compile can still return an empty function while its JSX is arriving.
-      if (hasVisibleContent(target)) { observer.disconnect(); resize.disconnect(); setPainted(true); }
+      if (hasVisibleContent(target)) {
+        // The first valid prefix may paint only one button. Keep the source's space while the rest arrives, or the browser clamps the chat's scroll position upward.
+        setHandoffHeight(sourceLayout === 'bounded' && latest.current.streaming ? target.parentElement?.getBoundingClientRect().height ?? 0 : 0);
+        observer.disconnect(); resize.disconnect(); setPainted(true);
+      }
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(check); };
     const observer = new MutationObserver(schedule), resize = new ResizeObserver(schedule);
@@ -87,7 +92,14 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     resize.observe(target);
     schedule();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); resize.disconnect(); };
-  }, [painted, sessionId, scope, filename]);
+  }, [painted, sessionId, scope, filename, sourceLayout]);
+
+  useEffect(() => {
+    if (streaming || (!settled && !error)) return;
+    // Release the temporary floor after the terminal layout commits; small final UIs shrink smoothly instead of retaining empty source space.
+    const frame = requestAnimationFrame(() => setHandoffHeight(0));
+    return () => cancelAnimationFrame(frame);
+  }, [streaming, settled, error]);
 
   useEffect(() => {
     const target = host.current;
@@ -95,6 +107,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     let disposed = false;
     setPainted(false);
     setSettled(false);
+    setHandoffHeight(0);
     let renderer: GenUIRenderer | null = null;
     let surfaceDelivery: SurfaceDelivery | null = null;
     let compilingSource: string | undefined, readySource: string | undefined;
@@ -135,7 +148,7 @@ export function Ui4aSurface({ source, streaming, partial, scope, sessionId, file
     };
   }, [sessionId, scope, filename]);
 
-  return <div className={UI4A_CLASS} data-ui4a-ready={painted && settled && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0, position: "relative" }}>
+  return <div className={UI4A_CLASS} data-ui4a-ready={painted && settled && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0, position: "relative", minHeight: handoffHeight, transition: streaming ? undefined : "min-height 320ms cubic-bezier(0.32,0.72,0,1)" }}>
     {/* Measure the first real UI without briefly stacking its height on top of the source fallback. */}
     <div ref={host} data-ui4a-render-host="" inert={!painted} style={painted ? undefined : { position: "absolute", insetInline: 0, top: 0, opacity: 0, pointerEvents: "none" }} />
     {/* Inline source stays bounded; Canvas owns its viewport and follows the full source with the shared spring. */}

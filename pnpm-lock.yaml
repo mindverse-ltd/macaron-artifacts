@@ -207,8 +207,8 @@ importers:
         specifier: 0.1.7
         version: 0.1.7
       partial-react:
-        specifier: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-react@5426bcf7bd2eaf8b08038c807ee002de0ef74971
-        version: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-react@5426bcf7bd2eaf8b08038c807ee002de0ef74971(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 0.0.7
+        version: 0.0.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -3015,16 +3015,14 @@ packages:
   partial-json@0.1.7:
     resolution: {integrity: sha512-Njv/59hHaokb/hRUjce3Hdv12wd60MtM9Z5Olmn+nehe0QDAsRtRbJPvJ0Z91TusF0SuZRIvnM+S4l6EIP8leA==}
 
-  partial-react@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-react@5426bcf7bd2eaf8b08038c807ee002de0ef74971:
-    resolution: {integrity: sha512-XI/+PAL5udyeaOBAAXbrDzrkEJKJurhUTF3Vla7lHOJbsO3NnrFcm68/O34Tvxwi4kHRjJkl4Qeh1qX7XQOvAg==, tarball: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-react@5426bcf7bd2eaf8b08038c807ee002de0ef74971}
-    version: 0.0.6
+  partial-react@0.0.7:
+    resolution: {integrity: sha512-7YJ8yWA8GdYBe82atjO/XHe9j5eP2yhm5k3AgN/y1lpLyusVtEMLN3oVMeYlrdKpvTqpzRWfGCivyUsKKajLlw==}
     peerDependencies:
       react: ^18.3.0 || ^19.0.0
       react-dom: ^18.3.0 || ^19.0.0
 
-  partial-tsx@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@5426bcf7bd2eaf8b08038c807ee002de0ef74971:
-    resolution: {integrity: sha512-u3RgXsXyP9aGyTbPvSeBD3nC0v3zZZyIj/Jj0M0k/xlqpRD61znzJ2C/FzZGhA1ele272tsLDJMZUtHyftcVeA==, tarball: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@5426bcf7bd2eaf8b08038c807ee002de0ef74971}
-    version: 0.0.3
+  partial-tsx@0.0.4:
+    resolution: {integrity: sha512-ccwUCknYRAEc+sEbrWJvEc1JgrShnbehhhfE/LVG+zRSxPr4AqNZFbA6W8ACL2GqJiuE0BiOlislCHWbGPTZ5Q==}
 
   path-data-parser@0.1.0:
     resolution: {integrity: sha512-NOnmBpt5Y2RWbuv0LMzsayp3lVylAHLPUTut412ZA3l+C4uw4ZVkQbjShYCQ8TCpUMdPapr4YjUqLYD6v68j+w==}
@@ -6711,14 +6709,14 @@ snapshots:
 
   partial-json@0.1.7: {}
 
-  partial-react@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-react@5426bcf7bd2eaf8b08038c807ee002de0ef74971(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  partial-react@0.0.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@esm.sh/tsx': 1.5.3
-      partial-tsx: https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@5426bcf7bd2eaf8b08038c807ee002de0ef74971
+      partial-tsx: 0.0.4
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  partial-tsx@https://pkg.pr.new/MindLab-Research/macaron-genui-demo/partial-tsx@5426bcf7bd2eaf8b08038c807ee002de0ef74971: {}
+  partial-tsx@0.0.4: {}
 
   path-data-parser@0.1.0: {}
 

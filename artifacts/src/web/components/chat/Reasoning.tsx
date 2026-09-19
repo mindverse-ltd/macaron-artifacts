@@ -58,7 +58,6 @@ function ReasoningView({ presentation, active, historyOpen }: { presentation: Re
   }, [entries, kind, active, historyOpen, arrivals, content]);
   useEffect(() => () => arrival.current?.cancel(), []);
   return <>
-    <div className="reasoning-indicator" aria-hidden="true" />
     <div className="reasoning-main">
       <span className="reasoning-sr-only" role="status">{active ? '正在思考' : ''}</span>
       <div id={regionId} ref={viewport} className="reasoning-viewport" role="region" aria-label={kind === 'summary' ? '思考摘要' : '思考过程'} tabIndex={overflowing ? 0 : undefined}>

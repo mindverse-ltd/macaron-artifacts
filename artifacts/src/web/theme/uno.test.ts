@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createGenerator } from '@unocss/core';
 import { readFile } from 'node:fs/promises';
 import { unoConfig } from './uno';
+import { themePalette } from './palette';
 
 test('Wind4 owns the shell reset and scoped surfaces inherit it', async () => {
   const shell = await createGenerator(unoConfig());
@@ -31,6 +32,16 @@ test('workbench color contexts and their interactive states stay scoped in gener
   for (const role of ['sidebar', 'titlebar', 'widget', 'menu', 'panel', 'code']) expect(css).toContain(`.ui4a-surface :is(.theme-${role})`);
   expect(css).toContain('--input-bg:var(--widget-input-bg)');
   expect(css).toContain('--hover-fg:var(--menu-hover-fg)');
+  for (const role of ['sidebar', 'titlebar', 'widget', 'menu', 'panel']) expect(css).toContain(`--dropdown-border-rest:var(--${role}-dropdown-border-rest)`);
+});
+
+test('Playground defines every palette token cleared when leaving a native theme', async () => {
+  const css = await readFile(new URL('./tokens.css', import.meta.url), 'utf8');
+  const defaults = new Set([...css.matchAll(/--([\w-]+)\s*:/g)].map(match => match[1]));
+  // applyTheme keeps success/warn inline; every other token must survive their removal.
+  for (const key of Object.keys(themePalette({ name: 'fallback', type: 'light', colors: {} }, false))) {
+    if (!['success', 'warn'].includes(key)) expect(defaults.has(key), key).toBe(true);
+  }
 });
 
 test('Headless UI form states compile into Wind4 utilities', async () => {

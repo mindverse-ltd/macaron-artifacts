@@ -12,6 +12,17 @@ test('Wind4 owns the shell reset and scoped surfaces inherit it', async () => {
   for (const token of ['outline-none', 'ring-2', 'animate-in', 'fade-in']) expect(result.css).toContain(`.ui4a-surface :is(.${token})`);
 });
 
+test.each([['shell', undefined], ['UI4A', '.ui4a-surface']] as const)('%s theme variants follow the data-theme attribute', async (_, scope) => {
+  const generator = await createGenerator(unoConfig(scope));
+  const { css, matched } = await generator.generate('dark:bg-accent light:bg-surface dark:hover:text-accent-fg', { preflights: false });
+  expect(matched.size).toBe(3);
+  for (const selector of ['[data-theme="dark"] .dark\\:bg-accent', '[data-theme="light"] .light\\:bg-surface', '[data-theme="dark"] .dark\\:hover\\:text-accent-fg:hover']) {
+    expect(css).toContain(scope ? `${scope} :is(${selector})` : selector);
+  }
+  expect(css).not.toMatch(/(?:\.dark|\.light)\s+\./);
+  expect(css).not.toContain('prefers-color-scheme');
+});
+
 test('late streaming utilities include their Wind4 theme and ring dependencies', async () => {
   const surface = await createGenerator(unoConfig('.ui4a-surface'));
   await surface.generate('p-2');

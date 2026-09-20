@@ -28,7 +28,7 @@ const METADATA_SESSION_PREFIX = 'macaron-metadata:';
 
 function options(turn: HarnessTurn, onEvent: (event: GatewayEvent) => void, onError: (error: Error) => void): GatewayOptions {
   const profile = turn.profile, url = profile?.config.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789', token = profile?.authToken || process.env.OPENCLAW_GATEWAY_TOKEN;
-  return { url, ...(token ? { token } : {}), clientName: 'gateway-client', clientDisplayName: 'Macaron Artifacts', clientVersion: '0.1.0', platform: process.platform, mode: 'backend', role: 'operator', scopes: ['operator.read', 'operator.write', 'operator.approvals'], minProtocol: 4, maxProtocol: 4, onEvent, onConnectError: onError };
+  return { url, ...(token ? { token } : {}), clientName: 'gateway-client', clientDisplayName: 'Macaron Artifacts', clientVersion: '0.1.0', platform: process.platform, mode: 'backend', role: 'operator', scopes: ['operator.read', 'operator.write', 'operator.approvals'], caps: ['tool-events'], minProtocol: 4, maxProtocol: 4, onEvent, onConnectError: onError };
 }
 
 const selectedAgent = (turn: HarnessTurn) => turn.profile?.config.agent || turn.profile?.config.nativeProfile;
@@ -68,7 +68,8 @@ async function createClient(turn: HarnessTurn, queue: EventQueue<ChatChunk>, ses
     if (event.event === 'exec.approval.requested') { if (!sid && !rid) return; const request = record(p.request), approvalId = string(p.id || p.approvalId); void approve({ id: approvalId, tool: string(request.command || request.tool || 'exec'), input: request }).then(ok => client?.request('exec.approval.resolve', { id: approvalId, decision: ok ? 'allow-once' : 'deny' })).catch(onError); return; }
     const data = record(p.data || p), stream = string(p.stream || event.event), phase = string(data.phase || data.state || data.type || p.state || p.phase);
     if (stream === 'assistant' || /assistant|message/i.test(stream)) emitSnapshot(data, state, queue); else if (stream === 'tool' || /tool/i.test(stream)) emitTool(data, state, queue);
-    if (['final', 'done', 'aborted', 'error'].includes(phase) || /complete|end/i.test(phase)) { if (state.textId) queue.push({ type: 'text-end', id: state.textId }); if (state.thoughtId) queue.push({ type: 'reasoning-end', id: state.thoughtId }); queue.end(); }
+    // Tool items and compaction also emit "end"; only a run terminal can finish the assistant turn.
+    if ((stream === 'lifecycle' && ['end', 'error'].includes(phase)) || (event.event === 'chat' && ['final', 'aborted', 'error'].includes(phase))) { if (state.textId) queue.push({ type: 'text-end', id: state.textId }); if (state.thoughtId) queue.push({ type: 'reasoning-end', id: state.thoughtId }); if (phase === 'error') queue.fail(new Error(safeError(data.error || data.errorMessage || 'OpenClaw run failed'))); else queue.end(); }
   };
   const clientOptions = options(turn, onEvent, onError);
   clientOptions.onClose = (_code, reason) => { if (reason) queue.fail(new Error(`OpenClaw Gateway closed: ${reason}`)); };
@@ -100,6 +101,6 @@ export const openClawAdapter: HarnessAdapter = {
       yield* queue;
       await producer;
     } catch (error) { queue.fail(signal.aborted ? abortError() : new Error(safeError(error))); yield* queue; }
-    finally { turn.signal.removeEventListener('abort', abort); controller.abort(); if (client && active && turn.enrichment) await client.request('sessions.delete', { key: active.key, deleteTranscript: true, archivedOnly: false }).catch(() => {}); await client?.stopAndWait({ timeoutMs: 1_000 }).catch(() => client?.stop()); }
+    finally { turn.signal.removeEventListener('abort', abort); controller.abort(); if (client && active && turn.enrichment) { const key = active.key, expectedSessionId = active.id; /* Deleting only archived forks stays within operator.write instead of requiring admin. */ await client.request('sessions.patch', { key, expectedSessionId, archived: true }).then(() => client!.request('sessions.delete', { key, expectedSessionId, deleteTranscript: true, archivedOnly: true })).catch(error => console.warn(`OpenClaw metadata fork cleanup failed: ${safeError(error)}`)); } await client?.stopAndWait({ timeoutMs: 1_000 }).catch(() => client?.stop()); }
   },
 };

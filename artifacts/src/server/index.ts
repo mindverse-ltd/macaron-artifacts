@@ -18,7 +18,7 @@ import { PairingManager, bearerToken, type PairingGrant, type PairingOptions } f
 import { AccessPolicy, PasswordAuth, type PasswordSession } from './auth.js';
 import { ConnectionInputError, connectionActionable, redactConnection, validateConnectionResponse } from './connections.js';
 import type { ConnectionControls } from './harnesses/types.js';
-import { expandPromptReferences, searchWorkspaceFiles } from './prompt-references.js';
+import { resolvePromptReferences, searchWorkspaceFiles } from './prompt-references.js';
 
 export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions; host?: string; password?: string; publicOrigin?: string }) {
   const access = new AccessPolicy(options), auth = await PasswordAuth.create(options.password);
@@ -290,9 +290,13 @@ export async function createArtifactsServer(options: { directory: string; instru
         try {
           // null records an explicit switch back to native defaults; absent IDs preserve legacy session behavior.
           const profile = await profiles.resolve(session.profileId, session.harness, session.cwd);
-          const prompt = retry ? rawPrompt : await expandPromptReferences(session.cwd, rawPrompt);
+          // Retry the accepted request with its original file snapshots, even if workspace files changed or disappeared.
+          const savedUser = retry ? session.messages.find(message => message.id === user.id) : undefined;
+          const reference = savedUser ? { references: savedUser.metadata?.references ?? [], context: savedUser.metadata?.referenceContext ?? '' } : await resolvePromptReferences(session.cwd, user.metadata?.references);
+          const text = savedUser ? savedUser.parts.filter(part => part.type === 'text').map(part => part.text).join('\n') : rawPrompt;
+          const prompt = text + reference.context;
           if (!retry) {
-            session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: rawPrompt }] });
+            session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: rawPrompt }], ...(reference.references.length ? { metadata: { references: reference.references, referenceContext: reference.context } } : {}) });
             if (session.messages.length === 1) session.title = rawPrompt.slice(0, 60);
           }
           session.status = 'running'; session.error = undefined; session.suggestions = []; session.updatedAt = Date.now();

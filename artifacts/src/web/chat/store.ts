@@ -15,7 +15,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
-export interface QueueItem { id: string; text: string }
+export interface QueueItem { id: string; text: string; references?: PromptReference[] }
 export interface WorkspaceSnapshot { sessions: SessionSummary[]; harnesses: HarnessInfo[]; activeId: string | null; ready: boolean; loading: boolean; error?: string; revision: number }
 const ACTIVE_KEY = 'macaron-artifacts:active-session';
 const LAST_CWD = 'macaron-artifacts:last-cwd';
@@ -211,13 +211,13 @@ export class WorkspaceStore {
     if (this.snapshot.activeId) await this.select(this.snapshot.activeId);
   };
 
-  send = (id: string, text: string) => {
+  send = (id: string, text: string, references: PromptReference[] = []) => {
     if (this.disposed || !text.trim()) return;
     if (this.snapshot.sessions.find(session => session.id === id)?.providerReview) return;
     this.heldQueues.delete(id);
     this.cancelMetadata(id);
     const queue = this.queue(id);
-    this.queues.set(id, [...queue, { id: randomUUID(), text }]);
+    this.queues.set(id, [...queue, { id: randomUUID(), text, ...(references.length ? { references: references.map(reference => ({ ...reference })) } : {}) }]);
     this.publish();
     void this.drain(id);
   };
@@ -237,7 +237,7 @@ export class WorkspaceStore {
     this.seenArtifactStreams.delete(id);
     this.dismissed.delete(id);
     this.update(id, { status: 'running', suggestions: [], error: undefined });
-    try { chat.clearError(); await chat.sendMessage({ text: item.text }); }
+    try { chat.clearError(); await chat.sendMessage({ text: item.text, ...(item.references?.length ? { metadata: { references: item.references } } : {}) }); }
     catch (error) { this.fail(error); }
     finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
   }

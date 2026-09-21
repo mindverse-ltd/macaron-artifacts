@@ -3,7 +3,7 @@ import { Icon } from '../Icon';
 import { promptReferences, referenceQuery, removePromptReference, type PromptReference } from '../../../shared/prompt-references';
 
 export function PromptBar({ text, setText, search }: { text: string; setText: (text: string) => void; search(query: string): Promise<PromptReference[]> }) {
-  const query = referenceQuery(text), [options, setOptions] = useState<PromptReference[]>([]), generation = useRef(0), listId = useId();
+  const match = referenceQuery(text), query = match?.query ?? null, [options, setOptions] = useState<PromptReference[]>([]), generation = useRef(0), listId = useId();
   useEffect(() => { if (query === null) { setOptions([]); return; } const current = ++generation.current; void search(query).then(result => { if (current === generation.current) setOptions(result); }).catch(() => { if (current === generation.current) setOptions([]); }); }, [query, search]);
   const refs = promptReferences(text);
   const choose = (path: string) => { const replaced = text.replace(/(^|\s)@[A-Za-z0-9_./-]*$/, `$1@${path} `); setText(replaced); setOptions([]); };

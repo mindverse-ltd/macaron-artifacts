@@ -31,7 +31,7 @@ test('a growing target retains velocity instead of restarting from rest', () => 
 
 test('the existing damped spring settles without overshooting', () => {
   let state = { position: 0, velocity: 0 };
-  for (let frame = 0; frame < 360; frame++) {
+  for (let frame = 0; frame < 480; frame++) {
     const next = stepTailSpring(state.position, state.velocity, 1000, 1000 / 120);
     expect(next.position).toBeGreaterThanOrEqual(state.position);
     expect(next.position).toBeLessThanOrEqual(1000);
@@ -55,7 +55,7 @@ test('starts by accelerating and settles by decelerating', () => {
 test('shortened and reversed targets remain bounded even with inherited high velocity', () => {
   for (const target of [413.394, 411.394, 412.394]) {
     let state = { position: 412.394, velocity: 4520.906 };
-    for (let frame = 0; frame < 120; frame++) {
+    for (let frame = 0; frame < 180; frame++) {
       const next = stepTailSpring(state.position, state.velocity, target, 1000 / 60);
       expect(next.position).toBeGreaterThanOrEqual(Math.min(state.position, target));
       expect(next.position).toBeLessThanOrEqual(Math.max(state.position, target));

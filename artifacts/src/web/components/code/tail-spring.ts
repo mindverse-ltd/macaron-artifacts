@@ -1,4 +1,4 @@
-const RESPONSE = 12;
+const RESPONSE = 8;
 
 /** Exact critically damped motion, with velocity bounded by remaining distance so a shortened target cannot overshoot. */
 export function stepTailSpring(position: number, velocity: number, target: number, elapsedMs: number) {

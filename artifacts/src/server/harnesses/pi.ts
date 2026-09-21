@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { Message, SystemMessage } from '@earendil-works/pi-ai';
+import { normalizeContext, toToolDeclaration } from '@earendil-works/pi-ai';
 import type { AgentSession, CreateAgentSessionOptions, ExtensionUIDialogOptions, ExtensionUIContext, FileEntry, SessionHeader, SessionManager } from '@earendil-works/pi-coding-agent';
 import type { ChatChunk } from '../../shared/types.js';
 import type { Question } from '../../shared/questions.js';
@@ -25,9 +27,37 @@ export function piQuestionUI(turn: HarnessTurn): Pick<ExtensionUIContext, 'selec
 }
 type RequestContext = Parameters<AgentSession['agent']['streamFunction']>[1];
 type PayloadPrefix = { api: string; history: string; fields: Record<string, unknown>; instructions: unknown[] };
-type Bootstrap = { version: 2; instructions: string; systemPrompt: string; tools: NonNullable<RequestContext['tools']>; payload?: PayloadPrefix };
+/**
+ * Version 3 records the transcript system messages that carry the prompt and tool
+ * declarations. Version 2 stored a flattened `systemPrompt`/`tools` pair from the
+ * pre-0.86 top-level request fields; that shape cannot express sections or mid-conversation
+ * tool evolution, so it is rejected rather than silently reinterpreted.
+ */
+type BootstrapSystem = { before: number; message: SystemMessage }[];
+type Bootstrap = { version: 3; instructions: string; system: BootstrapSystem; payload?: PayloadPrefix };
 const BOOTSTRAP = 'macaron-artifacts:pi-bootstrap';
-const toolSchemas = (tools: RequestContext['tools']): NonNullable<RequestContext['tools']> => (tools ?? []).map(tool => ({ name: tool.name, description: tool.description, parameters: JSON.parse(JSON.stringify(tool.parameters)), ...(tool.constrainedSampling !== undefined ? { constrainedSampling: structuredClone(tool.constrainedSampling) } : {}) }));
+
+/** Preserve each instruction/tool delta and its position among conversation messages. */
+export function captureBootstrapSystem(messages: readonly Message[]): BootstrapSystem {
+  let before = 0;
+  return structuredClone(messages.flatMap(message => {
+    if (message.role !== 'system') { before++; return []; }
+    return [{ before, message: { ...message, ...(message.toolsAdded ? { toolsAdded: message.toolsAdded.map(toToolDeclaration) } : {}) } }];
+  }));
+}
+
+/** Replace fork-only instructions without moving the parent's historical system deltas. */
+export function restoreBootstrapSystem(context: RequestContext, system: BootstrapSystem): RequestContext {
+  const conversation = context.messages.filter(message => message.role !== 'system'), messages: Message[] = [];
+  let offset = 0;
+  for (const entry of structuredClone(system)) {
+    if (!Number.isSafeInteger(entry.before) || entry.before < offset || entry.before > conversation.length || entry.message.role !== 'system') throw new Error('Pi metadata transcript no longer matches its parent');
+    messages.push(...conversation.slice(offset, entry.before), entry.message);
+    offset = entry.before;
+  }
+  messages.push(...conversation.slice(offset));
+  return normalizeContext({ messages });
+}
 const PREFIX_FIELDS = ['model', 'modelId', 'system', 'instructions', 'tools', 'toolConfig', 'prompt_cache_key', 'promptCacheKey', 'user', 'metadata', 'config.systemInstruction', 'config.tools', 'config.toolConfig', 'context.systemPrompt', 'context.tools', 'options.sessionId'];
 const field = (value: unknown, key: string): unknown => key.split('.').reduce<unknown>((value, key) => record(value)[key], value);
 const instruction = (value: unknown) => ['system', 'developer'].includes(String(record(value).role));
@@ -128,7 +158,12 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
       manager = sdk.SessionManager.inMemory(turn.cwd, undefined, fork.entries);
       const saved = manager.getBranch().findLast(entry => entry.type === 'custom' && entry.customType === BOOTSTRAP);
       const value = saved?.type === 'custom' ? record(saved.data) : {};
-      if (value.version !== 2 || value.instructions !== turn.instructions || typeof value.systemPrompt !== 'string' || !Array.isArray(value.tools) || !value.payload) throw new Error('Pi session is missing its matching UI4A bootstrap');
+      // A version-2 entry predates transcript system messages. Its flattened prompt/tool pair
+      // cannot reproduce sections or mid-conversation tool changes, so metadata fails closed
+      // here instead of reconstructing a prefix the parent never sent. Normal resume is
+      // unaffected: it recaptures a version-3 bootstrap from the live stream context.
+      if (value.version === 2) throw new Error('Pi session has a legacy UI4A bootstrap from an older SDK; complete a normal turn before generating metadata');
+      if (value.version !== 3 || value.instructions !== turn.instructions || !Array.isArray(value.system) || !value.payload) throw new Error('Pi session is missing its matching UI4A bootstrap');
       bootstrap = value as Bootstrap;
     } else manager = sdk.SessionManager.open(turn.nativeId);
   }
@@ -171,8 +206,11 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
     const nativeStream = current.agent.streamFunction;
     let captured: Bootstrap | undefined;
     current.agent.streamFunction = (model, context, options) => {
-      if (bootstrap) context = { ...context, systemPrompt: bootstrap.systemPrompt, tools: toolSchemas(bootstrap.tools) };
-      else captured = { version: 2, instructions: turn.instructions, systemPrompt: context.systemPrompt ?? '', tools: toolSchemas(context.tools) };
+      // The prompt and tool declarations now live in the transcript's system messages.
+      // Metadata replaces the parent's system messages in place and keeps every later
+      // non-system message, so sections and tool evolution replay exactly as they did.
+      if (bootstrap) context = restoreBootstrapSystem(context, bootstrap.system);
+      else captured = { version: 3, instructions: turn.instructions, system: captureBootstrapSystem(context.messages) };
       const previous = options?.onPayload;
       return nativeStream(model, context, { ...options, ...(bootstrap ? { transport: 'sse' as const } : {}), onPayload: async (payload, model) => {
         const changed = await previous?.(payload, model), final = changed === undefined ? payload : changed;

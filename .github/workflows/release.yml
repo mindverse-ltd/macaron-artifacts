@@ -14,7 +14,7 @@ on:
         type: boolean
         default: true
       force:
-        description: Allow replacing a conflicting public tag and mapping
+        description: Allow replacing a conflicting public tag
         required: true
         type: boolean
         default: false

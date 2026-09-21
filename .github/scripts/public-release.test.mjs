@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { LEGACY_SOURCE, NAME, PUBLIC, parseArgs, readConfiguration, release, validateMessage } from './public-release.mjs';
+import { fileURLToPath } from 'node:url';
+import { SOURCE, PUBLIC, parseArgs, release, validateMessage } from './public-release.mjs';
 
 const identity = { GIT_AUTHOR_NAME: 'mindlab-bot', GIT_AUTHOR_EMAIL: 'contact@mindlab.ltd', GIT_COMMITTER_NAME: 'mindlab-bot', GIT_COMMITTER_EMAIL: 'contact@mindlab.ltd' };
 const message = 'Add shared artifact workspaces\n\nKeep documentation and runnable examples together in the application.';
 function git(cwd, args, env = {}) {
-  const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, env: { ...process.env, ...identity, ...env }, encoding: 'utf8' });
+  const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, env: { ...process.env, ...identity, ...env }, encoding: 'utf8', timeout: 30_000 });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
@@ -19,11 +20,10 @@ async function file(root, path, text) { const full = join(root, path); await mkd
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'release-fixture-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const source = join(root, 'source'), publicWork = join(root, 'public-work'), botWork = join(root, 'bot-work');
-  for (const dir of [source, publicWork, botWork]) { await mkdir(dir); git(dir, ['init', '-q', '-b', 'main']); }
+  const source = join(root, 'source'), publicWork = join(root, 'public-work');
+  for (const dir of [source, publicWork]) { await mkdir(dir); git(dir, ['init', '-q', '-b', 'main']); }
   const content = {
     'README.md': 'workspace\n', '.github/workflows/internal.yml': 'internal', 'nested/.github/hidden': 'hidden',
-    'internal/plan.md': 'secret plan', 'internal/keep.md': 'public plan', 'private.secret': 'secret', 'visible.secret': 'keep',
     'docs/guide.md': 'guide', '.gitignore': 'ignored.txt\n', 'ignored.txt': 'tracked despite gitignore',
     '.gitattributes': 'docs/guide.md export-ignore\n', 'run.sh': '#!/bin/sh\necho example\n',
     'odd \nfile.md': 'newline filename',
@@ -36,18 +36,11 @@ async function fixture(t) {
   git(source, ['tag', '-a', 'v0.9.2', '-m', 'internal release annotation']);
   for (const [path, text] of Object.entries({ 'obsolete.txt': 'delete', '.github/old.yml': 'delete', 'internal/old.md': 'delete' })) await file(publicWork, path, text);
   git(publicWork, ['add', '.']); git(publicWork, ['commit', '-qm', 'Existing public snapshot']);
-  const config = { repositories: [{ name: NAME, private: LEGACY_SOURCE, public: PUBLIC, public_token_env: 'MINDLAB_BOT_GH_TOKEN', public_exclude: ['internal/*', '!internal/keep.md', '*.secret', '!visible.secret'] }] };
-  const mappings = '{\n  "mappings": {\n    "other": { "keep": "untouched" },\n    "macaron-artifacts": {},\n    "last": {}\n  }\n}\n';
-  await file(botWork, 'config/repositories.json', JSON.stringify(config));
-  await file(botWork, 'config/commits.json', mappings);
-  await file(botWork, 'unrelated.txt', 'keep this file');
-  git(botWork, ['add', '.']); git(botWork, ['commit', '-qm', 'Existing bot config']);
-  const publicUrl = join(root, 'public.git'), botUrl = join(root, 'bot.git');
-  git(root, ['clone', '-q', '--bare', publicWork, publicUrl]); git(root, ['clone', '-q', '--bare', botWork, botUrl]);
-  return { root, source, publicUrl, botUrl, config, mappings, publicBefore: head(publicUrl), botBefore: head(botUrl),
-    options: { sourceUrl: source, publicUrl, botUrl, tag: 'v0.9.2', message } };
+  const publicUrl = join(root, 'public.git');
+  git(root, ['clone', '-q', '--bare', publicWork, publicUrl]);
+  return { root, source, publicUrl, publicBefore: head(publicUrl), options: { sourceUrl: source, publicUrl, tag: 'v0.9.2', message } };
 }
-function allRefs(f) { return [refs(f.source), refs(f.publicUrl), refs(f.botUrl)]; }
+function allRefs(f) { return [refs(f.source), refs(f.publicUrl)]; }
 
 test('CLI defaults to dry-run, requires explicit publish, and rejects conflicting flags', () => {
   assert.equal(parseArgs(['--tag', 'v0.9.2']).dryRun, true);
@@ -87,16 +80,48 @@ test('publication preserves exact files, modes, symlinks, and only public commit
   assert.equal(git(f.publicUrl, ['show', '-s', '--format=%an <%ae>%n%cn <%ce>', 'main']), 'mindlab-bot <contact@mindlab.ltd>\nmindlab-bot <contact@mindlab.ltd>');
   assert.equal(git(f.publicUrl, ['show', '-s', '--format=%B', 'main']), message);
   const files = git(f.publicUrl, ['ls-tree', '-rz', 'main']).split('\0').filter(Boolean).map(s => s.slice(s.indexOf('\t') + 1));
-  for (const path of ['README.md', 'docs/guide.md', 'internal/keep.md', 'ignored.txt', 'visible.secret', 'odd \nfile.md']) assert.ok(files.includes(path), path);
-  for (const path of ['.github/old.yml', '.github/workflows/internal.yml', 'nested/.github/hidden', 'obsolete.txt', 'private.secret', 'internal/plan.md']) assert.ok(!files.includes(path), path);
+  for (const path of ['README.md', 'docs/guide.md', 'ignored.txt', 'odd \nfile.md']) assert.ok(files.includes(path), path);
+  for (const path of ['.github/old.yml', '.github/workflows/internal.yml', 'nested/.github/hidden', 'obsolete.txt', 'internal/old.md']) assert.ok(!files.includes(path), path);
   assert.match(git(f.publicUrl, ['ls-tree', 'main', 'run.sh']), /^100755 /);
   assert.match(git(f.publicUrl, ['ls-tree', 'main', 'guide.md']), /^120000 /);
   assert.equal(git(f.publicUrl, ['show', 'main:guide.md']), 'docs/guide.md');
-  const mapping = git(f.botUrl, ['show', 'main:config/commits.json']);
-  assert.equal(JSON.parse(mapping).mappings[NAME][published.sourceCommit], published.publicCommit);
-  assert.match(mapping, /"other": \{ "keep": "untouched" \}/);
-  assert.equal(git(f.botUrl, ['diff', '--name-only', f.botBefore, 'main']), 'config/commits.json');
   assert.equal(refs(f.source), beforeSource);
+});
+
+test('non-UTF-8 filenames cannot bypass exclusions and retained paths preserve their bytes', async t => {
+  const f = await fixture(t);
+  const rawName = Buffer.concat([Buffer.from('byte-'), Buffer.from([0xff]), Buffer.from('.txt')]);
+  for (const dir of ['.github', 'nested/.github', 'docs']) {
+    await writeFile(Buffer.concat([Buffer.from(join(f.source, dir) + '/'), rawName]), 'byte-path content');
+  }
+  git(f.source, ['add', '-f', '.']); git(f.source, ['commit', '-qm', 'Byte filenames']); git(f.source, ['tag', 'v0.9.3']);
+  const before = allRefs(f);
+  const options = { ...f.options, tag: 'v0.9.3' };
+  const preview = await release(options);
+  assert.deepEqual(allRefs(f), before);
+  const result = await release({ ...options, dryRun: false });
+  assert.equal(result.publicCommit, preview.publicCommit);
+  const listed = spawnSync('git', ['ls-tree', '-rz', result.publicCommit], { cwd: f.publicUrl, timeout: 30_000 });
+  assert.equal(listed.status, 0, listed.stderr.toString());
+  const paths = listed.stdout.toString('latin1').split('\0').filter(Boolean).map(entry => entry.slice(entry.indexOf('\t') + 1));
+  assert.ok(paths.every(path => !path.split('/').includes('.github')));
+  assert.ok(paths.includes('docs/' + rawName.toString('latin1')));
+});
+
+test('force replaces non-commit public tags while unforced and dry runs leave refs unchanged', async t => {
+  const f = await fixture(t);
+  for (const ref of ['main:obsolete.txt', 'main^{tree}']) {
+    const object = git(f.publicUrl, ['rev-parse', ref]);
+    git(f.publicUrl, ['update-ref', 'refs/tags/v0.9.2', object]);
+    const before = allRefs(f);
+    await assert.rejects(release({ ...f.options, dryRun: false }), /requires --force/);
+    await release({ ...f.options, force: true });
+    assert.deepEqual(allRefs(f), before);
+    const result = await release({ ...f.options, dryRun: false, force: true });
+    assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v0.9.2']), result.publicCommit);
+    assert.equal(git(f.publicUrl, ['cat-file', '-t', 'refs/tags/v0.9.2']), 'commit');
+    assert.equal(head(f.publicUrl), result.publicCommit);
+  }
 });
 
 test('retries are idempotent and older tags never rewind a newer public main', async t => {
@@ -135,68 +160,91 @@ test('a rejected tag cannot leave main partially published', async t => {
   await chmod(join(f.publicUrl, 'hooks/update'), 0o755);
   await assert.rejects(release({ ...f.options, dryRun: false }), /git push failed/);
   assert.deepEqual(allRefs(f), before);
-});
-
-test('mapping push failure is recoverable after the public refs are published', async t => {
-  const f = await fixture(t);
-  await file(f.botUrl, 'hooks/pre-receive', '#!/bin/sh\nexit 1\n');
-  await chmod(join(f.botUrl, 'hooks/pre-receive'), 0o755);
-  await assert.rejects(release({ ...f.options, dryRun: false }), /mapping write failed.*Rerun/s);
-  const publicRefs = refs(f.publicUrl);
-  assert.equal(head(f.botUrl), f.botBefore);
-  await rm(join(f.botUrl, 'hooks/pre-receive'));
+  await rm(join(f.publicUrl, 'hooks/update'));
   const retry = await release({ ...f.options, dryRun: false });
-  assert.equal(refs(f.publicUrl), publicRefs);
-  const mappings = JSON.parse(git(f.botUrl, ['show', 'main:config/commits.json'])).mappings;
-  assert.equal(mappings[NAME][retry.sourceCommit], retry.publicCommit);
+  assert.equal(head(f.publicUrl), retry.publicCommit);
+  assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v0.9.2']), retry.publicCommit);
 });
 
-test('invalid policies, tags, and missing mappings fail without changing remotes', async t => {
+test('invalid and missing source tags fail without changing remotes', async t => {
   const f = await fixture(t), before = allRefs(f);
   for (const tag of ['main', 'v1;touch injected', 'v1\nnext', 'v1$(id)', 'v99.0.0']) await assert.rejects(release({ ...f.options, tag }));
-  assert.throws(() => readConfiguration(JSON.stringify({ repositories: [f.config.repositories[0], f.config.repositories[0]] })), /exactly one/);
-  for (const public_exclude of ['internal', ['internal\nREADME.md']]) assert.throws(() => readConfiguration(JSON.stringify({ repositories: [{ ...f.config.repositories[0], public_exclude }] })), /single-line/);
   assert.deepEqual(allRefs(f), before);
 });
 
-test('mapping retries preserve a concurrent update from another project', async t => {
-  const f = await fixture(t), other = join(f.root, 'other-writer');
-  git(f.root, ['clone', '-q', f.botUrl, other]);
-  const nextMappings = f.mappings.replace('"keep": "untouched"', '"keep": "concurrently updated"');
-  await file(other, 'config/commits.json', nextMappings);
-  git(other, ['add', '.']); git(other, ['commit', '-qm', 'Other project mapping']);
-  const next = head(other);
-  git(f.botUrl, ['fetch', '-q', other, 'main:refs/heads/other-writer']);
-  // Advance the real remote after the client has read it, so its first compare-and-swap fails.
-  await file(f.botUrl, 'hooks/pre-receive', `#!/bin/sh
-unset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
-if [ ! -f hooks/raced ]; then
-  touch hooks/raced
-  git update-ref refs/heads/main ${next} ${f.botBefore} || exit 1
-  exit 1
-fi
-`);
-  await chmod(join(f.botUrl, 'hooks/pre-receive'), 0o755);
-  const result = await release({ ...f.options, dryRun: false });
-  const mapping = JSON.parse(git(f.botUrl, ['show', 'main:config/commits.json'])).mappings;
-  assert.equal(mapping.other.keep, 'concurrently updated');
-  assert.equal(mapping[NAME][result.sourceCommit], result.publicCommit);
-  assert.equal(git(f.botUrl, ['show', '-s', '--format=%P', 'main']), next);
+test('empty snapshots and submodules are rejected before publishing', async t => {
+  const f = await fixture(t);
+  git(f.source, ['update-index', '--add', '--cacheinfo', `160000,${head(f.source)},dependency`]);
+  git(f.source, ['commit', '-qm', 'Submodule']); git(f.source, ['tag', 'v0.9.3']);
+  const beforeSubmodule = allRefs(f);
+  await assert.rejects(release({ ...f.options, tag: 'v0.9.3', dryRun: false }), /submodule/);
+  assert.deepEqual(allRefs(f), beforeSubmodule);
+  git(f.source, ['read-tree', '--empty']);
+  git(f.source, ['add', '.github']); git(f.source, ['commit', '-qm', 'Only excluded files']); git(f.source, ['tag', 'v0.9.4']);
+  const beforeEmpty = allRefs(f);
+  await assert.rejects(release({ ...f.options, tag: 'v0.9.4', dryRun: false }), /empty public snapshot/);
+  assert.deepEqual(allRefs(f), beforeEmpty);
 });
 
-test('missing mapping sections and empty exports are rejected before publishing', async t => {
-  const f = await fixture(t), botWork = join(f.root, 'bot-work');
-  await file(botWork, 'config/commits.json', '{"mappings":{}}');
-  git(botWork, ['add', '.']); git(botWork, ['commit', '-qm', 'Missing project mapping']);
-  git(botWork, ['push', '-q', f.botUrl, 'main']);
+test('a new tag for the current snapshot reuses the public commit', async t => {
+  const f = await fixture(t);
+  const first = await release({ ...f.options, dryRun: false });
+  git(f.source, ['tag', 'v0.9.3']);
+  const second = await release({ ...f.options, tag: 'v0.9.3', dryRun: false });
+  assert.equal(second.publicCommit, first.publicCommit);
+  assert.equal(head(f.publicUrl), first.publicCommit);
+  assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v0.9.3']), first.publicCommit);
+});
+
+test('CLI needs only source and public repositories and performs one atomic push', async t => {
+  const f = await fixture(t), log = join(f.root, 'transport.jsonl');
+  const config = { log, source: SOURCE, public: PUBLIC, urls: { [`https://github.com/${SOURCE}.git`]: f.source, [`https://github.com/${PUBLIC}.git`]: f.publicUrl } };
+  const preload = `
+    import assert from 'node:assert/strict';
+    import cp from 'node:child_process';
+    import { appendFileSync } from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const c = ${JSON.stringify(config)};
+    const record = entry => appendFileSync(c.log, JSON.stringify(entry) + '\\n');
+    globalThis.fetch = async (url, options) => {
+      const path = new URL(url).pathname;
+      assert.ok(path === '/user' || path === '/repos/' + c.public, 'unexpected external repository access');
+      assert.ok(options.headers.Authorization === ['Bearer', 'fixture-public'].join(' '), 'wrong API identity');
+      record({kind:'api', path});
+      return new Response(JSON.stringify(path === '/user' ? {login:'mindlab-bot'} : {permissions:{push:true}}));
+    };
+    const spawn = cp.spawnSync;
+    cp.spawnSync = (command, args, options = {}) => {
+      assert.equal(command, 'git');
+      const remote = args.find(arg => arg.startsWith('https://'));
+      if (remote) assert.ok(Object.hasOwn(c.urls, remote), 'unexpected external Git repository');
+      const push = args.includes('push');
+      if (remote || push) {
+        const role = remote?.includes(c.source + '.git') ? 'source' : 'public';
+        assert.ok(options.env.GIT_CONFIG_VALUE_0 === 'AUTHORIZATION: basic ' + Buffer.from('x-access-token:fixture-' + role).toString('base64'), 'wrong Git identity');
+        record({kind:'git', role, push, atomic:args.includes('--atomic')});
+      }
+      return spawn(command, args.map(arg => c.urls[arg] || arg), options);
+    };
+    syncBuiltinESMExports();
+  `;
+  const run = async publish => {
+    await writeFile(log, '');
+    const result = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), fileURLToPath(new URL('./public-release.mjs', import.meta.url)), '--tag', 'v0.9.2', ...(publish ? ['--publish'] : [])], {
+      env: { ...process.env, GITHUB_REPOSITORY: SOURCE, GITHUB_TOKEN: 'fixture-source', MINDLAB_BOT_GH_TOKEN: 'fixture-public', MINDLAB_MAPPING_GH_TOKEN: '', PUBLIC_RELEASE_SUMMARY: message.split('\n')[0], PUBLIC_RELEASE_DETAILS: message.split('\n').slice(2).join('\n'), GITHUB_STEP_SUMMARY: '' }, encoding: 'utf8', timeout: 30_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout + result.stderr, /fixture-source|fixture-public/);
+    return (await readFile(log, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+  };
   const before = allRefs(f);
-  await assert.rejects(release({ ...f.options, dryRun: false }), /missing mappings/);
+  const dry = await run(false);
   assert.deepEqual(allRefs(f), before);
-  await file(botWork, 'config/commits.json', f.mappings);
-  f.config.repositories[0].public_exclude = ['*'];
-  await file(botWork, 'config/repositories.json', JSON.stringify(f.config));
-  git(botWork, ['add', '.']); git(botWork, ['commit', '-qm', 'Empty export policy']); git(botWork, ['push', '-q', f.botUrl, 'main']);
-  const emptyBefore = allRefs(f);
-  await assert.rejects(release({ ...f.options, dryRun: false }), /empty public snapshot/);
-  assert.deepEqual(allRefs(f), emptyBefore);
+  assert.deepEqual(dry.filter(c => c.kind === 'api').map(c => c.path).sort(), ['/repos/' + PUBLIC, '/user']);
+  assert.equal(dry.filter(c => c.push).length, 0);
+  const live = await run(true);
+  assert.deepEqual(live.filter(c => c.push), [{kind:'git', role:'public', push:true, atomic:true}]);
+  assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v0.9.2']), head(f.publicUrl));
+  const retry = await run(true);
+  assert.equal(retry.filter(c => c.push).length, 0);
 });

@@ -267,3 +267,7 @@ button:is(.pressable, .btn-icon):focus-visible:active { scale: none; }
 .tool-group[data-keyboard] > div { animation: none; }
 .tool-group[data-keyboard] .tool-group-icon { transition: none; }
 @media (prefers-reduced-motion: reduce) { .tool-group[open] > div { animation: none; } .tool-group-icon { transition: none; } }
+.selection-actions { transform-origin: center bottom; animation: selection-actions-in 160ms cubic-bezier(.23,1,.32,1); }
+@keyframes selection-actions-in { from { opacity: 0; transform: translateY(3px) scale(.96); } to { opacity: 1; transform: none; } }
+.selection-actions[data-keyboard] { animation: none; }
+@media (prefers-reduced-motion: reduce) { .selection-actions { animation: none; } }

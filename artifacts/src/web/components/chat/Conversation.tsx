@@ -1,4 +1,4 @@
-import { memo, useCallback, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { useChat, type Chat } from '@ai-sdk/react';
 import type { ChatMessage, ConnectionCommand, SessionSummary } from '../../../shared/types';
 import type { QuestionResponse } from '../../../shared/questions';
@@ -13,6 +13,8 @@ import { QuestionCard } from './QuestionCard';
 import { ConnectionCard } from './ConnectionCard';
 import { Composer } from './Composer';
 import { ProviderReviewBanner } from './ProviderReviewBanner';
+import { SelectionActions } from './SelectionActions';
+import { selectionDraft } from './selection-draft';
 import { Reasoning } from './Reasoning';
 import { reasoningRunAt } from './reasoning-model';
 import { Button } from '../ui4a-ui';
@@ -20,6 +22,7 @@ import { Icon } from '../Icon';
 import { LoadingState } from '../LoadingState';
 
 export function Conversation({ instance, session, store }: { instance: Chat<ChatMessage>; session: SessionSummary; store: WorkspaceStore }) {
+  const root = useRef<HTMLDivElement>(null);
   const chat = useChat<ChatMessage>({ chat: instance });
   const { viewport, content, stuck, scrollToBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
   const streaming = chat.status === 'submitted' || chat.status === 'streaming';
@@ -37,7 +40,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   }));
   const suggestions = session.suggestions;
   const queued = store.queue(session.id);
-  return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
+  return <div ref={root} className="@container relative flex h-full min-w-0 flex-1 flex-col">
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto"><div ref={content} data-chat-content className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
       {/* While submitted, the last message is still the complete user prompt; only assistant text can stream. */}
       {chat.messages.map(message => <Message key={message.id} message={message} streaming={message.role === 'assistant' && streaming && message.id === last?.id} active={session.status === 'running'} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} onAnswer={answer} onConnectionCommand={commandConnection} />)}
@@ -52,6 +55,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
     </div></div>
     {session.providerReview ? <ProviderReviewBanner review={session.providerReview} onRefresh={() => store.refreshProviderReview(session.id)} /> : null}
     <SessionComposer store={store} sessionId={session.id} busy={streaming} disabled={Boolean(session.providerReview)} onSend={send} />
+    <SelectionActions root={root} onQuote={(text, action) => store.setDraft(session.id, selectionDraft(store.draft(session.id), text, action))} />
   </div>;
 }
 

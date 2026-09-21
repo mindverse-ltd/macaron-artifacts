@@ -5,8 +5,7 @@
 @import "streamdown/styles.css";
 @import "katex/dist/katex.min.css";
 
-.md .katex-display, .ui4a-math-block { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 2rem), transparent); }
-.md .katex-display::-webkit-scrollbar, .ui4a-math-block::-webkit-scrollbar { display: none; }
+.md .katex-display, .ui4a-math-block .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; }
 .ui4a-math-block { display: block; min-width: 0; }
 .ui4a-math-block .katex-display { margin: 0; }
 .ui4a-chart { color: var(--muted); font-size: 12px; }
@@ -222,11 +221,18 @@ button.pressable:focus-visible:active { scale: none; }
 .scroll-x {
   overflow-x: auto;
   scrollbar-width: none;
-  animation: fade-x-end linear;
-  animation-timeline: scroll(self inline);
 }
 .scroll-x::-webkit-scrollbar {
   display: none;
+}
+/* Keep formula scrollbars as the fallback; an inactive timeline leaves short formulas unmasked. */
+@supports (animation-timeline: scroll(self inline)) {
+  .scroll-x, .md .katex-display, .ui4a-math-block .katex-display {
+    scrollbar-width: none;
+    animation: fade-x-end linear;
+    animation-timeline: scroll(self inline);
+  }
+  .md .katex-display::-webkit-scrollbar, .ui4a-math-block .katex-display::-webkit-scrollbar { display: none; }
 }
 /* 渐隐带只在最后一段路里收掉：等距插值的话，一个只能滚几十像素的框全程都糊着右边一截。
    `to` 那帧的 `100%` 是把渐变的起点推到最右 —— 等价于没有渐隐，但仍是同一个可插值的值。 */

@@ -7,6 +7,7 @@ import { artifactEntryPath } from '../../shared/artifact-path';
 import { apiUrl, connectionHeaders } from './connection';
 import { authenticatedFetch } from './auth';
 import { randomUUID } from '../uuid';
+import type { PromptReference } from '../../shared/prompt-references';
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await authenticatedFetch(apiUrl(path), { ...init, headers: connectionHeaders({ 'content-type': 'application/json', ...init?.headers }) });
@@ -61,6 +62,7 @@ export class WorkspaceStore {
     // Keystrokes only notify this composer; streaming history and the application shell need not render again.
     for (const listener of this.draftListeners.get(id) ?? []) listener();
   };
+  searchReferences = async (id: string, query: string) => api<PromptReference[]>(`/api/sessions/${encodeURIComponent(id)}/files/search?q=${encodeURIComponent(query)}`);
   selectedArtifact = (id: string) => this.selectedArtifacts.get(id);
   dispose = () => {
     this.disposed = true; this.queues.clear(); this.listeners.clear(); this.draftListeners.clear();

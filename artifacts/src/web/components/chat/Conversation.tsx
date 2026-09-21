@@ -58,7 +58,8 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
 function SessionComposer({ store, sessionId, busy, disabled, onSend }: { store: WorkspaceStore; sessionId: string; busy: boolean; disabled: boolean; onSend: (text: string) => void }) {
   const subscribe = useCallback((listener: () => void) => store.subscribeDraft(sessionId, listener), [store, sessionId]);
   const text = useSyncExternalStore(subscribe, () => store.draft(sessionId));
-  return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={disabled} busy={busy} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} />;
+  const searchReferences = useCallback((query: string) => store.searchReferences(sessionId, query), [sessionId, store]);
+  return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={disabled} busy={busy} searchReferences={searchReferences} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} />;
 }
 
 const Message = memo(function Message({ message, streaming, active, sessionId, cwd, onSend, onArtifact, onApprove, onAnswer, onConnectionCommand }: { message: ChatMessage; streaming: boolean; active: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown>; onAnswer: (id: string, response: QuestionResponse) => Promise<unknown>; onConnectionCommand: (id: string, command: ConnectionCommand) => Promise<unknown> }) {

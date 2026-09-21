@@ -10,4 +10,4 @@ export type MessageData = { artifact: Artifact; command: { toolCallId: string; o
 export type ChatMessage = UIMessage<{ interrupted?: boolean }, MessageData>;
 export type ChatChunk = InferUIMessageChunk<ChatMessage>;
 export interface Session { id: string; harness: HarnessId; cwd: string; title: string; model?: string; profileId?: string | null; nativeId?: string; messages: ChatMessage[]; suggestions: string[]; createdAt: number; updatedAt: number; status: 'idle' | 'running' | 'error'; error?: string }
-export type SessionSummary = Omit<Session, 'messages'>;
+export type SessionSummary = Omit<Session, 'messages'> & { activity?: 'idle' | 'running' | 'answer' | 'approval' | 'error' | 'complete' };

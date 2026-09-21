@@ -10,7 +10,7 @@
 .question-choices { position: relative; }
 .question-highlight { position: absolute; inset-inline: 0; top: 0; height: 0; opacity: 0; pointer-events: none; }
 .question-choices > label { position: relative; }
-.question-choices > label:has(input:focus-visible) { outline: 2px solid var(--focus); }
+.question-choices > label:has(.question-choice-input:focus-visible) { outline: 2px solid var(--focus); }
 .question-card[data-motion="true"] .question-highlight { transition: top 220ms cubic-bezier(.23, 1, .32, 1), height 220ms cubic-bezier(.23, 1, .32, 1), opacity 150ms; }
 .question-marker { display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--border); color: var(--surface); }
 .question-marker > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; transform: scale(0); }

@@ -15,6 +15,7 @@ import { ProfileManager } from './components/profiles/ProfileManager';
 import { SessionProfileDialog } from './components/profiles/SessionProfile';
 import { useProfiles } from './components/profiles/ProfileProvider';
 import { ExportMenu } from './components/ExportMenu';
+import { LoadingState } from './components/LoadingState';
 
 export default function App() {
   const { state, actions } = useWorkspace();
@@ -57,7 +58,7 @@ export default function App() {
     <div className="flex min-h-0 flex-1"><Sidebar {...sidebar} /><SidebarDrawer {...sidebar} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div ref={split.container} className="@container/panes flex min-h-0 min-w-0 flex-1" style={{ ['--canvas-w' as string]: `${(split.fraction * 100).toFixed(2)}%` }}>
         <div ref={chatTarget} className={`min-w-0 flex-1 ${canvasOpen ? 'hidden @[681px]/panes:flex' : 'flex'}`}>
-          {session && chat ? <Conversation key={session.id} instance={chat} session={session} store={actions} /> : <div className="flex flex-1 items-center justify-center p-6"><div className="max-w-sm text-center">{!state.ready || state.loading ? <p className="text-sm text-muted" role="status">正在载入会话…</p> : <><p className="mb-4 text-sm text-muted">在同一个工作区里，用熟悉的 harness 构建界面。</p><Button onClick={create} disabled={!state.harnesses.some(item => item.available)}>新会话</Button>{state.harnesses.length && !state.harnesses.some(item => item.available) ? <p className="mt-3 text-xs text-danger">尚未检测到可用的 harness。请检查 CLI 安装或 pi SDK 加载状态。</p> : null}</>}</div></div>}
+          {session && chat ? <Conversation key={session.id} instance={chat} session={session} store={actions} /> : <div className="flex flex-1 items-center justify-center p-6"><div className="max-w-sm text-center">{!state.ready || state.loading ? <LoadingState key={state.activeId} label="正在载入会话…" /> : <><p className="mb-4 text-sm text-muted">在同一个工作区里，用熟悉的 harness 构建界面。</p><Button onClick={create} disabled={!state.harnesses.some(item => item.available)}>新会话</Button>{state.harnesses.length && !state.harnesses.some(item => item.available) ? <p className="mt-3 text-xs text-danger">尚未检测到可用的 harness。请检查 CLI 安装或 pi SDK 加载状态。</p> : null}</>}</div></div>}
         </div>
         {canvasOpen ? <SplitHandle fraction={split.fraction * 100} dragging={split.dragging} handlers={split.handlers} /> : null}
         {canvasOpen ? <aside className="theme-panel min-w-0 w-full @[681px]/panes:w-[clamp(300px,var(--canvas-w),calc(100%-381px))]">{session ? <ArtifactPanel key={session.id} session={session} artifacts={artifacts} selected={selectedArtifact} onSelect={path => actions.openArtifact(session.id, path)} onClose={closeCanvas} onSend={text => actions.send(session.id, text)} /> : <div className="flex h-full flex-col"><header className="flex h-12 items-center justify-between px-3 text-sm">Canvas<button type="button" onClick={closeCanvas} aria-label="关闭 Canvas"><Icon name="x" /></button></header><p className="p-6 text-xs text-muted">创建会话后，生成的界面会显示在这里。</p></div>}</aside> : null}

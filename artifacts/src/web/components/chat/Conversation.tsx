@@ -11,6 +11,7 @@ import { Reasoning } from './Reasoning';
 import { reasoningRunAt } from './reasoning-model';
 import { Button } from '../ui4a-ui';
 import { Icon } from '../Icon';
+import { LoadingState } from '../LoadingState';
 
 export function Conversation({ instance, session, store }: { instance: Chat<ChatMessage>; session: SessionSummary; store: WorkspaceStore }) {
   const chat = useChat<ChatMessage>({ chat: instance });
@@ -20,12 +21,18 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const openArtifact = useCallback((path: string) => store.openArtifact(session.id, path), [session.id, store]);
   const approve = useCallback((id: string, approved: boolean) => store.approve(session.id, id, approved), [session.id, store]);
   const last = chat.messages.at(-1);
+  const waiting = streaming && !(last?.role === 'assistant' && last.parts.some(part => {
+    if (part.type === 'text') return Boolean(part.text.trim());
+    // Active reasoning already owns a visible placeholder before its first text delta.
+    if (part.type === 'reasoning') return part.state !== 'done' || Boolean(part.text.trim());
+    return part.type.startsWith('tool-') || part.type === 'dynamic-tool' || part.type === 'data-approval' || part.type === 'data-command' || (part.type === 'file' && part.mediaType.startsWith('image/'));
+  }));
   const suggestions = session.suggestions;
   const queued = store.queue(session.id);
   return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto"><div ref={content} data-chat-content className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
       {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
-      {chat.status === 'submitted' ? <p className="flex items-center gap-2 text-xs text-muted" role="status"><span className="size-1.5 animate-pulse rounded-full bg-accent" />正在连接…</p> : null}
+      {waiting ? <LoadingState label={chat.status === 'submitted' ? '正在连接…' : '正在生成…'} /> : null}
       {chat.error || session.status === 'error' ? <div role="alert" className="flex items-center gap-3 rounded-xl border border-danger/40 px-3 py-2 text-xs text-danger"><span className="min-w-0 flex-1 break-words">{chat.error?.message ?? session.error ?? '这轮没有跑完'}</span><Button data-export-control size="sm" variant="ghost" onClick={() => void store.retry(session.id)}>重试</Button></div> : null}
     </div></div>
     <button type="button" onClick={event => scrollToBottom(event.detail === 0 ? 'instant' : 'smooth')} inert={stuck} className={`absolute bottom-24 left-1/2 z-floating-control -translate-x-1/2 theme-widget rounded-full px-3 py-1.5 text-xs text-muted hover:text-fg ${stuck ? 'opacity-0' : 'opacity-100'}`}>回到底部 ↓</button>

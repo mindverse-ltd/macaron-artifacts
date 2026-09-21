@@ -196,8 +196,81 @@ test('a new tag for the current snapshot reuses the public commit', async t => {
   assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v0.9.3']), first.publicCommit);
 });
 
-test('CLI needs only source and public repositories and performs one atomic push', async t => {
-  const f = await fixture(t), log = join(f.root, 'transport.jsonl');
+const syncOptions = f => ({ sourceUrl: f.source, publicUrl: f.publicUrl, syncMain: true });
+
+test('sync mode defaults to dry-run, needs no notes, and rejects tag or force combinations', async t => {
+  const f = await fixture(t), before = allRefs(f);
+  assert.equal(parseArgs(['--sync-main']).dryRun, true);
+  assert.equal(parseArgs(['--sync-main']).syncMain, true);
+  assert.equal(parseArgs(['--sync-main', '--publish']).dryRun, false);
+  assert.throws(() => parseArgs(['--sync-main', '--tag', 'v0.9.2']), /either --tag or --sync-main/);
+  assert.throws(() => parseArgs(['--sync-main', '--force']), /--force is not supported/);
+  await assert.rejects(release({ ...syncOptions(f), tag: 'v0.9.2' }), /either --tag or --sync-main/);
+  await assert.rejects(release({ ...syncOptions(f), force: true }), /--force is not supported/);
+  await assert.rejects(release({ ...syncOptions(f), dryRun: 'false' }), /must be booleans/);
+  await assert.rejects(release({ ...syncOptions(f), syncMain: 'yes' }), /must be booleans/);
+  const preview = await release(syncOptions(f));
+  assert.equal(preview.dryRun, true);
+  assert.equal(preview.needsMessage, false);
+  assert.match(preview.snapshot, /^[0-9a-f]{40}$/);
+  assert.deepEqual(allRefs(f), before);
+});
+
+test('sync publishes the current source main, converges on later commits, and retries as a no-op', async t => {
+  const f = await fixture(t);
+  git(f.publicUrl, ['update-ref', 'refs/tags/v1.0.0', f.publicBefore]);
+  const tagsBefore = git(f.publicUrl, ['show-ref', '--tags']);
+  const first = await release({ ...syncOptions(f), dryRun: false });
+  assert.equal(head(f.publicUrl), first.publicCommit);
+  assert.equal(git(f.publicUrl, ['show', '-s', '--format=%P', 'main']), f.publicBefore);
+  assert.equal(git(f.publicUrl, ['rev-list', '--count', 'main']), '2');
+  assert.equal(git(f.publicUrl, ['show', '-s', '--format=%an <%ae>%n%cn <%ce>', 'main']), 'mindlab-bot <contact@mindlab.ltd>\nmindlab-bot <contact@mindlab.ltd>');
+  const body = git(f.publicUrl, ['show', '-s', '--format=%B', 'main']);
+  assert.doesNotMatch(body, /Internal implementation|#42|Private developer|mindverse-ltd/);
+  assert.doesNotMatch(body, new RegExp(first.sourceCommit));
+  assert.equal(body, 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.');
+  const afterFirst = allRefs(f);
+  const retry = await release({ ...syncOptions(f), dryRun: false });
+  assert.equal(retry.publicCommit, first.publicCommit);
+  assert.deepEqual(allRefs(f), afterFirst);
+  await file(f.source, 'README.md', 'advanced workspace\n');
+  git(f.source, ['add', '.']); git(f.source, ['commit', '-qm', 'Private follow-up (#77)'], { GIT_AUTHOR_NAME: 'Private developer', GIT_COMMITTER_NAME: 'Private developer' });
+  const second = await release({ ...syncOptions(f), dryRun: false });
+  assert.equal(second.sourceCommit, git(f.source, ['rev-parse', 'refs/heads/main']));
+  assert.equal(head(f.publicUrl), second.publicCommit);
+  assert.equal(git(f.publicUrl, ['show', 'main:README.md']), 'advanced workspace');
+  assert.equal(git(f.publicUrl, ['show', '-s', '--format=%P', 'main']), first.publicCommit);
+  assert.equal(git(f.publicUrl, ['rev-list', '--count', 'main']), '3');
+  assert.equal(git(f.publicUrl, ['show-ref', '--tags']), tagsBefore);
+  assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v1.0.0']), f.publicBefore);
+});
+
+test('sync skips internal-only changes and keeps byte-path exclusions intact', async t => {
+  const f = await fixture(t);
+  const rawName = Buffer.concat([Buffer.from('byte-'), Buffer.from([0xff]), Buffer.from('.txt')]);
+  for (const dir of ['.github', 'nested/.github', 'docs']) {
+    await writeFile(Buffer.concat([Buffer.from(join(f.source, dir) + '/'), rawName]), 'byte-path content');
+  }
+  git(f.source, ['add', '-f', '.']); git(f.source, ['commit', '-qm', 'Byte filenames']);
+  const published = await release({ ...syncOptions(f), dryRun: false });
+  const listed = spawnSync('git', ['ls-tree', '-rz', published.publicCommit], { cwd: f.publicUrl, timeout: 30_000 });
+  assert.equal(listed.status, 0, listed.stderr.toString());
+  const paths = listed.stdout.toString('latin1').split('\0').filter(Boolean).map(entry => entry.slice(entry.indexOf('\t') + 1));
+  assert.ok(paths.every(path => !path.split('/').includes('.github')));
+  assert.ok(paths.includes('docs/' + rawName.toString('latin1')));
+  assert.match(git(f.publicUrl, ['ls-tree', 'main', 'run.sh']), /^100755 /);
+  assert.match(git(f.publicUrl, ['ls-tree', 'main', 'guide.md']), /^120000 /);
+  const afterPublish = refs(f.publicUrl);
+  await file(f.source, '.github/workflows/internal.yml', 'internal change only');
+  git(f.source, ['add', '-f', '.']); git(f.source, ['commit', '-qm', 'Internal workflow tweak']);
+  const internalOnly = await release({ ...syncOptions(f), dryRun: false });
+  assert.equal(internalOnly.publicCommit, published.publicCommit);
+  assert.equal(internalOnly.publicMain, published.publicCommit);
+  assert.equal(refs(f.publicUrl), afterPublish);
+});
+
+function cliRunner(f) {
+  const log = join(f.root, 'transport.jsonl');
   const config = { log, source: SOURCE, public: PUBLIC, urls: { [`https://github.com/${SOURCE}.git`]: f.source, [`https://github.com/${PUBLIC}.git`]: f.publicUrl } };
   const preload = `
     import assert from 'node:assert/strict';
@@ -216,6 +289,7 @@ test('CLI needs only source and public repositories and performs one atomic push
     const spawn = cp.spawnSync;
     cp.spawnSync = (command, args, options = {}) => {
       assert.equal(command, 'git');
+      record({kind:'command', args});
       const remote = args.find(arg => arg.startsWith('https://'));
       if (remote) assert.ok(Object.hasOwn(c.urls, remote), 'unexpected external Git repository');
       const push = args.includes('push');
@@ -228,15 +302,20 @@ test('CLI needs only source and public repositories and performs one atomic push
     };
     syncBuiltinESMExports();
   `;
-  const run = async publish => {
+  return async (...args) => {
     await writeFile(log, '');
-    const result = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), fileURLToPath(new URL('./public-release.mjs', import.meta.url)), '--tag', 'v0.9.2', ...(publish ? ['--publish'] : [])], {
+    const result = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), fileURLToPath(new URL('./public-release.mjs', import.meta.url)), ...args], {
       env: { ...process.env, GITHUB_REPOSITORY: SOURCE, GITHUB_TOKEN: 'fixture-source', MINDLAB_BOT_GH_TOKEN: 'fixture-public', MINDLAB_MAPPING_GH_TOKEN: '', PUBLIC_RELEASE_SUMMARY: message.split('\n')[0], PUBLIC_RELEASE_DETAILS: message.split('\n').slice(2).join('\n'), GITHUB_STEP_SUMMARY: '' }, encoding: 'utf8', timeout: 30_000,
     });
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(result.stdout + result.stderr, /fixture-source|fixture-public/);
-    return (await readFile(log, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+    return { stdout: result.stdout, log: (await readFile(log, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)) };
   };
+}
+
+test('CLI needs only source and public repositories and performs one atomic push', async t => {
+  const f = await fixture(t), runCli = cliRunner(f);
+  const run = async publish => (await runCli('--tag', 'v0.9.2', ...(publish ? ['--publish'] : []))).log;
   const before = allRefs(f);
   const dry = await run(false);
   assert.deepEqual(allRefs(f), before);
@@ -247,4 +326,14 @@ test('CLI needs only source and public repositories and performs one atomic push
   assert.equal(git(f.publicUrl, ['rev-parse', 'refs/tags/v0.9.2']), head(f.publicUrl));
   const retry = await run(true);
   assert.equal(retry.filter(c => c.push).length, 0);
+});
+
+test('--sync-main updates public main without creating a tag', async t => {
+  const f = await fixture(t), runCli = cliRunner(f);
+  const beforePublic = head(f.publicUrl);
+  const { stdout, log } = await runCli('--sync-main', '--publish');
+  assert.match(stdout, /Public main is synchronized/);
+  assert.notEqual(head(f.publicUrl), beforePublic);
+  assert.equal(git(f.publicUrl, ['tag', '-l', 'v0.9.2']), '');
+  assert.deepEqual(log.filter(c => c.push), [{kind:'git', role:'public', push:true, atomic:true}]);
 });

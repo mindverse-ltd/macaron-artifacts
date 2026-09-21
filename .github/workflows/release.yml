@@ -1,7 +1,9 @@
 name: Release to Public
-run-name: "${{ github.event.inputs.dry_run == 'false' && 'Publish' || 'Dry run' }} ${{ inputs.tag_name }}"
+run-name: "${{ github.event_name == 'push' && 'Sync public main' || format('{0} {1}', github.event.inputs.dry_run == 'false' && 'Publish' || 'Dry run', inputs.tag_name) }}"
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag_name:
@@ -31,6 +33,7 @@ permissions:
 concurrency:
   group: release-to-public
   cancel-in-progress: false
+  queue: max
 
 jobs:
   release:
@@ -48,6 +51,7 @@ jobs:
         run: node --test .github/scripts/public-release.test.mjs
       - name: Build public snapshot
         env:
+          RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ inputs.tag_name }}
           DRY_RUN: ${{ inputs.dry_run }}
           FORCE_RELEASE: ${{ inputs.force }}
@@ -57,8 +61,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          args=(--tag "$RELEASE_TAG")
-          # Missing or invalid inputs stay dry; only an explicit false enables remote writes.
-          [[ "$DRY_RUN" == 'false' ]] && args+=(--publish)
-          [[ "$FORCE_RELEASE" == 'true' ]] && args+=(--force)
+          case "$RELEASE_EVENT" in
+            push) args=(--sync-main --publish) ;;
+            workflow_dispatch)
+              args=(--tag "$RELEASE_TAG")
+              # Missing or invalid inputs stay dry; only an explicit false enables remote writes.
+              [[ "$DRY_RUN" == 'false' ]] && args+=(--publish)
+              [[ "$FORCE_RELEASE" == 'true' ]] && args+=(--force)
+              ;;
+            *) exit 1 ;;
+          esac
           node .github/scripts/public-release.mjs "${args[@]}"

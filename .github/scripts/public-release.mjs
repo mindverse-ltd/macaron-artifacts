@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publish a filtered tag snapshot directly to the public repository; no source code is executed.
+// Publish a filtered tag or main snapshot directly to the public repository; no source code is executed.
 import { spawnSync } from 'node:child_process';
 import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,7 @@ function git(args, { cwd, env = {}, input, allow = [0], encoding = 'utf8' } = {}
 }
 
 export function parseArgs(argv) {
-  const options = { dryRun: true, force: false, tag: '' };
+  const options = { dryRun: true, force: false, tag: '', syncMain: false };
   let mode;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -33,9 +33,12 @@ export function parseArgs(argv) {
       if (mode && mode !== arg) throw new Error('choose either --publish or --dry-run');
       mode = arg; options.dryRun = arg !== '--publish';
     } else if (arg === '--force') options.force = true;
+    else if (arg === '--sync-main') options.syncMain = true;
     else if (arg === '--help') options.help = true;
     else throw new Error(`unknown argument: ${arg}`);
   }
+  if (options.syncMain && options.tag) throw new Error('choose either --tag or --sync-main');
+  if (options.syncMain && options.force) throw new Error('--force is not supported with --sync-main');
   return options;
 }
 
@@ -78,20 +81,23 @@ function snapshotTree(cwd, sourceCommit) {
 }
 
 // URLs and git environments are injected for integration tests against disposable local bare repos.
-export async function release({ tag, dryRun = true, force = false, message = '', sourceUrl, publicUrl, sourceEnv = {}, publicEnv = {} }) {
-  if (!/^v[0-9][0-9A-Za-z.+-]*$/.test(tag)) throw new Error('tag must be an existing version such as v1.0.0');
-  if (typeof dryRun !== 'boolean' || typeof force !== 'boolean') throw new Error('dryRun and force must be booleans');
-  if (!dryRun || message) message = validateMessage(message);
+export async function release({ tag = '', syncMain = false, dryRun = true, force = false, message = '', sourceUrl, publicUrl, sourceEnv = {}, publicEnv = {} }) {
+  if (typeof dryRun !== 'boolean' || typeof force !== 'boolean' || typeof syncMain !== 'boolean') throw new Error('dryRun, force and syncMain must be booleans');
+  if (syncMain && tag) throw new Error('choose either --tag or --sync-main');
+  if (syncMain && force) throw new Error('--force is not supported with --sync-main');
+  if (!syncMain && !/^v[0-9][0-9A-Za-z.+-]*$/.test(tag)) throw new Error('tag must be an existing version such as v1.0.0');
+  if (syncMain) message = 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.';
+  else if (!dryRun || message) message = validateMessage(message);
   const scratch = await mkdtemp(join(tmpdir(), 'macaron-public-release-'));
   try {
     const source = join(scratch, 'source'), target = join(scratch, 'public');
-    const tagRef = `refs/tags/${tag}`;
-    // Only the tagged tree is needed; fetching the entire internal history slows down every dry-run.
+    const tagRef = syncMain ? null : `refs/tags/${tag}`, sourceRef = syncMain ? 'refs/remotes/source/main' : tagRef;
+    // Queued syncs fetch current main into a tracking ref, never a checked-out local branch.
     git(['init', '--quiet', source]);
-    git(['fetch', '--quiet', '--depth=1', '--no-tags', sourceUrl, `${tagRef}:${tagRef}`], { cwd: source, env: sourceEnv });
-    git(['clone', '--quiet', '--no-checkout', '--', publicUrl, target], { env: publicEnv });
-    const sourceCommit = oid(source, `${tagRef}^{commit}`);
-    const publicBase = oid(target, 'refs/remotes/origin/main'), oldTag = oid(target, tagRef, false), oldTagCommit = oldTag && oid(target, `${tagRef}^{commit}`, false);
+    git(['fetch', '--quiet', '--depth=1', '--no-tags', sourceUrl, `${syncMain ? 'refs/heads/main' : tagRef}:${sourceRef}`], { cwd: source, env: sourceEnv });
+    git(['clone', '--quiet', '--no-checkout', ...(syncMain ? ['--no-tags'] : []), '--', publicUrl, target], { env: publicEnv });
+    const sourceCommit = oid(source, `${sourceRef}^{commit}`);
+    const publicBase = oid(target, 'refs/remotes/origin/main'), oldTag = !syncMain && oid(target, tagRef, false), oldTagCommit = oldTag && oid(target, `${tagRef}^{commit}`, false);
 
     // Import objects only. The public commit has ONLY a public parent, never a source-history parent.
     git(['fetch', '--quiet', '--no-tags', source, sourceCommit], { cwd: target });
@@ -110,12 +116,12 @@ export async function release({ tag, dryRun = true, force = false, message = '',
     }
 
     const diff = git(['diff', '--stat', publicBase, snapshot, '--'], { cwd: target });
-    const result = { tag, dryRun, sourceCommit, snapshot, publicCommit: publicCommit || null, publicMain, diff, needsMessage: !publicCommit };
+    const result = { tag, syncMain, dryRun, sourceCommit, snapshot, publicCommit: publicCommit || null, publicMain, diff, needsMessage: !publicCommit };
     if (dryRun) return result;
 
     const refspecs = [], leases = [];
     if (publicMain !== publicBase) { refspecs.push(`${publicMain}:refs/heads/main`); leases.push(`--force-with-lease=refs/heads/main:${publicBase}`); }
-    if (oldTagCommit !== publicCommit) { refspecs.push(`${publicCommit}:${tagRef}`); leases.push(`--force-with-lease=${tagRef}:${oldTag || ''}`); }
+    if (!syncMain && oldTagCommit !== publicCommit) { refspecs.push(`${publicCommit}:${tagRef}`); leases.push(`--force-with-lease=${tagRef}:${oldTag || ''}`); }
     // Both refs advance together; exact leases reject any change since the initial read, including forced tags.
     if (refspecs.length) git(['push', '--atomic', ...leases, 'origin', ...refspecs], { cwd: target, env: publicEnv });
 
@@ -134,7 +140,7 @@ async function api(path, token) {
 }
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  if (options.help) { console.log('Usage: node .github/scripts/public-release.mjs --tag vX.Y.Z [--dry-run | --publish] [--message-file notes.md] [--force]'); return; }
+  if (options.help) { console.log('Usage: node .github/scripts/public-release.mjs (--tag vX.Y.Z [--message-file notes.md] [--force] | --sync-main) [--dry-run | --publish]'); return; }
   const token = process.env.MINDLAB_BOT_GH_TOKEN?.trim(), sourceToken = process.env.GITHUB_TOKEN?.trim();
   if (!token) throw new Error('MINDLAB_BOT_GH_TOKEN is required in repository Actions secrets');
   if (process.env.GITHUB_REPOSITORY && process.env.GITHUB_REPOSITORY !== SOURCE) throw new Error(`run this workflow in ${SOURCE}`);
@@ -142,13 +148,13 @@ async function main() {
   if (checks[0].login !== 'mindlab-bot') throw new Error('MINDLAB_BOT_GH_TOKEN must belong to mindlab-bot');
   if (!checks[1].permissions?.push) throw new Error('MINDLAB_BOT_GH_TOKEN needs Contents read/write on the public repository');
   const summary = process.env.PUBLIC_RELEASE_SUMMARY || '', details = process.env.PUBLIC_RELEASE_DETAILS || '';
-  const message = options.messageFile ? await readFile(options.messageFile, 'utf8') : (summary || details ? `${summary}\n\n${details}` : '');
+  const message = options.syncMain ? '' : options.messageFile ? await readFile(options.messageFile, 'utf8') : (summary || details ? `${summary}\n\n${details}` : '');
   const result = await release({ ...options, message, sourceUrl: `https://github.com/${SOURCE}.git`, publicUrl: `https://github.com/${PUBLIC}.git`, sourceEnv: authEnv(sourceToken), publicEnv: authEnv(token) });
   const report = [
-    `### ${result.dryRun ? 'Dry run' : 'Published'} ${result.tag}`, '', `Source commit: ${result.sourceCommit}`, `Public snapshot tree: ${result.snapshot}`,
+    `### ${result.dryRun ? 'Dry run' : 'Published'} ${result.syncMain ? 'main snapshot' : result.tag}`, '', `Source commit: ${result.sourceCommit}`, `Public snapshot tree: ${result.snapshot}`,
     `Public commit: ${result.publicCommit || 'pending public release description'}`, '', result.diff || 'No public file changes.', '',
     ...(result.needsMessage ? ['Provide a public summary and description before publishing.'] : []),
-    result.dryRun ? 'No remote commits or tags were written. API-reported permissions do not prove branch-rule acceptance.' : 'Public main and tag are published.',
+    result.dryRun ? 'No remote commits or tags were written. API-reported permissions do not prove branch-rule acceptance.' : result.syncMain ? 'Public main is synchronized; no tags were written.' : 'Public main and tag are published.',
   ].join('\n');
   console.log(report);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, report + '\n');

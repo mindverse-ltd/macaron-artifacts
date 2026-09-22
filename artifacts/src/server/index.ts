@@ -13,10 +13,12 @@ import { ActiveConversation } from './conversations.js';
 import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
 import { ProfileStore, validateProfileInput } from './profiles.js';
-import { safeError } from './harnesses/common.js';
+import { safeError, safeProfileError } from './harnesses/common.js';
 import { closeHermesConnections } from './harnesses/hermes.js';
 import { PairingManager, bearerToken, type PairingGrant, type PairingOptions } from './pairing.js';
 import { AccessPolicy, PasswordAuth, type PasswordSession } from './auth.js';
+import { ConnectionInputError, connectionActionable, redactConnection, validateConnectionResponse } from './connections.js';
+import type { ConnectionControls } from './harnesses/types.js';
 
 export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions; host?: string; password?: string; publicOrigin?: string }) {
   const access = new AccessPolicy(options), auth = await PasswordAuth.create(options.password);
@@ -24,6 +26,17 @@ export async function createArtifactsServer(options: { directory: string; instru
   const pairing = new PairingManager(options.pairing);
   const profiles = options.profiles ?? new ProfileStore(join(options.directory, 'profiles'));
   const deletingProfiles = new Set<string>(), bindingProfiles = new Map<string, number>();
+  // A native gateway that never answers must not hold an HTTP request open.
+  const bounded = async <T,>(promise: Promise<T>, ms = 20_000) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Connection timeout')), ms); timer.unref?.(); })]); }
+    finally { clearTimeout(timer); }
+  };
+  // Status is reported as the safe summary; a fresh authorization link only reaches the live stream.
+  const connectionStatus = async (controls: ConnectionControls) => {
+    const state = await bounded(controls.status());
+    return state ? { ...redactConnection(state), actionable: connectionActionable(state) } : undefined;
+  };
   // Reserve bindings before resolving async native config, so deletion cannot race a new session or a profile switch.
   const bindProfile = (id: string | null | undefined) => {
     if (id && deletingProfiles.has(id)) throw Object.assign(new Error('Profile 正在删除，请重新选择'), { status: 409 });
@@ -105,7 +118,17 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (!localRequest) return json(res, { error: 'This endpoint is local-only.' }, 403);
         return json(res, { ok: pairing.revoke(decodeURIComponent(segments[3])) });
       }
-      if (url.pathname === '/api/harnesses' && req.method === 'GET') return json(res, await Promise.all(Object.values(harnesses).map(adapter => adapter.info())));
+      if (url.pathname === '/api/harnesses' && req.method === 'GET') {
+        const infos = await Promise.all(Object.values(harnesses).map(adapter => adapter.info()));
+        for (const gateway of infos.filter(info => (info.id === 'hermes' || info.id === 'openclaw') && !info.available)) {
+          for (const profile of await profiles.list()) {
+            if (profile.harness !== gateway.id || !profile.config.gatewayUrl) continue;
+            const info = await harnesses[gateway.id]!.info({ config: profile.config });
+            if (info.available) { Object.assign(gateway, info, { detail: '可通过已保存的 Gateway Profile 使用，请选择该 Profile；连接和认证尚未检查' }); break; }
+          }
+        }
+        return json(res, infos);
+      }
       if (segments[0] === 'api' && segments[1] === 'harnesses' && segments[3] === 'profile-options' && req.method === 'GET') {
         const harness = segments[2] as HarnessId, adapter = Object.hasOwn(harnesses, harness) ? harnesses[harness] : undefined;
         if (!adapter) return json(res, { error: 'Unsupported harness.' }, 400);
@@ -117,6 +140,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       if (segments[0] === 'api' && segments[1] === 'profiles') {
         const id = segments[2] ? decodeURIComponent(segments[2]) : undefined;
         if (!id && req.method === 'GET') return json(res, await profiles.list());
+        if (id && req.method === 'PUT' && [...store.sessions.values()].some(session => session.profileId === id && (session.providerReview || claims.has(session.id)))) return json(res, { error: '请先完成关联会话的复核，再修改 Profile。' }, 409);
         if ((!id && req.method === 'POST') || (id && req.method === 'PUT')) return json(res, await profiles.save(validateProfileInput(await body(req)), id), id ? 200 : 201);
         if (id && req.method === 'DELETE') {
           const input = await body(req);
@@ -134,7 +158,9 @@ export async function createArtifactsServer(options: { directory: string; instru
         try {
           const cwd = await realpath(typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd : process.cwd());
           if (!(await stat(cwd)).isDirectory()) return json(res, { error: 'Workspace must be a directory.' }, 400);
-          await profiles.resolve(input.profileId === null ? null : profileId, harness, cwd);
+          const profile = await profiles.resolve(input.profileId === null ? null : profileId, harness, cwd);
+          const runtimeInfo = await harnesses[harness].info(profile);
+          if (!runtimeInfo.available) return json(res, { error: `${runtimeInfo.name} 运行时不可用：${runtimeInfo.detail || '请检查安装或 Profile 配置'}` }, 503);
           const session: Session = { id: crypto.randomUUID(), harness, cwd, profileId: input.profileId === null ? null : profileId, model: optionalText(input.model, '模型'), title: '新会话', messages: [], suggestions: [], createdAt: Date.now(), updatedAt: Date.now(), status: 'idle' };
           await store.save(session); return json(res, session, 201);
         } finally { release(); }
@@ -152,7 +178,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (segments.length === 3 && req.method === 'PATCH') {
           const input = await body(req), configuration = 'profileId' in input || 'model' in input;
           if (store.sessions.get(session.id) !== session) return json(res, { error: 'Session not found.' }, 404);
-          if (claims.has(session.id) || configuration && (active.has(session.id) || session.status === 'running')) return json(res, { error: '请在当前一轮结束后切换会话配置。' }, 409);
+          if (claims.has(session.id) || configuration && (active.has(session.id) || session.status === 'running' || session.providerReview)) return json(res, { error: '请在当前一轮及复核结束后切换会话配置。' }, 409);
           const profileId = 'profileId' in input ? optionalText(input.profileId, 'Profile') ?? null : session.profileId, release = bindProfile(profileId);
           claims.add(session.id);
           try {
@@ -193,6 +219,40 @@ export async function createArtifactsServer(options: { directory: string; instru
           if (result === 'invalid') return json(res, { error: 'Answer every question using its allowed choices or a custom answer.' }, 400);
           return json(res, { ok: true });
         }
+        if (segments[3] === 'connections' && segments[4] && req.method === 'POST') {
+          const input = await body(req, 64 * 1024);
+          // The id addresses one operation of one live turn. Controls were captured by the adapter,
+          // so a browser can never name a session, owner or RPC method of its own.
+          const pending = active.get(session.id)?.connection(decodeURIComponent(segments[4]));
+          if (!pending) return json(res, { error: 'Connection operation is no longer open.' }, 409);
+          const action = input.action === undefined ? 'respond' : input.action;
+          try {
+            if (action === 'status') return json(res, { state: await connectionStatus(pending.controls) });
+            if (action === 'check') { await bounded(pending.controls.wake()); return json(res, { state: await connectionStatus(pending.controls) }); }
+            if (action !== 'respond') return json(res, { error: 'Unsupported connection action.' }, 400);
+            await bounded(pending.controls.respond(validateConnectionResponse(input, pending.state)), 30_000);
+            return json(res, { ok: true });
+          } catch (error) {
+            if (error instanceof ConnectionInputError) return json(res, { error: error.message }, error.status);
+            // A provider rejection can quote the credentials it was given; never echo it verbatim.
+            console.warn('[connections]', { sessionId: session.id, action, error: 'Native connection request failed' });
+            return json(res, { error: '连接服务暂时没有接受这次操作，请稍后重试。' }, 502);
+          }
+        }
+        if (segments[3] === 'provider-review' && segments[4] === 'refresh' && segments.length === 5 && req.method === 'POST') {
+          const adapter = harnesses[session.harness];
+          if (!adapter?.refreshProviderReview || !session.nativeId) return json(res, { error: 'This session does not support provider review refresh.' }, 400);
+          if (active.has(session.id) || claims.has(session.id)) return json(res, { error: '请等待当前操作结束后再检查复核状态。' }, 409);
+          claims.add(session.id);
+          const before = session.providerReview;
+          try {
+            const profile = await profiles.resolve(session.profileId, session.harness, session.cwd);
+            try { session.providerReview = await adapter.refreshProviderReview(session.nativeId, session.cwd, profile, before); }
+            catch (error) { throw new Error(safeProfileError(error, profile)); }
+            try { await store.save(session); } catch (error) { session.providerReview = before; throw error; }
+            return json(res, { providerReview: session.providerReview ?? null });
+          } finally { claims.delete(session.id); }
+        }
         if (segments[3] === 'artifacts' && req.method === 'GET') return json(res, await listArtifacts(session.cwd));
         if (segments[3] === 'files') {
           const path = url.searchParams.get('path') ?? '';
@@ -211,6 +271,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       if (url.pathname === '/api/chat' && req.method === 'POST') {
         const input = await body(req), session = store.sessions.get(String(input.id));
         if (!session) return json(res, { error: 'Session not found.' }, 404);
+        if (session.providerReview) return json(res, { error: '会话因服务商复核而暂停，请完成复核并检查状态后再发送。' }, 409);
         if (active.has(session.id) || claims.has(session.id)) return json(res, { error: 'This session already has a running turn.' }, 409);
         const adapter = Object.hasOwn(harnesses, session.harness) ? harnesses[session.harness] : undefined;
         if (!adapter) return json(res, { error: 'This harness is unavailable.' }, 400);

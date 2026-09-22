@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { readUIMessageStream } from 'ai';
 import { sessionActivity } from '../shared/session-activity.js';
 import type { ChatChunk, ChatMessage, Session, SessionSummary } from '../shared/types.js';
+import { redactConnection } from './connections.js';
 
 export class SessionStore {
   readonly sessions = new Map<string, Session>();
@@ -36,7 +37,11 @@ export class SessionStore {
       }
       session.status = interrupted ? 'error' : 'idle';
       // A recovered transcript cannot reconnect the native process that owned these callbacks.
-      for (const message of session.messages) for (const part of message.parts) if (part.type === 'data-question' && !part.data.response) part.data.response = { cancelled: true };
+      for (const message of session.messages) for (const part of message.parts) {
+        if (part.type === 'data-question' && !part.data.response) part.data.response = { cancelled: true };
+        // Recovered connection cards keep their summary; their controls and links died with the process.
+        if (part.type === 'data-connection') part.data = { ...redactConnection(part.data), actionable: false };
+      }
       session.error = interrupted ? 'The server stopped during this turn. The partial response was recovered.' : undefined;
       await this.save(session);
       await rm(this.journalPath(session.id), { force: true });

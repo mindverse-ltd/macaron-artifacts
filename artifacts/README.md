@@ -34,7 +34,15 @@ pnpm start
 
 Run these commands from the repository root. `MACARON_PORT` and `WEB_PORT` override the ports. Production serves the UI and API together.
 
-Install and authenticate the native CLI for Claude Code, Codex, or OpenCode. `MACARON_CLAUDE_PATH`, `MACARON_CODEX_PATH`, and `MACARON_OPENCODE_PATH` can select each executable. The bundled pi SDK uses local `~/.pi/agent` configuration; `PI_CODING_AGENT_DIR` overrides that directory, and no pi executable is required. An empty model field uses the harness default. OpenCode and pi accept an optional `provider/model` override.
+The picker checks the runtime each adapter actually uses, not whether every harness has a command on PATH:
+
+- **Claude Code** uses the bundled SDK and its optional platform binary by default. Keep optional dependencies enabled. `MACARON_CLAUDE_PATH` selects an authoritative CLI or script override; a broken override does not fall back to the bundled binary.
+- **pi** uses the bundled SDK; no separate `pi` CLI is required. It uses local `~/.pi/agent` configuration, or `PI_CODING_AGENT_DIR`.
+- **Codex / OpenCode** require external CLIs. `MACARON_CODEX_PATH` and `MACARON_OPENCODE_PATH` override the executables.
+- **Hermes** uses an external CLI (`MACARON_HERMES_PATH` or `hermes`) unless a Profile's Gateway URL or `MACARON_HERMES_URL` selects an external gateway. A saved gateway Profile can be used without a local CLI.
+- **OpenClaw** uses the bundled Gateway Client and an external gateway, not a local `openclaw` command. Configure the Profile or `OPENCLAW_GATEWAY_URL` (default `ws://127.0.0.1:18789`).
+
+Runtime availability does **not** check model credentials or gateway connectivity. No model requests or gateway handshakes are made by the availability checks. Session creation rechecks the selected runtime/Profile before saving. An empty model field uses the harness default; OpenCode and pi accept an optional `provider/model` override.
 
 App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` overrides that directory. Workspace files remain in the directory selected for each session. Deleting an app conversation does not delete workspace files.
 
@@ -145,6 +153,14 @@ Tests exercise harness event conversion, real JSONL RPC framing, approval/cancel
 `test:package` builds and installs the package into an empty consumer directory, then starts its CLI and checks the harness catalog, all client assets, and password-protected login/logout and restart behavior. It also checks that non-loopback configurations refuse to start without a password. `MACARON_PACKAGE_SOURCE` runs the same acceptance checks against a published preview URL or an existing tarball.
 
 The root package publishes only the unified application. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Native session-history migration, attachments, and the old administrative panels are outside this adapter slice.
+
+## OpenClaw provider review
+
+When OpenClaw reports a provider review, Artifacts keeps a durable pause, shows the reason, and blocks new sends, retries and queued-message delivery. It does not acknowledge the review, reset/fork the session, or switch providers. Complete the review in the official OpenClaw Control UI, then use **检查复核状态**. Only a successful read of the same Gateway/agent/session generation without a review unlocks sends; failed or mismatched reads keep the pause. Held messages require an explicit send afterward.
+
+Set `OPENCLAW_CONTROL_URL` on the Artifacts server to the browser-accessible Control UI base, for example `https://openclaw.example/proxy-base`. The link uses the official literal session-key route and preserves proxy prefixes. Use an HTTP(S) URL without userinfo, query parameters or a fragment; never put Gateway credentials in it. Without a safe URL, the banner gives manual instructions. This setting is global; installations using multiple Gateway Profiles should leave it unset unless they share that Control UI. A Gateway/agent change while paused cannot clear the old review.
+
+The adapter checks advertised `sessions.describe` support, handles session-scoped review events and rechecks terminal runs. A Gateway explicitly advertising an older method set without describe keeps its old behavior. Missing/invalid capability data is not interpreted as clearance. Local regression coverage uses the real adapter/GatewayClient transport with a synthetic loopback Gateway; it does not establish live provider or deployment acceptance.
 
 ## Deferred adapters
 

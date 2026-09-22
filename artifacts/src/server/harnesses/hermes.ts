@@ -29,8 +29,8 @@ export const hermesAdapter: HarnessAdapter = {
     const url = gatewayUrl(profile), capabilities = { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: false, approvals: true, fork: false };
     if (url) {
       let available = false;
-      try { available = ['ws:', 'wss:'].includes(new URL(url).protocol); } catch { /* Invalid configured URL; do not silently switch to the local CLI. */ }
-      return { id: 'hermes', name: 'Hermes', available, source: 'gateway', detail: available ? '已配置外部 Gateway，无需本机 CLI；连接和认证尚未检查' : 'Gateway URL 无效，需要 ws:// 或 wss:// 地址', capabilities };
+      try { available = ['ws:', 'wss:', 'http:', 'https:'].includes(new URL(url).protocol); } catch { /* Invalid configured URL; do not silently switch to the local CLI. */ }
+      return { id: 'hermes', name: 'Hermes', available, source: 'gateway', detail: available ? '已配置外部 Gateway，无需本机 CLI；连接和认证尚未检查' : 'Gateway URL 无效，需要 ws://, wss://, http://, 或 https:// 地址', capabilities };
     }
     const version = await executableVersion(process.env.MACARON_HERMES_PATH || 'hermes');
     return { id: 'hermes', name: 'Hermes', available: Boolean(version), source: 'native-cli', detail: version ? `外部 CLI · ${version}` : 'Hermes CLI 不可用，或可在 Profile 配置外部 Gateway', capabilities };

@@ -106,12 +106,11 @@ export async function createArtifactsServer(options: { directory: string; instru
       }
       if (url.pathname === '/api/harnesses' && req.method === 'GET') {
         const infos = await Promise.all(Object.values(harnesses).map(adapter => adapter.info()));
-        const hermes = infos.find(info => info.id === 'hermes');
-        if (hermes && !hermes.available) {
+        for (const gateway of infos.filter(info => (info.id === 'hermes' || info.id === 'openclaw') && !info.available)) {
           for (const profile of await profiles.list()) {
-            if (profile.harness !== 'hermes' || !profile.config.gatewayUrl) continue;
-            const info = await harnesses.hermes!.info({ config: profile.config });
-            if (info.available) { Object.assign(hermes, info, { detail: '可通过已保存的 Gateway Profile 使用，请选择该 Profile；连接和认证尚未检查' }); break; }
+            if (profile.harness !== gateway.id || !profile.config.gatewayUrl) continue;
+            const info = await harnesses[gateway.id]!.info({ config: profile.config });
+            if (info.available) { Object.assign(gateway, info, { detail: '可通过已保存的 Gateway Profile 使用，请选择该 Profile；连接和认证尚未检查' }); break; }
           }
         }
         return json(res, infos);

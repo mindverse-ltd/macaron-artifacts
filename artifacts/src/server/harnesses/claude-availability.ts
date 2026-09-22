@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import type { HarnessInfo } from '../../shared/types.js';
 import { executableVersion } from './common.js';
 
-/** Match the native-package precedence in the pinned Claude SDK's query(). */
+/** Match query() native-package precedence in Claude SDK 0.3.263; recheck on upgrades. */
 function resolveSdkBinary(): string | undefined {
   const require = createRequire(import.meta.resolve('@anthropic-ai/claude-agent-sdk'));
   const { platform, arch } = process, prefix = '@anthropic-ai/claude-agent-sdk';
@@ -36,11 +36,17 @@ export async function claudeRuntimeInfo(): Promise<HarnessInfo> {
         : await executableVersion(binary);
     }
   } catch { /* Import, platform resolution or execution can be unavailable. */ }
+  let detail: string;
+  if (version) {
+    const sourceLabel = override ? (script ? '自定义脚本' : '外部 CLI') : '内置 Claude SDK';
+    detail = `${sourceLabel} · ${version}`;
+  } else if (override) {
+    detail = 'Claude SDK 或指定的 CLI/脚本不可用，请检查 MACARON_CLAUDE_PATH';
+  } else {
+    detail = 'Claude SDK 或内置原生程序不可用，请重新安装 Artifacts（保留可选依赖）';
+  }
   return {
-    id: 'claude-code', name: 'Claude Code', available: Boolean(version), source,
-    detail: version ? `${override ? script ? '自定义脚本' : '外部 CLI' : '内置 Claude SDK'} · ${version}`
-      : override ? 'Claude SDK 或指定的 CLI/脚本不可用，请检查 MACARON_CLAUDE_PATH'
-        : 'Claude SDK 或内置原生程序不可用，请重新安装 Artifacts（保留可选依赖）',
+    id: 'claude-code', name: 'Claude Code', available: Boolean(version), source, detail,
     capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: false, approvals: true, fork: true },
   };
 }

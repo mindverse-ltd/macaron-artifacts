@@ -91,8 +91,14 @@ describe('native OpenCode v2 lifecycle', () => {
       expect(value.calls.at(-1)?.method).toBe('close');
     }
   });
+  test('permissions expose the native v2 action, not the v1 permission field', async () => {
+    const value = fake((queue, id) => { queue.push(event('permission.asked', { id: 'approval', action: 'shell', resources: ['pwd'] })); success(queue, id); });
+    const approvals: unknown[] = [];
+    await collect(turn({ approve: async request => { approvals.push(request); return true; } }), value.connection);
+    expect(approvals).toEqual([{ id: 'approval', tool: 'shell', input: expect.objectContaining({ action: 'shell', resources: ['pwd'] }) }]);
+  });
   test('cancellation while permission UI is unresolved cannot hang the event pump', async () => {
-    const controller = new AbortController(), value = fake(queue => { queue.push(event('permission.asked', { id: 'approval', permission: 'shell' })); setTimeout(() => controller.abort(), 5); });
+    const controller = new AbortController(), value = fake(queue => { queue.push(event('permission.asked', { id: 'approval', action: 'shell', resources: ['pwd'] })); setTimeout(() => controller.abort(), 5); });
     await expect(collect(turn({ signal: controller.signal, approve: () => new Promise(() => {}) }), value.connection)).rejects.toThrow('interrupted');
     expect(value.calls.map(call => call.method)).toContain('interrupt');
   });
@@ -125,6 +131,23 @@ test('native v2 profile overlays preserve provider config, plugins and native cr
   const result = openCodeV2ProfileConfig(native, { config: { model: 'local/main', baseUrl: 'new', authMode: 'inherit', agentModels: { explore: 'local/worker' } }, apiKey: 'unused' });
   expect(result).toMatchObject({ plugins: ['user-plugin'], providers: { local: { package: 'adapter', settings: { baseURL: 'new', apiKey: 'native', extra: true }, models: { main: {} } } }, agents: { explore: { description: 'native', model: 'local/worker' } } });
   expect(native.providers.local.settings.baseURL).toBe('old'); expect(openCodeV2Model('provider/folder/model')).toEqual({ providerID: 'provider', id: 'folder/model' });
+});
+
+test('native v2 overlays retain legacy entries and respect alias precedence without mutation', () => {
+  const native = { provider: { local: { npm: 'adapter', options: { apiKey: 'native', extra: true }, models: { main: {} } }, untouched: { npm: 'other' } }, agent: { scout: { prompt: 'instructions', mode: 'subagent', temperature: 0.3 }, untouched: { prompt: 'other' } } };
+  const before = structuredClone(native);
+  const profile = { config: { model: 'local/main', baseUrl: 'new', authMode: 'inherit' as const, agentModels: { scout: 'local/worker' } }, apiKey: 'unused' };
+  const result = openCodeV2ProfileConfig(native, profile);
+  expect(result).toEqual({ ...native, model: 'local/main', provider: { ...native.provider, local: { ...native.provider.local, options: { apiKey: 'native', extra: true, baseURL: 'new' } } }, agent: { ...native.agent, scout: { ...native.agent.scout, model: 'local/worker' } } });
+  expect(native).toEqual(before);
+  const mixed = { ...native, providers: { local: { package: 'canonical', models: { main: {} }, settings: { apiKey: 'winner' } } }, mode: { scout: { prompt: 'mode wins' } }, agents: { scout: { system: 'canonical wins' } } };
+  const canonical = openCodeV2ProfileConfig(mixed, profile);
+  expect(canonical).toMatchObject({ provider: native.provider, agent: native.agent, mode: mixed.mode, providers: { local: { package: 'canonical', models: { main: {} }, settings: { apiKey: 'winner', baseURL: 'new' } } }, agents: { scout: { system: 'canonical wins', model: 'local/worker' } } });
+  const modeOnly = openCodeV2ProfileConfig({ ...native, mode: mixed.mode }, profile);
+  expect(modeOnly).toMatchObject({ agent: native.agent, mode: { scout: { prompt: 'mode wins', model: 'local/worker' } } });
+  expect(modeOnly).not.toHaveProperty('agents');
+  const explicit = openCodeV2ProfileConfig(native, { ...profile, config: { ...profile.config, authMode: 'api-key' } });
+  expect(explicit).toMatchObject({ provider: { local: { options: { apiKey: 'unused' } } } });
 });
 
 test('independent binary paths reject the wrong native major before serving', async () => {

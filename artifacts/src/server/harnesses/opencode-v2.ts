@@ -85,7 +85,7 @@ export async function* runOpenCodeV2Connection(turn: HarnessTurn, connection: Op
         const data = record(record(event).data), form = record(data.form);
         if (!started || (data.sessionID ?? form.sessionID) !== nativeID) continue;
         if (event.type === 'permission.asked') reply(`permission:${string(data.id)}`, async local => {
-          const approved = !turn.enrichment && await abortable(turn.approve({ id: string(data.id), tool: string(data.permission), input: data }), local);
+          const approved = !turn.enrichment && await abortable(turn.approve({ id: string(data.id), tool: string(data.action), input: data }), local);
           if (!local.aborted) await client.permission.reply({ sessionID: nativeID, requestID: string(data.id), decision: approved ? 'once' : 'reject' }, options(local));
         });
         else if (event.type === 'form.created') reply(`form:${string(form.id)}`, async local => {

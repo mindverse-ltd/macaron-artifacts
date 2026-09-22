@@ -24,17 +24,22 @@ export function openCodeV2ProfileConfig(native: Record<string, unknown>, profile
   if (model) config.model = model;
   if (selected.agent) config.default_agent = selected.agent;
   if (selected.agentModels) {
-    const agents = { ...record(config.agents) };
-    for (const [id, model] of Object.entries(selected.agentModels)) agents[id] = { ...record(agents[id]), model };
-    config.agents = agents;
+    for (const [id, model] of Object.entries(selected.agentModels)) {
+      // Native aliases replace whole entries: agents > mode > agent.
+      const key = Object.hasOwn(record(config.agents), id) ? 'agents' : Object.hasOwn(record(config.mode), id) ? 'mode' : Object.hasOwn(record(config.agent), id) ? 'agent' : 'agents';
+      const agents = record(config[key]);
+      config[key] = { ...agents, [id]: { ...record(agents[id]), model } };
+    }
   }
   const apiKey = selected.authMode === 'inherit' ? undefined : profile.apiKey;
   if (selected.baseUrl || apiKey) {
     if (!provider) throw new Error('Choose an OpenCode v2 provider or provider/model before overriding its endpoint or API key');
-    // Use canonical v2 overlays. Native normalization merges these over legacy provider documents too.
-    const providers = { ...record(config.providers) }, prior = record(providers[provider]);
-    providers[provider] = { ...prior, settings: { ...record(prior.settings), ...(selected.baseUrl ? { baseURL: selected.baseUrl } : {}), ...(apiKey ? { apiKey } : {}) } };
-    config.providers = providers;
+    // Preserve the authoritative inline shape; adding a competing alias would
+    // replace the complete legacy provider and discard its package/models.
+    const key = Object.hasOwn(record(config.providers), provider) || !Object.hasOwn(record(config.provider), provider) ? 'providers' : 'provider';
+    const field = key === 'providers' ? 'settings' : 'options';
+    const providers = record(config[key]), prior = record(providers[provider]);
+    config[key] = { ...providers, [provider]: { ...prior, [field]: { ...record(prior[field]), ...(selected.baseUrl ? { baseURL: selected.baseUrl } : {}), ...(apiKey ? { apiKey } : {}) } } };
   }
   return config;
 }

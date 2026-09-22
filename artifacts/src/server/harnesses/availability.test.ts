@@ -47,7 +47,7 @@ test('authoritative native overrides accept PATH commands but reject missing/non
   process.env.MACARON_CLAUDE_PATH = await cli('broken', 'process.exit(7)');
   expect((await claudeAdapter.info()).available).toBe(false);
   process.env.MACARON_CODEX_PATH = binary;
-  process.env.MACARON_OPENCODE_PATH = binary;
+  process.env.MACARON_OPENCODE_PATH = await cli('fixture-opencode', 'console.log("opencode v1.0.0")');
   process.env.MACARON_HERMES_PATH = binary;
   for (const adapter of [codexAdapter, openCodeAdapter, hermesAdapter]) expect((await adapter.info()).available).toBe(true);
 });

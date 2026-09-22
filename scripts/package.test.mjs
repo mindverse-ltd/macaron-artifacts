@@ -148,9 +148,18 @@ test('the single published package installs in isolation and serves seven harnes
   assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'hermes', 'openclaw', 'opencode', 'opencode-v2', 'pi']);
   for (const harness of harnesses) {
     assert.equal(harness.available, true, `${harness.id} must be available from its CLI stub or bundled SDK`);
-    assert.match(harness.detail, harness.id === 'pi' ? /^pi SDK \S+/ : harness.id === 'opencode' ? /^1\.18\.29$/ : harness.id === 'opencode-v2' ? /^opencode v2\.0\.13$/ : /package-smoke-native/);
     if (harness.id === 'opencode') assert.equal(harness.name, 'OpenCode v1');
     if (harness.id === 'opencode-v2') assert.equal(harness.name, 'OpenCode v2');
+    if (harness.id === 'pi') {
+      assert.equal(harness.source, 'bundled-sdk');
+      assert.match(harness.detail, /^内置 Pi SDK \S+，无需单独安装 pi CLI$/);
+    } else if (harness.id === 'openclaw') {
+      assert.equal(harness.source, 'gateway');
+      assert.equal(harness.detail, '内置 Gateway Client，无需本机 CLI；需要外部 Gateway，连接和认证尚未检查');
+    } else {
+      assert.equal(harness.source, 'native-cli');
+      assert.match(harness.detail, harness.id === 'opencode' ? /^1\.18\.29$/ : harness.id === 'opencode-v2' ? /^opencode v2\.0\.13$/ : /package-smoke-native/);
+    }
     const response = await fetch(`${app.base}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ harness: harness.id, cwd: consumer }) });
     assert.equal(response.status, 201);
     assert.equal((await response.json()).harness, harness.id);

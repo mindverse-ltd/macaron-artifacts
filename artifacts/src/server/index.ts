@@ -104,7 +104,18 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (!localRequest) return json(res, { error: 'This endpoint is local-only.' }, 403);
         return json(res, { ok: pairing.revoke(decodeURIComponent(segments[3])) });
       }
-      if (url.pathname === '/api/harnesses' && req.method === 'GET') return json(res, await Promise.all(Object.values(harnesses).map(adapter => adapter.info())));
+      if (url.pathname === '/api/harnesses' && req.method === 'GET') {
+        const infos = await Promise.all(Object.values(harnesses).map(adapter => adapter.info()));
+        const hermes = infos.find(info => info.id === 'hermes');
+        if (hermes && !hermes.available) {
+          for (const profile of await profiles.list()) {
+            if (profile.harness !== 'hermes' || !profile.config.gatewayUrl) continue;
+            const info = await harnesses.hermes!.info({ config: profile.config });
+            if (info.available) { Object.assign(hermes, info, { detail: '可通过已保存的 Gateway Profile 使用，请选择该 Profile；连接和认证尚未检查' }); break; }
+          }
+        }
+        return json(res, infos);
+      }
       if (segments[0] === 'api' && segments[1] === 'harnesses' && segments[3] === 'profile-options' && req.method === 'GET') {
         const harness = segments[2] as HarnessId, adapter = Object.hasOwn(harnesses, harness) ? harnesses[harness] : undefined;
         if (!adapter) return json(res, { error: 'Unsupported harness.' }, 400);
@@ -133,7 +144,9 @@ export async function createArtifactsServer(options: { directory: string; instru
         try {
           const cwd = await realpath(typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd : process.cwd());
           if (!(await stat(cwd)).isDirectory()) return json(res, { error: 'Workspace must be a directory.' }, 400);
-          await profiles.resolve(input.profileId === null ? null : profileId, harness, cwd);
+          const profile = await profiles.resolve(input.profileId === null ? null : profileId, harness, cwd);
+          const runtimeInfo = await harnesses[harness].info(profile);
+          if (!runtimeInfo.available) return json(res, { error: `${runtimeInfo.name} 运行时不可用：${runtimeInfo.detail || '请检查安装或 Profile 配置'}` }, 503);
           const session: Session = { id: crypto.randomUUID(), harness, cwd, profileId: input.profileId === null ? null : profileId, model: optionalText(input.model, '模型'), title: '新会话', messages: [], suggestions: [], createdAt: Date.now(), updatedAt: Date.now(), status: 'idle' };
           await store.save(session); return json(res, session, 201);
         } finally { release(); }

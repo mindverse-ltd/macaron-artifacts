@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatChunk, HarnessInfo } from '../../shared/types.js';
 import type { ProfileOptions } from '../../shared/profiles.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
-import { abortError, EventQueue, executableVersion, record, safeError, string } from './common.js';
+import { abortError, EventQueue, record, safeError, string } from './common.js';
 
 type GatewayClient = import('@openclaw/gateway-client').GatewayClient;
 type GatewayOptions = import('@openclaw/gateway-client').GatewayClientOptions;
@@ -10,7 +10,6 @@ type GatewayEvent = { event: string; payload?: unknown };
 type NativeSession = { key: string; id?: string; cwd: string };
 type StreamState = { text: string; thought: string; textId: string; thoughtId: string; tools: Set<string> };
 
-const OPENCLAW = () => process.env.MACARON_OPENCLAW_PATH || 'openclaw';
 const decode = (value: string | undefined, cwd: string): NativeSession | undefined => {
   if (!value) return;
   try { const decoded = JSON.parse(Buffer.from(value.startsWith('openclaw:') ? value.slice('openclaw:'.length) : value, 'base64url').toString('utf8')); if (decoded.key) return { key: String(decoded.key), id: decoded.id ? String(decoded.id) : undefined, cwd: String(decoded.cwd || cwd) }; } catch { /* Old sessions stored the Gateway key directly. */ }
@@ -82,7 +81,11 @@ async function createClient(turn: HarnessTurn, queue: EventQueue<ChatChunk>, ses
 
 export const openClawAdapter: HarnessAdapter = {
   id: 'openclaw' as never,
-  async info(): Promise<HarnessInfo> { const version = await executableVersion(OPENCLAW()); return { id: 'openclaw' as never, name: 'OpenClaw', available: Boolean(version), detail: version || 'Install OpenClaw', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } }; },
+  async info(): Promise<HarnessInfo> {
+    let available = false;
+    try { available = typeof (await import('@openclaw/gateway-client')).GatewayClient === 'function'; } catch { /* Missing or broken bundled SDK. */ }
+    return { id: 'openclaw', name: 'OpenClaw', available, source: 'gateway', detail: available ? '内置 Gateway Client，无需本机 CLI；需要外部 Gateway，连接和认证尚未检查' : 'Gateway Client SDK 不可用，请重新安装 Artifacts', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } };
+  },
   async profileOptions(): Promise<ProfileOptions> { return { models: [], efforts: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] }; },
   async *run(turn): AsyncIterable<ChatChunk> {
     if (turn.signal.aborted) throw abortError();

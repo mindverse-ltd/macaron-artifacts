@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { Message, SystemMessage } from '@earendil-works/pi-ai';
-import { normalizeContext, toToolDeclaration } from '@earendil-works/pi-ai';
 import type { AgentSession, CreateAgentSessionOptions, ExtensionUIDialogOptions, ExtensionUIContext, FileEntry, SessionHeader, SessionManager } from '@earendil-works/pi-coding-agent';
 import type { ChatChunk } from '../../shared/types.js';
 import type { Question } from '../../shared/questions.js';
@@ -12,6 +10,37 @@ import { abortable, abortError, EventQueue, record, safeError } from './common.j
 import { PiEventMapper } from './pi-events.js';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
+/**
+ * Minimal structural mirrors of the pi-ai transcript types. Pre-0.86 SDKs do not export
+ * `SystemMessage` or the transcript helpers at all, so this adapter declares exactly the
+ * fields it reads instead of importing names that only exist in one generation.
+ */
+type PiTool = { name: string; description: string; parameters: unknown; constrainedSampling?: unknown };
+type PiMessage = { role: string; timestamp: number };
+type PiSystemMessage = PiMessage & { role: 'system'; content: string | unknown[]; sections?: Record<string, string | null>; toolsAdded?: PiTool[]; toolsRemoved?: { name: string }[] };
+/** Whatever the installed SDK actually hands the stream function: `TranscriptContext` from 0.86, `Context` before it. */
+type RequestContext = Parameters<AgentSession['agent']['streamFunction']>[1];
+/** Pre-0.86 stream contexts carry the prompt and tool declarations as top-level request fields. */
+type LegacyRequestContext = { systemPrompt?: string; messages: PiMessage[]; tools?: PiTool[] };
+type LegacyBootstrapTools = { name: string; description: string; parameters: unknown };
+type TranscriptHelpers = { normalizeContext: (context: { messages: PiMessage[] }) => RequestContext; toToolDeclaration: (tool: PiTool) => PiTool };
+
+let transcriptHelpers: TranscriptHelpers | null | undefined;
+/**
+ * 0.86 moved the prompt and tool declarations out of the top-level request fields and into
+ * the transcript's system messages, adding `normalizeContext`/`toToolDeclaration`. Their
+ * presence in the loaded module is the generation probe; older SDKs return null and the
+ * adapter uses the flattened contract instead.
+ */
+export async function piTranscriptHelpers(): Promise<TranscriptHelpers | null> {
+  if (transcriptHelpers !== undefined) return transcriptHelpers;
+  const module: Record<string, unknown> = { ...await import('@earendil-works/pi-ai') };
+  const normalize = module.normalizeContext, declare = module.toToolDeclaration;
+  transcriptHelpers = typeof normalize === 'function' && typeof declare === 'function'
+    ? { normalizeContext: normalize as TranscriptHelpers['normalizeContext'], toToolDeclaration: declare as TranscriptHelpers['toToolDeclaration'] }
+    : null;
+  return transcriptHelpers;
+}
 export function piQuestionUI(turn: HarnessTurn): Pick<ExtensionUIContext, 'select' | 'input'> {
   const ask = async (question: Question, options?: ExtensionUIDialogOptions) => {
     if (turn.enrichment) return undefined;
@@ -25,30 +54,36 @@ export function piQuestionUI(turn: HarnessTurn): Pick<ExtensionUIContext, 'selec
     input: (title, placeholder, opts) => ask({ id: 'answer', question: title, options: [], custom: true, placeholder }, opts),
   };
 }
-type RequestContext = Parameters<AgentSession['agent']['streamFunction']>[1];
 type PayloadPrefix = { api: string; history: string; fields: Record<string, unknown>; instructions: unknown[] };
 /**
  * Version 3 records the transcript system messages that carry the prompt and tool
- * declarations. Version 2 stored a flattened `systemPrompt`/`tools` pair from the
- * pre-0.86 top-level request fields; that shape cannot express sections or mid-conversation
- * tool evolution, so it is rejected rather than silently reinterpreted.
+ * declarations. Version 2 stores the flattened `systemPrompt`/`tools` pair that pre-0.86
+ * SDKs put in the top-level request fields; that shape cannot express sections or
+ * mid-conversation tool evolution, so a version-2 entry is only replayed under an SDK that
+ * still sends those fields, never reinterpreted as a version-3 transcript.
  */
-type BootstrapSystem = { before: number; message: SystemMessage }[];
-type Bootstrap = { version: 3; instructions: string; system: BootstrapSystem; payload?: PayloadPrefix };
+type BootstrapSystem = { before: number; message: PiSystemMessage }[];
+type TranscriptBootstrap = { version: 3; instructions: string; system: BootstrapSystem; payload?: PayloadPrefix };
+type LegacyBootstrap = { version: 2; instructions: string; systemPrompt?: string; tools?: LegacyBootstrapTools[]; payload?: PayloadPrefix };
+type Bootstrap = TranscriptBootstrap | LegacyBootstrap;
 const BOOTSTRAP = 'macaron-artifacts:pi-bootstrap';
 
 /** Preserve each instruction/tool delta and its position among conversation messages. */
-export function captureBootstrapSystem(messages: readonly Message[]): BootstrapSystem {
+export function captureBootstrapSystem(messages: readonly { role: string }[], toToolDeclaration: TranscriptHelpers['toToolDeclaration']): BootstrapSystem {
   let before = 0;
   return structuredClone(messages.flatMap(message => {
     if (message.role !== 'system') { before++; return []; }
-    return [{ before, message: { ...message, ...(message.toolsAdded ? { toolsAdded: message.toolsAdded.map(toToolDeclaration) } : {}) } }];
+    const system = message as PiSystemMessage;
+    return [{ before, message: { ...system, ...(system.toolsAdded ? { toolsAdded: system.toolsAdded.map(toToolDeclaration) } : {}) } }];
   }));
 }
 
-/** Replace fork-only instructions without moving the parent's historical system deltas. */
-export function restoreBootstrapSystem(context: RequestContext, system: BootstrapSystem): RequestContext {
-  const conversation = context.messages.filter(message => message.role !== 'system'), messages: Message[] = [];
+/**
+ * Replace fork-only instructions without moving the parent's historical system deltas.
+ * Returns a plain message list; the caller normalizes it with the installed SDK.
+ */
+export function restoreBootstrapSystem<T extends { role: string }>(context: { messages: readonly T[] }, system: BootstrapSystem): { messages: (T | PiSystemMessage)[] } {
+  const conversation = context.messages.filter(message => message.role !== 'system'), messages: (T | PiSystemMessage)[] = [];
   let offset = 0;
   for (const entry of structuredClone(system)) {
     if (!Number.isSafeInteger(entry.before) || entry.before < offset || entry.before > conversation.length || entry.message.role !== 'system') throw new Error('Pi metadata transcript no longer matches its parent');
@@ -56,7 +91,29 @@ export function restoreBootstrapSystem(context: RequestContext, system: Bootstra
     offset = entry.before;
   }
   messages.push(...conversation.slice(offset));
-  return normalizeContext({ messages });
+  return { messages };
+}
+
+/**
+ * Pre-0.86 request fields hold the whole prompt and tool set, so the parent's pair replaces
+ * the fork's outright. The conversation itself is untouched: those SDKs keep no system
+ * messages in the transcript.
+ */
+export function captureLegacyBootstrap(context: { systemPrompt?: unknown; tools?: unknown }, instructions: string): LegacyBootstrap {
+  const prompt = typeof context.systemPrompt === 'string' ? context.systemPrompt : undefined;
+  // Registered tools carry `execute` and other host-only callbacks that no clone can copy.
+  // Persist only the declaration the model actually saw, exactly as the pre-0.86 wire did.
+  const tools = Array.isArray(context.tools) ? (context.tools as PiTool[]).map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters })) : undefined;
+  return structuredClone({ version: 2 as const, instructions, systemPrompt: prompt, tools });
+}
+
+/** Validate the saved pair before it replaces a live legacy request's prompt and tool fields. */
+export function restoreLegacyBootstrap<T extends { role: string }>(context: { messages: readonly T[] }, bootstrap: LegacyBootstrap): { messages: T[]; systemPrompt?: string; tools?: LegacyBootstrapTools[] } {
+  if (context.messages.some(message => message.role === 'system')) throw new Error('Pi metadata transcript no longer matches its parent');
+  if (bootstrap.systemPrompt !== undefined && typeof bootstrap.systemPrompt !== 'string') throw new Error('Pi metadata bootstrap has an invalid systemPrompt');
+  if (bootstrap.tools !== undefined && (!Array.isArray(bootstrap.tools) || bootstrap.tools.some(tool => !tool || typeof tool !== 'object' || typeof tool.name !== 'string' || typeof tool.description !== 'string' || typeof (tool as { parameters?: unknown }).parameters !== 'object'))) throw new Error('Pi metadata bootstrap has invalid tools');
+  const restored = structuredClone(bootstrap);
+  return { ...context, messages: [...context.messages], systemPrompt: restored.systemPrompt, tools: restored.tools };
 }
 const PREFIX_FIELDS = ['model', 'modelId', 'system', 'instructions', 'tools', 'toolConfig', 'prompt_cache_key', 'promptCacheKey', 'user', 'metadata', 'config.systemInstruction', 'config.tools', 'config.toolConfig', 'context.systemPrompt', 'context.tools', 'options.sessionId'];
 const field = (value: unknown, key: string): unknown => key.split('.').reduce<unknown>((value, key) => record(value)[key], value);
@@ -149,6 +206,8 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
   if (turn.enrichment && !turn.nativeId) throw new Error('Metadata generation requires a completed native Pi session');
   const agentDir = sdk.getAgentDir(), settingsManager = sdk.SettingsManager.create(turn.cwd, agentDir);
   const loader = new sdk.DefaultResourceLoader({ cwd: turn.cwd, agentDir, settingsManager, appendSystemPromptOverride: base => [...base, turn.instructions] });
+  // The installed SDK generation decides which bootstrap contract this turn can capture or replay.
+  const transcript = await piTranscriptHelpers();
   let manager: SessionManager | undefined, affinity: string | undefined, bootstrap: Bootstrap | undefined, session: AgentSession | undefined;
   if (turn.nativeId) {
     const entries = await readNativeSession(sdk, turn.nativeId), header = entries[0] as SessionHeader;
@@ -158,12 +217,16 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
       manager = sdk.SessionManager.inMemory(turn.cwd, undefined, fork.entries);
       const saved = manager.getBranch().findLast(entry => entry.type === 'custom' && entry.customType === BOOTSTRAP);
       const value = saved?.type === 'custom' ? record(saved.data) : {};
-      // A version-2 entry predates transcript system messages. Its flattened prompt/tool pair
-      // cannot reproduce sections or mid-conversation tool changes, so metadata fails closed
-      // here instead of reconstructing a prefix the parent never sent. Normal resume is
-      // unaffected: it recaptures a version-3 bootstrap from the live stream context.
-      if (value.version === 2) throw new Error('Pi session has a legacy UI4A bootstrap from an older SDK; complete a normal turn before generating metadata');
-      if (value.version !== 3 || value.instructions !== turn.instructions || !Array.isArray(value.system) || !value.payload) throw new Error('Pi session is missing its matching UI4A bootstrap');
+      const expected = transcript ? 3 : 2;
+      // A version-2 entry holds the flattened prompt/tool pair that only pre-0.86 SDKs send,
+      // and a version-3 entry holds transcript system messages only newer SDKs accept. Across
+      // generations neither can reproduce the other's request prefix, so metadata fails closed
+      // instead of reconstructing a prefix the parent never sent. Normal resume is unaffected:
+      // it recaptures a bootstrap for the running generation from the live stream context.
+      if (value.version === 2 && expected === 3) throw new Error('Pi session has a legacy UI4A bootstrap from an older SDK; complete a normal turn before generating metadata');
+      if (value.version === 3 && expected === 2) throw new Error('Pi session has a UI4A bootstrap from a newer SDK; complete a normal turn before generating metadata');
+      if (value.version !== expected || value.instructions !== turn.instructions || !value.payload) throw new Error('Pi session is missing its matching UI4A bootstrap');
+      if (expected === 3 && !Array.isArray(value.system)) throw new Error('Pi session is missing its matching UI4A bootstrap');
       bootstrap = value as Bootstrap;
     } else manager = sdk.SessionManager.open(turn.nativeId);
   }
@@ -206,11 +269,23 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
     const nativeStream = current.agent.streamFunction;
     let captured: Bootstrap | undefined;
     current.agent.streamFunction = (model, context, options) => {
-      // The prompt and tool declarations now live in the transcript's system messages.
-      // Metadata replaces the parent's system messages in place and keeps every later
-      // non-system message, so sections and tool evolution replay exactly as they did.
-      if (bootstrap) context = restoreBootstrapSystem(context, bootstrap.system);
-      else captured = { version: 3, instructions: turn.instructions, system: captureBootstrapSystem(context.messages) };
+      // 0.86+ puts the prompt and tool declarations in the transcript's system messages; older
+      // SDKs send them as top-level `systemPrompt`/`tools` request fields. Metadata replaces
+      // the fork-only instructions with the parent's prefix — system messages for transcript
+      // SDKs, the flattened pair for legacy SDKs — and keeps every later message, so sections
+      // and tool evolution replay exactly as they did.
+      // The two generations model this argument with incompatible types (branded
+      // `TranscriptContext` from 0.86, plain `Context` before it) while agreeing on the
+      // `messages` array these helpers read. Bridging through the structural view here, once,
+      // is what lets identical source compile and run against both installed SDKs.
+      const incoming = context as unknown as { messages: PiMessage[]; systemPrompt?: unknown; tools?: unknown };
+      if (!Array.isArray(incoming.messages)) throw new Error('Pi stream context has no message list');
+      if (bootstrap) {
+        if (bootstrap.version === 3 && transcript) context = transcript.normalizeContext(restoreBootstrapSystem(incoming, bootstrap.system));
+        else if (bootstrap.version === 2 && !transcript) context = restoreLegacyBootstrap(incoming, bootstrap) as unknown as RequestContext;
+        else throw new Error('Pi metadata bootstrap does not match the running SDK generation');
+      } else if (transcript) captured = { version: 3, instructions: turn.instructions, system: captureBootstrapSystem(incoming.messages, transcript.toToolDeclaration) };
+      else captured = captureLegacyBootstrap(incoming, turn.instructions);
       const previous = options?.onPayload;
       return nativeStream(model, context, { ...options, ...(bootstrap ? { transport: 'sse' as const } : {}), onPayload: async (payload, model) => {
         const changed = await previous?.(payload, model), final = changed === undefined ? payload : changed;

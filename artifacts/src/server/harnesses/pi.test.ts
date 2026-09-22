@@ -3,11 +3,16 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { FileEntry } from '@earendil-works/pi-coding-agent';
-import { getCurrentSystemPrompt, getCurrentTools, normalizeContext, toToolDeclaration, Type, type Message, type SystemMessage, type Tool } from '@earendil-works/pi-ai';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessTurn } from './types.js';
 import { PiEventMapper } from './pi-events.js';
-import { captureBootstrapSystem, createPiSession, piMetadataEntries, piPayloadPrefix, restoreBootstrapSystem, restorePiPayloadPrefix, runPiSession } from './pi.js';
+import { captureBootstrapSystem, captureLegacyBootstrap, createPiSession, piMetadataEntries, piPayloadPrefix, piTranscriptHelpers, restoreBootstrapSystem, restoreLegacyBootstrap, restorePiPayloadPrefix, runPiSession } from './pi.js';
+
+type FixtureTool = { name: string; description: string; parameters: unknown };
+type FixtureMessage = { role: string; content?: unknown; sections?: Record<string, string | null>; toolsAdded?: FixtureTool[]; toolsRemoved?: { name: string }[]; timestamp: number };
+const declareTool = (tool: FixtureTool): FixtureTool => structuredClone({ name: tool.name, description: tool.description, parameters: tool.parameters });
+const systemPrompt = (messages: FixtureMessage[]) => messages.filter(message => message.role === 'system').map(message => String(message.content ?? '')).join('\\n');
+const currentTools = (messages: FixtureMessage[]) => { const tools = new Map<string, FixtureTool>(); for (const message of messages) { for (const tool of message.toolsAdded ?? []) tools.set(tool.name, tool); for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name); } return [...tools.values()]; };
 
 const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, ask: async () => ({ cancelled: true as const }), approve: async () => true, ...overrides });
 const update = (type: string, fields: Record<string, unknown> = {}) => ({ type: 'message_update', assistantMessageEvent: { type, contentIndex: 0, ...fields } });
@@ -76,58 +81,56 @@ test('protects serialized Responses and Google prefixes while retaining the new 
   expect(() => restorePiPayloadPrefix({ ...next, model: 'another-model' }, 'openai-responses', piPayloadPrefix(source, 'openai-responses')!)).toThrow('no longer matches');
 });
 
-describe('Pi transcript bootstrap', () => {
-  const tool = (name: string, description = `${name} description`): Tool => ({ name, description, parameters: Type.Object({ path: Type.String() }) });
-  const context = (messages: Message[]) => normalizeContext({ messages });
-  const leading = (tools: Tool[], content = 'Base prompt', sections?: Record<string, string | null>): SystemMessage => ({ role: 'system', content, ...(sections ? { sections } : {}), toolsAdded: tools, timestamp: 0 });
+describe('Pi bootstrap adapter', () => {
+  const tool = (name: string, description = `${name} description`): FixtureTool => ({ name, description, parameters: { type: 'object', properties: { path: { type: 'string' } } } });
+  const leading = (tools: FixtureTool[], content = 'Base prompt', sections?: Record<string, string | null>): FixtureMessage => ({ role: 'system', content, ...(sections ? { sections } : {}), toolsAdded: tools, timestamp: 0 });
 
-  test('captures the transcript prompt and declared tools from a real stream context', () => {
-    const write = tool('write'), captured = captureBootstrapSystem(context([leading([write], 'Base prompt', { guidance: 'UI4A rules' }), { role: 'user', content: 'main', timestamp: 1 }]).messages);
-    expect(captured).toHaveLength(1);
-    expect(getCurrentSystemPrompt(captured.map(entry => entry.message))).toBe(getCurrentSystemPrompt([leading([write], 'Base prompt', { guidance: 'UI4A rules' })]));
-    expect(getCurrentTools(captured.map(entry => entry.message)).map(value => value.name)).toEqual(['write']);
-    // Declarations persist exactly what the model saw, with executable fields dropped.
-    expect(getCurrentTools(captured.map(entry => entry.message))[0]).toEqual(toToolDeclaration(write));
-  });
-
-  test('keeps mid-conversation prompt and tool evolution instead of flattening it', () => {
-    const added = tool('bash'), messages = [
-      leading([tool('write')]),
-      { role: 'user' as const, content: 'main', timestamp: 1 },
-      { role: 'system' as const, content: 'Extra instruction', sections: { guidance: 'replaced' }, toolsAdded: [added], toolsRemoved: [{ name: 'write' }], timestamp: 2 },
-      { role: 'user' as const, content: 'follow up', timestamp: 3 },
-    ];
-    const captured = captureBootstrapSystem(context(messages).messages);
-    expect(captured).toHaveLength(2);
-    expect(getCurrentTools(captured.map(entry => entry.message)).map(value => value.name)).toEqual(['bash']);
-    expect(getCurrentSystemPrompt(captured.map(entry => entry.message))).toContain('Extra instruction');
-    // The later system message keeps its own deltas rather than being folded into the leading one.
+  test('captures positioned system deltas and declarations without flattening', () => {
+    const write = tool('write'), messages: FixtureMessage[] = [leading([write], 'Base prompt', { guidance: 'UI4A rules' }), { role: 'user', content: 'main', timestamp: 1 }, { role: 'system', content: 'Extra instruction', sections: { guidance: 'replaced' }, toolsAdded: [tool('bash')], toolsRemoved: [{ name: 'write' }], timestamp: 2 }, { role: 'user', content: 'follow up', timestamp: 3 }];
+    const captured = captureBootstrapSystem(messages, declareTool);
+    expect(captured.map(entry => entry.before)).toEqual([0, 1]);
+    expect(systemPrompt(captured.map(entry => entry.message))).toContain('Extra instruction');
+    expect(currentTools(captured.map(entry => entry.message)).map(value => value.name)).toEqual(['bash']);
+    expect(captured[0]!.message.toolsAdded![0]).toEqual(declareTool(write));
     expect(captured[1]!.message.toolsRemoved).toEqual([{ name: 'write' }]);
     expect(captured[1]!.message.sections).toEqual({ guidance: 'replaced' });
-    expect(captured.map(entry => entry.before)).toEqual([0, 1]);
-    expect(restoreBootstrapSystem(context(messages), captured).messages).toEqual(messages);
+    expect(restoreBootstrapSystem({ messages }, captured).messages).toEqual(messages);
   });
 
-  test('restores the parent system messages in place over a changed metadata conversation', () => {
-    const parent = captureBootstrapSystem(context([leading([tool('write')], 'Parent prompt'), { role: 'user', content: 'main', timestamp: 1 }, { role: 'system', content: 'Parent update', toolsAdded: [tool('bash')], timestamp: 2 }]).messages);
-    const metadata = context([leading([tool('unrelated')], 'Metadata prompt'), { role: 'user', content: 'main', timestamp: 1 }, { role: 'assistant', content: [{ type: 'text', text: 'answer' }], api: 'openai-completions', provider: 'stub', model: 'stub', stopReason: 'stop', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: 2 }, { role: 'user', content: 'metadata only', timestamp: 3 }]);
-    const restored = restoreBootstrapSystem(metadata, parent);
-    expect(getCurrentSystemPrompt(restored.messages)).toBe(getCurrentSystemPrompt(parent.map(entry => entry.message)));
+  test('restores positioned parent messages over metadata history and rejects invalid positions', () => {
+    const parentMessages: FixtureMessage[] = [leading([tool('write')], 'Parent prompt'), { role: 'user', content: 'main', timestamp: 1 }, { role: 'system', content: 'Parent update', toolsAdded: [tool('bash')], timestamp: 2 }];
+    const parent = captureBootstrapSystem(parentMessages, declareTool), metadata: FixtureMessage[] = [leading([tool('unrelated')], 'Metadata prompt'), { role: 'user', content: 'main', timestamp: 1 }, { role: 'assistant', content: 'answer', timestamp: 2 }, { role: 'user', content: 'metadata only', timestamp: 3 }];
+    const restored = restoreBootstrapSystem({ messages: metadata }, parent);
+    expect(systemPrompt(restored.messages)).toBe(systemPrompt(parent.map(entry => entry.message)));
     expect(restored.messages.map(message => message.role)).toEqual(['system', 'user', 'system', 'assistant', 'user']);
-    expect(getCurrentTools(restored.messages).map(value => value.name)).toEqual(['write', 'bash']);
-    // The metadata turn's own conversation survives intact, and no metadata prompt leaks in.
-    expect(restored.messages.filter(message => message.role !== 'system')).toEqual(metadata.messages.filter(message => message.role !== 'system'));
+    expect(currentTools(restored.messages).map(value => value.name)).toEqual(['write', 'bash']);
+    expect(restored.messages.filter(message => message.role !== 'system')).toEqual(metadata.filter(message => message.role !== 'system'));
     expect(JSON.stringify(restored.messages)).not.toContain('Metadata prompt');
-    expect(JSON.stringify(restored.messages)).not.toContain('unrelated');
+    expect(() => restoreBootstrapSystem({ messages: metadata }, [{ before: 99, message: parent[0]!.message }])).toThrow('no longer matches');
+    for (const before of [-1, 0.5, NaN]) expect(() => restoreBootstrapSystem({ messages: metadata }, [{ before, message: parent[0]!.message }])).toThrow('no longer matches');
+    expect(() => restoreBootstrapSystem({ messages: metadata }, [{ ...parent[0]!, before: 1 }, { ...parent[1]!, before: 0 }])).toThrow('no longer matches');
   });
 
-  test('clones nested schemas so a restored request cannot mutate the saved bootstrap', () => {
-    const saved = captureBootstrapSystem(context([leading([tool('write')]), { role: 'user', content: 'main', timestamp: 1 }]).messages);
-    const snapshot = structuredClone(saved), restored = restoreBootstrapSystem(context([{ role: 'user', content: 'metadata', timestamp: 1 }]), saved);
-    const tools = getCurrentTools(restored.messages) as unknown as { parameters: { properties: Record<string, unknown> } }[];
-    tools[0]!.parameters.properties.injected = { type: 'string' };
-    (restored.messages[0] as SystemMessage).content = 'rewritten';
+  test('isolates nested declaration data from the saved bootstrap', () => {
+    const saved = captureBootstrapSystem([leading([tool('write')]), { role: 'user', content: 'main', timestamp: 1 }], declareTool), snapshot = structuredClone(saved), restored = restoreBootstrapSystem({ messages: [{ role: 'user', content: 'metadata', timestamp: 1 }] }, saved);
+    const restoredSystem = restored.messages[0] as FixtureMessage;
+    (restoredSystem.toolsAdded![0]!.parameters as { properties: Record<string, unknown> }).properties.injected = { type: 'string' };
+    restoredSystem.content = 'rewritten';
     expect(saved).toEqual(snapshot);
+  });
+
+  test('captures and restores the legacy flattened bootstrap with declaration-only tools', () => {
+    const executable = { ...tool('write'), execute: () => 'must not persist' }, context = { systemPrompt: 'parent', messages: [{ role: 'user', timestamp: 1 }], tools: [executable] };
+    const saved = captureLegacyBootstrap(context, 'Stable UI4A guidance');
+    expect(saved).toMatchObject({ version: 2, systemPrompt: 'parent', tools: [{ name: 'write', description: 'write description', parameters: executable.parameters }] });
+    expect(saved.tools![0]).not.toHaveProperty('execute');
+    const restored = restoreLegacyBootstrap({ messages: context.messages }, saved);
+    expect(restored).toMatchObject({ systemPrompt: 'parent', tools: saved.tools });
+    expect(() => restoreLegacyBootstrap(context, { ...saved, tools: [{ name: 1 } as never] })).toThrow('invalid tools');
+    const original = structuredClone(saved);
+    (restored.tools![0]!.parameters as { properties: Record<string, unknown> }).properties.injected = { type: 'string' };
+    expect(saved).toEqual(original);
+    expect(restoreLegacyBootstrap(context, captureLegacyBootstrap({}, 'rules'))).toEqual({ messages: context.messages, systemPrompt: undefined, tools: undefined });
   });
 });
 
@@ -135,7 +138,10 @@ describe('Pi native SDK with a local scripted provider', () => {
   let directory: string, agentDir: string, cwd: string, oldAgentDir: string | undefined;
   let server: ReturnType<typeof Bun.serve>, requests: Record<string, unknown>[] = [], answer = 'main';
   let streaming!: () => void;
+  // The installed SDK decides which request contract these assertions must see.
+  let transcriptGeneration!: boolean;
   beforeAll(async () => {
+    transcriptGeneration = (await piTranscriptHelpers()) !== null;
     directory = await mkdtemp(path.join(os.tmpdir(), 'artifacts-pi-')); agentDir = path.join(directory, 'agent'); cwd = path.join(directory, 'work');
     await mkdir(agentDir); await mkdir(cwd);
     oldAgentDir = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -187,7 +193,7 @@ describe('Pi native SDK with a local scripted provider', () => {
     expect(await readFile(nativeId, 'utf8')).toContain('second response');
   }, 30_000);
 
-  test('persists the actual transcript bootstrap and isolates metadata from changed native resources', async () => {
+  test('persists the actual bootstrap for the running SDK generation and isolates metadata from changed native resources', async () => {
     let nativeId = ''; requests = []; answer = 'completed';
     await run({ onNativeSession: id => { nativeId = id; } });
     const original = await readFile(nativeId, 'utf8'), mainRequest = requests.at(-1)!;
@@ -195,10 +201,26 @@ describe('Pi native SDK with a local scripted provider', () => {
     const saved = parseSessionEntries(original).findLast(entry => entry.type === 'custom' && entry.customType === 'macaron-artifacts:pi-bootstrap');
     expect(saved?.type).toBe('custom');
     if (saved?.type !== 'custom') throw new Error('Missing bootstrap');
-    const bootstrap = saved.data as { version: number; system: { before: number; message: SystemMessage }[] };
-    expect(bootstrap.version).toBe(3);
-    expect(getCurrentSystemPrompt(bootstrap.system.map(entry => entry.message))).toContain('Stable UI4A guidance');
-    expect(getCurrentTools(bootstrap.system.map(entry => entry.message)).some(tool => tool.name === 'write')).toBe(true);
+    const bootstrap = saved.data as { version: number; instructions: string; systemPrompt?: string; tools?: FixtureTool[]; system?: { before: number; message: FixtureMessage }[] };
+    // The saved shape must match what the installed SDK actually sends on the wire.
+    expect(bootstrap.version).toBe(transcriptGeneration ? 3 : 2);
+    expect(bootstrap.instructions).toBe('Stable UI4A guidance');
+    if (transcriptGeneration) {
+      const messages = bootstrap.system!.map(entry => entry.message);
+      // Native integration uses the installed SDK's real section/delta semantics,
+      // not the simplified helpers used by the pure structural fixtures above.
+      const ai: Record<string, unknown> = { ...await import('@earendil-works/pi-ai') };
+      if (typeof ai.getCurrentSystemPrompt !== 'function' || typeof ai.getCurrentTools !== 'function') throw new Error('Missing native transcript helpers');
+      expect(ai.getCurrentSystemPrompt(messages)).toContain('Stable UI4A guidance');
+      const tools: FixtureTool[] = ai.getCurrentTools(messages);
+      expect(tools.some(tool => tool.name === 'write')).toBe(true);
+      for (const tool of tools) expect(tool).not.toHaveProperty('execute');
+    } else {
+      expect(bootstrap.system).toBeUndefined();
+      expect(bootstrap.systemPrompt).toContain('Stable UI4A guidance');
+      expect(bootstrap.tools!.some(tool => tool.name === 'write')).toBe(true);
+      for (const tool of bootstrap.tools!) expect(tool).not.toHaveProperty('execute');
+    }
     const resource = path.join(agentDir, 'APPEND_SYSTEM.md'), before = await readFile(resource, 'utf8');
     try {
       await writeFile(resource, 'Changed resource must not enter metadata.');
@@ -210,11 +232,16 @@ describe('Pi native SDK with a local scripted provider', () => {
     } finally { await writeFile(resource, before); }
   }, 30_000);
 
-  test('legacy bootstrap fails closed until a normal resumed turn refreshes it', async () => {
+  test('an opposite-generation bootstrap fails closed until a normal resumed turn refreshes it', async () => {
     let nativeId = ''; answer = 'legacy parent'; await run({ onNativeSession: id => { nativeId = id; } });
     const { SessionManager } = await import('@earendil-works/pi-coding-agent');
     const manager = SessionManager.open(nativeId);
-    manager.appendCustomEntry('macaron-artifacts:pi-bootstrap', { version: 2, instructions: 'Stable UI4A guidance', systemPrompt: 'old', tools: [], payload: piPayloadPrefix(requests.at(-1), 'openai-completions') });
+    // Write the bootstrap the OTHER generation would have saved: version 2 under a transcript
+    // SDK, version 3 under a pre-0.86 SDK. Neither can reproduce the running SDK's prefix.
+    const payload = piPayloadPrefix(requests.at(-1), 'openai-completions');
+    manager.appendCustomEntry('macaron-artifacts:pi-bootstrap', transcriptGeneration
+      ? { version: 2, instructions: 'Stable UI4A guidance', systemPrompt: 'old', tools: [], payload }
+      : { version: 3, instructions: 'Stable UI4A guidance', system: [{ before: 0, message: { role: 'system', content: 'old', timestamp: 0 } }], payload });
     const original = await readFile(nativeId, 'utf8'); requests = [];
     await expect(run({ nativeId, enrichment: true })).rejects.toThrow('complete a normal turn');
     expect(requests).toHaveLength(0); expect(await readFile(nativeId, 'utf8')).toBe(original);

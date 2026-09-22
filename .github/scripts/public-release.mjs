@@ -42,11 +42,22 @@ export function parseArgs(argv) {
   return options;
 }
 
+const INTERNAL = /mindverse-ltd|macaron-claude-code|Co-authored-by:|Signed-off-by:|(?:^|\s|\()#\d+|github\.com\/[^\s]+\/(?:pull|issues)\//im;
+const GENERIC_SYNC = 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.';
+
 export function validateMessage(message) {
   const lines = message.replaceAll('\r\n', '\n').trim().split('\n');
   if (!lines[0] || [...lines[0]].length >= 72 || lines[1] !== '' || !lines[2]?.trim()) throw new Error('provide a public summary under 72 characters, a blank line, and a nonempty description');
-  if (/mindverse-ltd|macaron-claude-code|Co-authored-by:|Signed-off-by:|(?:^|\s|\()#\d+|github\.com\/[^\s]+\/(?:pull|issues)\//im.test(message)) throw new Error('public description must not include internal repository names, author trailers, or PR/issue references');
+  if (INTERNAL.test(message)) throw new Error('public description must not include internal repository names, author trailers, or PR/issue references');
   return lines.join('\n');
+}
+
+// Sync carries the real source message forward. Squash merges append the internal PR number to each
+// subject line, and trailers name internal accounts; anything still internal after that stays unpublished.
+export function publicMessage(message) {
+  const text = message.replaceAll('\r\n', '\n').split('\n').map(line => line.replace(/\s*\(#\d+\)\s*$/, ''))
+    .filter(line => !/^(?:Co-authored-by|Signed-off-by):/i.test(line)).join('\n').trim();
+  return text && !INTERNAL.test(text) ? text : GENERIC_SYNC;
 }
 
 function oid(cwd, ref, required = true) {
@@ -86,8 +97,7 @@ export async function release({ tag = '', syncMain = false, dryRun = true, force
   if (syncMain && tag) throw new Error('choose either --tag or --sync-main');
   if (syncMain && force) throw new Error('--force is not supported with --sync-main');
   if (!syncMain && !/^v[0-9][0-9A-Za-z.+-]*$/.test(tag)) throw new Error('tag must be an existing version such as v1.0.0');
-  if (syncMain) message = 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.';
-  else if (!dryRun || message) message = validateMessage(message);
+  if (!syncMain && (!dryRun || message)) message = validateMessage(message);
   const scratch = await mkdtemp(join(tmpdir(), 'macaron-public-release-'));
   try {
     const source = join(scratch, 'source'), target = join(scratch, 'public');
@@ -97,6 +107,7 @@ export async function release({ tag = '', syncMain = false, dryRun = true, force
     git(['fetch', '--quiet', '--depth=1', '--no-tags', sourceUrl, `${syncMain ? 'refs/heads/main' : tagRef}:${sourceRef}`], { cwd: source, env: sourceEnv });
     git(['clone', '--quiet', '--no-checkout', ...(syncMain ? ['--no-tags'] : []), '--', publicUrl, target], { env: publicEnv });
     const sourceCommit = oid(source, `${sourceRef}^{commit}`);
+    if (syncMain) message = publicMessage(git(['show', '-s', '--format=%B', sourceCommit], { cwd: source }));
     const publicBase = oid(target, 'refs/remotes/origin/main'), oldTag = !syncMain && oid(target, tagRef, false), oldTagCommit = oldTag && oid(target, `${tagRef}^{commit}`, false);
 
     // Import objects only. The public commit has ONLY a public parent, never a source-history parent.
@@ -116,7 +127,7 @@ export async function release({ tag = '', syncMain = false, dryRun = true, force
     }
 
     const diff = git(['diff', '--stat', publicBase, snapshot, '--'], { cwd: target });
-    const result = { tag, syncMain, dryRun, sourceCommit, snapshot, publicCommit: publicCommit || null, publicMain, diff, needsMessage: !publicCommit };
+    const result = { tag, syncMain, dryRun, sourceCommit, snapshot, publicCommit: publicCommit || null, publicMain, diff, message, needsMessage: !publicCommit };
     if (dryRun) return result;
 
     const refspecs = [], leases = [];
@@ -152,7 +163,8 @@ async function main() {
   const result = await release({ ...options, message, sourceUrl: `https://github.com/${SOURCE}.git`, publicUrl: `https://github.com/${PUBLIC}.git`, sourceEnv: authEnv(sourceToken), publicEnv: authEnv(token) });
   const report = [
     `### ${result.dryRun ? 'Dry run' : 'Published'} ${result.syncMain ? 'main snapshot' : result.tag}`, '', `Source commit: ${result.sourceCommit}`, `Public snapshot tree: ${result.snapshot}`,
-    `Public commit: ${result.publicCommit || 'pending public release description'}`, '', result.diff || 'No public file changes.', '',
+    `Public commit: ${result.publicCommit || 'pending public release description'}`,
+    ...(result.message ? ['', '```', result.message, '```'] : []), '', result.diff || 'No public file changes.', '',
     ...(result.needsMessage ? ['Provide a public summary and description before publishing.'] : []),
     result.dryRun ? 'No remote commits or tags were written. API-reported permissions do not prove branch-rule acceptance.' : result.syncMain ? 'Public main is synchronized; no tags were written.' : 'Public main and tag are published.',
   ].join('\n');

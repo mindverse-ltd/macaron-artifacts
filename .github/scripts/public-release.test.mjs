@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { SOURCE, PUBLIC, parseArgs, release, validateMessage } from './public-release.mjs';
+import { SOURCE, PUBLIC, parseArgs, publicMessage, release, validateMessage } from './public-release.mjs';
 
 const identity = { GIT_AUTHOR_NAME: 'mindlab-bot', GIT_AUTHOR_EMAIL: 'contact@mindlab.ltd', GIT_COMMITTER_NAME: 'mindlab-bot', GIT_COMMITTER_EMAIL: 'contact@mindlab.ltd' };
 const message = 'Add shared artifact workspaces\n\nKeep documentation and runnable examples together in the application.';
@@ -50,6 +50,17 @@ test('CLI defaults to dry-run, requires explicit publish, and rejects conflictin
   assert.equal(parseArgs(['--help']).help, true);
   assert.throws(() => validateMessage('only a subject'), /blank line/);
   assert.throws(() => validateMessage('Update (#42)\n\nPrivate implementation.'), /internal/);
+});
+
+test('sync messages keep the source subject and body while dropping internal markers', () => {
+  const generic = 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.';
+  assert.equal(publicMessage('group read tools and preview edit diffs (#253)'), 'group read tools and preview edit diffs');
+  assert.equal(publicMessage('fix: support legacy SDKs (#256)\n\n* migrate bootstrap\n\n* support both SDKs\n'), 'fix: support legacy SDKs\n\n* migrate bootstrap\n\n* support both SDKs');
+  assert.equal(publicMessage('Tidy imports\n\nCo-authored-by: Private developer <dev@mindverse.ltd>'), 'Tidy imports');
+  // Nothing mechanical can redact these, so the snapshot keeps a generic message instead of leaking.
+  assert.equal(publicMessage('Move mindverse-ltd paths'), generic);
+  assert.equal(publicMessage('Fix regression\n\nReverts #42 from the internal tracker.'), generic);
+  assert.equal(publicMessage('  \n'), generic);
 });
 
 test('dry-run builds a full snapshot without writing any remote refs', async t => {
@@ -226,9 +237,9 @@ test('sync publishes the current source main, converges on later commits, and re
   assert.equal(git(f.publicUrl, ['rev-list', '--count', 'main']), '2');
   assert.equal(git(f.publicUrl, ['show', '-s', '--format=%an <%ae>%n%cn <%ce>', 'main']), 'mindlab-bot <contact@mindlab.ltd>\nmindlab-bot <contact@mindlab.ltd>');
   const body = git(f.publicUrl, ['show', '-s', '--format=%B', 'main']);
-  assert.doesNotMatch(body, /Internal implementation|#42|Private developer|mindverse-ltd/);
+  assert.doesNotMatch(body, /#42|Private developer|mindverse-ltd/);
   assert.doesNotMatch(body, new RegExp(first.sourceCommit));
-  assert.equal(body, 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.');
+  assert.equal(body, 'Internal implementation');
   const afterFirst = allRefs(f);
   const retry = await release({ ...syncOptions(f), dryRun: false });
   assert.equal(retry.publicCommit, first.publicCommit);
@@ -236,6 +247,7 @@ test('sync publishes the current source main, converges on later commits, and re
   await file(f.source, 'README.md', 'advanced workspace\n');
   git(f.source, ['add', '.']); git(f.source, ['commit', '-qm', 'Private follow-up (#77)'], { GIT_AUTHOR_NAME: 'Private developer', GIT_COMMITTER_NAME: 'Private developer' });
   const second = await release({ ...syncOptions(f), dryRun: false });
+  assert.equal(git(f.publicUrl, ['show', '-s', '--format=%B', 'main']), 'Private follow-up');
   assert.equal(second.sourceCommit, git(f.source, ['rev-parse', 'refs/heads/main']));
   assert.equal(head(f.publicUrl), second.publicCommit);
   assert.equal(git(f.publicUrl, ['show', 'main:README.md']), 'advanced workspace');

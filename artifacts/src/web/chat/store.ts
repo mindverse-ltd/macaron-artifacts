@@ -7,6 +7,7 @@ import { artifactEntryPath } from '../../shared/artifact-path';
 import { apiUrl, connectionHeaders } from './connection';
 import { authenticatedFetch } from './auth';
 import { randomUUID } from '../uuid';
+import type { PromptReference } from '../../shared/prompt-references';
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await authenticatedFetch(apiUrl(path), { ...init, headers: connectionHeaders({ 'content-type': 'application/json', ...init?.headers }) });
@@ -14,7 +15,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
-export interface QueueItem { id: string; text: string }
+export interface QueueItem { id: string; text: string; references?: PromptReference[] }
 export interface WorkspaceSnapshot { sessions: SessionSummary[]; harnesses: HarnessInfo[]; activeId: string | null; ready: boolean; loading: boolean; error?: string; revision: number }
 const ACTIVE_KEY = 'macaron-artifacts:active-session';
 const LAST_CWD = 'macaron-artifacts:last-cwd';
@@ -62,6 +63,7 @@ export class WorkspaceStore {
     // Keystrokes only notify this composer; streaming history and the application shell need not render again.
     for (const listener of this.draftListeners.get(id) ?? []) listener();
   };
+  searchReferences = async (id: string, query: string) => api<PromptReference[]>(`/api/sessions/${encodeURIComponent(id)}/files/search?q=${encodeURIComponent(query)}`);
   selectedArtifact = (id: string) => this.selectedArtifacts.get(id);
   dispose = () => {
     this.disposed = true; this.queues.clear(); this.pendingActions.clear(); this.listeners.clear(); this.draftListeners.clear();
@@ -220,13 +222,13 @@ export class WorkspaceStore {
     if (this.snapshot.activeId) await this.select(this.snapshot.activeId);
   };
 
-  send = (id: string, text: string) => {
+  send = (id: string, text: string, references: PromptReference[] = []) => {
     if (this.disposed || !text.trim()) return;
     if (this.snapshot.sessions.find(session => session.id === id)?.providerReview) return;
     this.heldQueues.delete(id);
     this.cancelMetadata(id);
     const queue = this.queue(id);
-    this.queues.set(id, [...queue, { id: randomUUID(), text }]);
+    this.queues.set(id, [...queue, { id: randomUUID(), text, ...(references.length ? { references: references.map(reference => ({ ...reference })) } : {}) }]);
     this.publish();
     void this.drain(id);
   };
@@ -246,7 +248,7 @@ export class WorkspaceStore {
     this.seenArtifactStreams.delete(id);
     this.dismissed.delete(id);
     this.pendingActions.delete(id); this.update(id, { status: 'running', activity: 'running', suggestions: [], error: undefined });
-    try { chat.clearError(); await chat.sendMessage({ text: item.text }); }
+    try { chat.clearError(); await chat.sendMessage({ text: item.text, ...(item.references?.length ? { metadata: { references: item.references } } : {}) }); }
     catch (error) { this.fail(error); }
     finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
   }

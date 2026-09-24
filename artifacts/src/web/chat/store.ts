@@ -31,6 +31,7 @@ export class WorkspaceStore {
   private chats = new Map<string, Chat<ChatMessage>>();
   private files = new Map<string, Map<string, Artifact>>();
   private liveRevisions = new Map<string, Map<string, number>>();
+  private pendingActions = new Map<string, Map<string, 'answer' | 'approval'>>();
   private queues = new Map<string, QueueItem[]>();
   private heldQueues = new Set<string>();
   private drafts = new Map<string, string>();
@@ -65,7 +66,7 @@ export class WorkspaceStore {
   searchReferences = async (id: string, query: string) => api<PromptReference[]>(`/api/sessions/${encodeURIComponent(id)}/files/search?q=${encodeURIComponent(query)}`);
   selectedArtifact = (id: string) => this.selectedArtifacts.get(id);
   dispose = () => {
-    this.disposed = true; this.queues.clear(); this.listeners.clear(); this.draftListeners.clear();
+    this.disposed = true; this.queues.clear(); this.pendingActions.clear(); this.listeners.clear(); this.draftListeners.clear();
     for (const controller of this.metadata.values()) controller.abort();
     this.metadata.clear();
     // This only detaches browser streams. Native turns survive logout and can be resumed after login.
@@ -81,6 +82,8 @@ export class WorkspaceStore {
       const activeId = sessions.find(session => session.id === remembered)?.id ?? sessions[0]?.id ?? null;
       this.publish({ sessions, harnesses, ready: true, activeId });
       if (activeId) await this.select(activeId);
+      // Resume background runs too, so their waiting/completion badges keep updating after refresh.
+      for (const session of sessions) if (session.status === 'running' && session.id !== activeId) void this.load(session.id).catch(this.fail);
     } catch (error) { this.publish({ ready: true }); this.fail(error); }
   }
 
@@ -105,10 +108,11 @@ export class WorkspaceStore {
         id, messages: session.messages,
         transport: new DefaultChatTransport<ChatMessage>({ api: apiUrl('/api/chat'), fetch: authenticatedFetch as typeof fetch, headers: connectionHeaders(), prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, messages }, headers: connectionHeaders() }) }),
         onData: part => this.onData(id, part),
-        onError: error => this.update(id, { status: 'error', error: error.message }),
+        onError: error => this.update(id, { status: 'error', activity: 'error', error: error.message }),
         onFinish: ({ isError, isDisconnect }) => {
           if (this.disposed) return;
-          if (!isError && !isDisconnect) this.update(id, { status: 'idle', error: undefined });
+          this.pendingActions.delete(id);
+          if (!isError && !isDisconnect) this.update(id, { status: 'idle', activity: 'complete', error: undefined });
           const turn = this.turns.get(id);
           void this.refresh(id, turn, isError || isDisconnect).then(() => { if (!isError && !isDisconnect && this.turns.get(id) === turn) void this.subscribeMetadata(id); });
         },
@@ -128,6 +132,13 @@ export class WorkspaceStore {
 
   private onData(id: string, part: DataUIPart<MessageData>) {
     if (this.disposed) return;
+    if (part.type === 'data-question' || part.type === 'data-approval') {
+      let pending = this.pendingActions.get(id);
+      if (!pending) this.pendingActions.set(id, pending = new Map());
+      const key = `${part.type}:${part.data.id}`, resolved = part.type === 'data-question' ? !!part.data.response : part.data.resolved;
+      if (resolved) pending.delete(key); else pending.set(key, part.type === 'data-question' ? 'answer' : 'approval');
+      this.update(id, { activity: [...pending.values()].includes('answer') ? 'answer' : pending.size ? 'approval' : 'running' });
+    }
     if (part.type === 'data-providerReview') this.update(id, { providerReview: part.data });
     if (part.type === 'data-artifact') {
       let files = this.files.get(id);
@@ -205,7 +216,7 @@ export class WorkspaceStore {
   remove = async (id: string) => {
     await api(`/api/sessions/${id}`, { method: 'DELETE' });
     this.cancelMetadata(id); this.turns.delete(id); this.configurationRevisions.delete(id); this.setDraft(id, '');
-    this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.seenArtifactStreams.delete(id); this.dismissed.delete(id);
+    this.pendingActions.delete(id); this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.seenArtifactStreams.delete(id); this.dismissed.delete(id);
     const sessions = this.snapshot.sessions.filter(session => session.id !== id);
     this.publish({ sessions, activeId: this.snapshot.activeId === id ? sessions[0]?.id ?? null : this.snapshot.activeId });
     if (this.snapshot.activeId) await this.select(this.snapshot.activeId);
@@ -236,7 +247,7 @@ export class WorkspaceStore {
     this.liveRevisions.delete(id);
     this.seenArtifactStreams.delete(id);
     this.dismissed.delete(id);
-    this.update(id, { status: 'running', suggestions: [], error: undefined });
+    this.pendingActions.delete(id); this.update(id, { status: 'running', activity: 'running', suggestions: [], error: undefined });
     try { chat.clearError(); await chat.sendMessage({ text: item.text, ...(item.references?.length ? { metadata: { references: item.references } } : {}) }); }
     catch (error) { this.fail(error); }
     finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
@@ -268,7 +279,7 @@ export class WorkspaceStore {
       const lastUser = chat.messages.findLast(message => message.role === 'user');
       if (lastUser && !remote.messages.some(message => message.id === lastUser.id)) {
         if (remote.status === 'running') throw new Error('这个会话仍有一轮正在生成，请稍后重试。');
-        this.update(id, { status: 'running', suggestions: [], error: undefined });
+        this.pendingActions.delete(id); this.update(id, { status: 'running', activity: 'running', suggestions: [], error: undefined });
         chat.clearError();
         this.seenArtifactStreams.delete(id);
         // No argument replays the same message id and intent; appending "continue" would lose a request the server never received.
@@ -277,7 +288,7 @@ export class WorkspaceStore {
         chat.clearError(); await chat.resumeStream(); await this.refresh(id, turn, true);
       } else {
         chat.messages = remote.messages; chat.clearError();
-        if (remote.status === 'error') { this.seenArtifactStreams.delete(id); this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage(); }
+        if (remote.status === 'error') { this.pendingActions.delete(id); this.seenArtifactStreams.delete(id); this.update(id, { status: 'running', activity: 'running', suggestions: [], error: undefined }); await chat.sendMessage(); }
         else { const { messages: _messages, ...summary } = remote; this.update(id, summary); void this.subscribeMetadata(id); }
       }
     } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }
@@ -298,7 +309,8 @@ export class WorkspaceStore {
     }
     await this.chats.get(id)?.stop();
     this.inflight.delete(id);
-    this.update(id, { status: 'idle' });
+    this.pendingActions.delete(id); this.update(id, { status: 'idle', activity: 'idle' });
+    await this.refresh(id);
     void this.drain(id);
   };
   approve = (id: string, approvalId: string, approved: boolean) => api(`/api/sessions/${id}/approvals/${encodeURIComponent(approvalId)}`, { method: 'POST', body: JSON.stringify({ approved }) });

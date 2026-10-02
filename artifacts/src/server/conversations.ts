@@ -11,6 +11,8 @@ import { ArtifactObserver } from './artifacts.js';
 import { MetadataTasks } from './enrichment.js';
 import { SessionStore } from './store.js';
 
+const isTransientChunk = (chunk: ChatChunk) => (chunk as { transient?: boolean }).transient === true;
+
 /**
  * A saved transcript keeps what happened, never a replayable authorization link or credential default,
  * and never controls: the native process that owned them is gone by the time this is read back.
@@ -70,7 +72,9 @@ export class ActiveConversation {
   }
   private cancelQuestions() { for (const pending of this.questions.values()) pending.resolve({ cancelled: true }); }
   private publish(chunk: ChatChunk) {
-    this.journal.push(chunk);
+    // Transient data parts are live UI signals, not transcript state. Replaying them after a
+    // reconnect would duplicate keyless toasts and restart TTLs that may already have expired.
+    if (!isTransientChunk(chunk)) this.journal.push(chunk);
     for (const listener of this.listeners) { try { listener.enqueue(chunk); } catch { this.listeners.delete(listener); } }
   }
   private async execute(prompt: string) {
@@ -86,14 +90,15 @@ export class ActiveConversation {
         // re-send, re-journal and re-store the whole output on every chunk of a noisy build.
         const emit = (chunk: ChatChunk) => writer.write('errorText' in chunk && typeof chunk.errorText === 'string' ? { ...chunk, errorText: safeProfileError(chunk.errorText, this.profile) } : chunk);
         const artifacts = new ArtifactObserver(session.cwd, emit);
-        const approve = async (request: Approval) => {
-          if (this.controller.signal.aborted) return false;
+        const approve = async (request: Approval, signal?: AbortSignal) => {
+          const activeSignal = signal ? AbortSignal.any([this.controller.signal, signal]) : this.controller.signal;
+          if (activeSignal.aborted) return false;
           emit({ type: 'data-approval', id: request.id, data: request });
           const approved = await new Promise<boolean>(resolve => {
-            const decide = (answer: boolean) => { this.controller.signal.removeEventListener('abort', abort); resolve(answer); };
+            const decide = (answer: boolean) => { activeSignal.removeEventListener('abort', abort); resolve(answer); };
             const abort = () => decide(false);
             this.approvals.set(request.id, decide);
-            this.controller.signal.addEventListener('abort', abort, { once: true });
+            activeSignal.addEventListener('abort', abort, { once: true });
           });
           this.approvals.delete(request.id);
           emit({ type: 'data-approval', id: request.id, data: { ...request, resolved: true } });
@@ -173,7 +178,7 @@ export class ActiveConversation {
           const { value, done } = await reader.read();
           if (done) break;
           // Live subscribers get the real authorization link; disk keeps only the safe historical summary.
-          if (!diskError) disk.write(`${JSON.stringify(value.type === 'data-connection' ? { ...value, data: { ...redactConnection(value.data), actionable: false } } : value)}\n`);
+          if (!diskError && !isTransientChunk(value)) disk.write(`${JSON.stringify(value.type === 'data-connection' ? { ...value, data: { ...redactConnection(value.data), actionable: false } } : value)}\n`);
           this.publish(value);
         }
       } finally { reader.releaseLock(); }

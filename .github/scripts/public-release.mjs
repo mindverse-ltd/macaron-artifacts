@@ -42,7 +42,8 @@ export function parseArgs(argv) {
   return options;
 }
 
-const INTERNAL = /mindverse-ltd|macaron-claude-code|Co-authored-by:|Signed-off-by:|(?:^|\s|\()#\d+|github\.com\/[^\s]+\/(?:pull|issues)\//im;
+const AUTHOR_TRAILER = /^\s*(?:Co-author(?:ed|ized)-by|Signed-off-by):/i;
+const INTERNAL = /mindverse-ltd|macaron-claude-code|Co-author(?:ed|ized)-by:|Signed-off-by:|(?:^|\s|\()#\d+|github\.com\/[^\s]+\/(?:pull|issues)\//im;
 const GENERIC_SYNC = 'Sync public snapshot\n\nUpdate the public workspace with the latest changes.';
 
 export function validateMessage(message) {
@@ -56,7 +57,7 @@ export function validateMessage(message) {
 // subject line, and trailers name internal accounts; anything still internal after that stays unpublished.
 export function publicMessage(message) {
   const text = message.replaceAll('\r\n', '\n').split('\n').map(line => line.replace(/\s*\(#\d+\)\s*$/, ''))
-    .filter(line => !/^(?:Co-authored-by|Signed-off-by):/i.test(line)).join('\n').trim();
+    .filter(line => !AUTHOR_TRAILER.test(line)).join('\n').trim();
   return text && !INTERNAL.test(text) ? text : GENERIC_SYNC;
 }
 

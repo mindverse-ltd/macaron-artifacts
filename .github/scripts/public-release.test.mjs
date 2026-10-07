@@ -57,6 +57,9 @@ test('sync messages keep the source subject and body while dropping internal mar
   assert.equal(publicMessage('group read tools and preview edit diffs (#253)'), 'group read tools and preview edit diffs');
   assert.equal(publicMessage('fix: support legacy SDKs (#256)\n\n* migrate bootstrap\n\n* support both SDKs\n'), 'fix: support legacy SDKs\n\n* migrate bootstrap\n\n* support both SDKs');
   assert.equal(publicMessage('Tidy imports\n\nCo-authored-by: Private developer <dev@mindverse.ltd>'), 'Tidy imports');
+  assert.equal(publicMessage('Tidy imports\n\nCo-authorized-by: EVE <github@multica.ai>'), 'Tidy imports');
+  assert.equal(publicMessage('Tidy imports\n\n  Signed-off-by: Private developer <dev@mindverse.ltd>'), 'Tidy imports');
+  assert.throws(() => validateMessage('Publish update\n\nPublic details.\n\nCo-authorized-by: EVE <github@multica.ai>'), /internal/);
   // Nothing mechanical can redact these, so the snapshot keeps a generic message instead of leaking.
   assert.equal(publicMessage('Move mindverse-ltd paths'), generic);
   assert.equal(publicMessage('Fix regression\n\nReverts #42 from the internal tracker.'), generic);
@@ -245,7 +248,7 @@ test('sync publishes the current source main, converges on later commits, and re
   assert.equal(retry.publicCommit, first.publicCommit);
   assert.deepEqual(allRefs(f), afterFirst);
   await file(f.source, 'README.md', 'advanced workspace\n');
-  git(f.source, ['add', '.']); git(f.source, ['commit', '-qm', 'Private follow-up (#77)'], { GIT_AUTHOR_NAME: 'Private developer', GIT_COMMITTER_NAME: 'Private developer' });
+  git(f.source, ['add', '.']); git(f.source, ['commit', '-qm', 'Private follow-up (#77)', '-m', 'Co-authorized-by: EVE <github@multica.ai>'], { GIT_AUTHOR_NAME: 'Private developer', GIT_COMMITTER_NAME: 'Private developer' });
   const second = await release({ ...syncOptions(f), dryRun: false });
   assert.equal(git(f.publicUrl, ['show', '-s', '--format=%B', 'main']), 'Private follow-up');
   assert.equal(second.sourceCommit, git(f.source, ['rev-parse', 'refs/heads/main']));

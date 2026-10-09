@@ -179,5 +179,5 @@ html > body[data-scroll-locked] {
 }
 
 .headline-word { display: inline-block; white-space: pre; animation: headline-word .7s cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes headline-word { from { opacity: 0; filter: blur(3px); transform: translateY(.14em); } }
+@keyframes headline-word { from { opacity: 0; filter: blur(3px); transform: translateY(var(--y, .14em)); } }
 @media (prefers-reduced-motion: reduce) { .headline-word { animation: none; } }

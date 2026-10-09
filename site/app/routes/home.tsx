@@ -38,8 +38,9 @@ export default function Home() {
                 <span key={line} className={`site:block ${i ? 'site:text-genui' : ''}`}>{line.split(' ').map((word, j) => <span key={j} data-w={i * 3 + j} className="headline-word">{word} </span>)}</span>
               ))}
             </h1>
-            {/* Runs before first paint, so each visit gets its own order; a separate sheet keeps the hydrated markup untouched. */}
-            <script dangerouslySetInnerHTML={{ __html: `document.head.append(Object.assign(document.createElement('style'), { textContent: [0, 1, 2, 3, 4, 5].map(i => '.headline-word[data-w="' + i + '"]{animation-delay:' + Math.random() * 300 + 'ms}').join('') }))` }} />
+            {/* Runs before first paint, so each visit gets its own order; a separate sheet keeps the hydrated markup untouched.
+                Later words draw from a wider range, so earlier ones tend to land first without a fixed order. */}
+            <script dangerouslySetInnerHTML={{ __html: `document.head.append(Object.assign(document.createElement('style'), { textContent: [0, 1, 2, 3, 4, 5].map(i => { const t = Math.random() * (i + 1); return '.headline-word[data-w="' + i + '"]{animation-delay:' + t * 90 + 'ms;animation-duration:' + (t * 60 + 500) + 'ms;--y:' + (0.08 + Math.random() * 0.1) + 'em}'; }).join('') }))` }} />
             <p className="site:mt-6 site:max-w-xl site:text-fd-muted-foreground site:text-lg">One local WebUI for your coding harnesses. Replies can be interfaces that work while they stream — in the conversation, or in a Canvas beside it.</p>
             <div className="site:mt-8 site:flex site:flex-wrap site:items-center site:gap-3">
               <Link className="site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-opacity site:hovered:opacity-90" to="/docs" onClick={() => track('cta_click', { target: 'docs', section: 'hero' })}>Read the Docs</Link>

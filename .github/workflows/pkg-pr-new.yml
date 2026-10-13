@@ -32,6 +32,6 @@ jobs:
       # devDependency, so this executes the lockfile-pinned binary from
       # node_modules/.bin. The mandatory package test above installs and boots
       # the same single-package layout in an empty consumer directory.
-      # Force long-form URLs because compact URLs require npm repository metadata;
-      # these are only published through pkg.pr.new, and --bin shows a CLI command.
-      - run: pnpm exec pkg-pr-new publish --no-compact --bin .
+      # Compact URLs use npm repository metadata, falling back to long-form URLs
+      # until the first npm release. --bin shows a CLI command.
+      - run: pnpm exec pkg-pr-new publish --bin .
